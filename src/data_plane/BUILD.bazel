@@ -159,6 +159,7 @@ cc_library(
     visibility = [
         "//src/sql:__subpackages__",
         "//src/storage:__subpackages__",
+        "//unittest/data_plane:__pkg__",
     ],
 )
 

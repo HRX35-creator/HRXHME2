@@ -44,10 +44,10 @@ struct ObStorageDatum : public common::ObDatum
   // ext value section
   OB_INLINE void reuse() { ptr_ = buf_; reserved_ = 0; pack_ = 0; }
   OB_INLINE void set_ext_value(const int64_t ext_value)
-  { reuse(); set_ext(); no_cv(extend_obj_)->set_ext(ext_value); }
+  { reuse(); common::ObDatum::set_ext_value(ext_value); }
   OB_INLINE void set_nop() { set_ext_value(ObActionFlag::OP_NOP); }
-  OB_INLINE void set_min() { set_ext_value(common::ObObj::MIN_OBJECT_VALUE); }
-  OB_INLINE void set_max() { set_ext_value(common::ObObj::MAX_OBJECT_VALUE); }
+  OB_INLINE void set_min() { set_ext_value(common::DATUM_MIN_EXT_VALUE); }
+  OB_INLINE void set_max() { set_ext_value(common::DATUM_MAX_EXT_VALUE); }
   OB_INLINE bool is_nop_value() const { return is_nop(); } // temp solution
   // conversion section
   OB_INLINE bool is_local_buf() const { return ptr_ == buf_; }
@@ -153,7 +153,7 @@ OB_INLINE int ObStorageDatum::deep_copy(
 
 // SQL expression frames can be overwritten by the next index row/batch. Copy
 // their values directly, retaining small payloads in the storage datum itself.
-// Extended SQL datums may contain a full ObObj and need the existing adapter.
+// Extended lookup keys require the existing sentinel/type validation adapter.
 OB_INLINE int ObStorageDatum::deep_copy_from_datum(
     const common::ObDatum &src, common::ObIAllocator &allocator)
 {
@@ -275,7 +275,7 @@ OB_INLINE bool ObStorageDatum::operator==(const ObStorageDatum &other) const
   if (is_null()) {
     bret = other.is_null();
   } else if (is_ext()) {
-    bret = other.is_ext() && extend_obj_->get_ext() == other.extend_obj_->get_ext();
+    bret = other.is_ext() && get_ext() == other.get_ext();
   } else {
     bret = common::ObDatum::binary_equal(*this, other);
   }

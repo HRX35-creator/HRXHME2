@@ -54,6 +54,7 @@ class ObSQLSessionInfo;
 }
 namespace common
 {
+struct ObDatum;
 class ObTimeZoneInfo;
 }
 
@@ -485,7 +486,7 @@ public:
   static int deep_copy_pl_type(ObIAllocator &allocator, const ObPLDataType &src, ObPLDataType *&dst);
 
   static int obj_is_null(ObObj &obj, bool &is_null);
-  static int datum_is_null(ObDatum* param, bool is_udt_type, bool &is_null);
+  static int datum_is_null(common::ObDatum* param, bool is_udt_type, bool &is_null);
 
   DECLARE_TO_STRING;
 

@@ -654,10 +654,21 @@ int ObPLDataType::datum_is_null(ObDatum* param, bool is_udt_type, bool &is_null)
     // do nothing
   } else if (!is_udt_type) {
     is_null = param->is_null();
-  } else if (param->is_null() || param->extend_obj_->is_null()) {
+  } else if (param->is_null() || param->is_extended_null()) {
     is_null = true;
   } else {
-    if (OB_FAIL(ObPLDataType::obj_is_null(*(ObObj*)param->extend_obj_, is_null))) {
+    if (!param->has_ext_value()) {
+      ret = OB_ERR_UNEXPECTED;
+    } else if (param->get_extend_type() != pl::PL_RECORD_TYPE) {
+      ret = OB_NOT_SUPPORTED;
+      LOG_USER_ERROR(OB_NOT_SUPPORTED, "check complex is null");
+    } else {
+      const pl::ObPLRecord *record = reinterpret_cast<const pl::ObPLRecord *>(param->get_ext());
+      if (OB_ISNULL(record)) {
+        ret = OB_ERR_UNEXPECTED;
+      } else {
+        is_null = record->is_null();
+      }
     }
   }
   return ret;

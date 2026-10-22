@@ -800,16 +800,15 @@ public:
   }
   void set_sql_array_datum(const ObSqlDatumArray *datum_array)
   {
-    //you can't use datum_.extend_obj_ here,
-    //datum_.extend_obj_m is just to asign an ObObj pointer
-    //here you need to set the address of the constructed datum array
+    // SQL arrays use the ordinary integer mapping to carry the address of
+    // the constructed array, not the typed extended-value representation.
     datum_.set_int(reinterpret_cast<int64_t>(datum_array));
   }
   const ObSqlDatumArray *get_sql_datum_array() const
   {
     ObSqlDatumArray *datum_array = nullptr;
     if (meta_.is_ext_sql_array()) {
-      //you can't call get_ext() here, get_ext() in Datum is to get an ObObj pointer
+      //you can't call get_ext() here, get_ext() in Datum reads a typed extended value
       //here you need to get the address of the constructed datum array
       int64_t array_addr = datum_.get_int();
       datum_array = reinterpret_cast<ObSqlDatumArray*>(array_addr);
@@ -820,7 +819,7 @@ public:
   {
     ObSqlDatumArray *datum_array = nullptr;
     if (meta_.is_ext_sql_array()) {
-      //you can't call get_ext() here, get_ext() in Datum is to get an ObObj pointer
+      //you can't call get_ext() here, get_ext() in Datum reads a typed extended value
       //here you need to get the address of the constructed datum array
       int64_t array_addr = datum_.get_int();
       datum_array = reinterpret_cast<ObSqlDatumArray*>(array_addr);

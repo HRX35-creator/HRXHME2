@@ -289,8 +289,7 @@ int ObDictDecoder::decode(const common::ObObjType &obj_type, common::ObDatum &da
       if (ref == count) {
         datum.set_null();
       } else if (ref == count + 1) {
-        datum.set_ext();
-        datum.no_cv(datum.extend_obj_)->set_ext(common::ObActionFlag::OP_NOP);
+        datum.set_ext_value(common::ObActionFlag::OP_NOP);
       } else {
         ret = OB_ERR_UNEXPECTED;
       }

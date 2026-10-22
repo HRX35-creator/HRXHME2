@@ -52,7 +52,7 @@ ObObjDatumMapType ObDatum::get_obj_datum_map_type(const ObObjType type)
     OBJ_DATUM_STRING,         // ObVarcharType
     OBJ_DATUM_STRING,         // ObCharType
     OBJ_DATUM_STRING,         // ObHexStringType
-    OBJ_DATUM_FULL,           // ObExtendType
+    OBJ_DATUM_EXTEND,           // ObExtendType
     OBJ_DATUM_8BYTE_DATA,     // ObUnknownType
     OBJ_DATUM_STRING,         // ObTinyTextType
     OBJ_DATUM_STRING,         // ObTextType
@@ -96,7 +96,7 @@ uint32_t ObDatum::get_reserved_size(const ObObjDatumMapType type,
     OBJ_DATUM_1BYTE_DATA_RES_SIZE,     // OBJ_DATUM_1BYTE_DATA
     OBJ_DATUM_4BYTE_LEN_DATA_RES_SIZE, // OBJ_DATUM_4BYTE_LEN_DATA
     OBJ_DATUM_2BYTE_LEN_DATA_RES_SIZE, // OBJ_DATUM_2BYTE_LEN_DATA
-    OBJ_DATUM_FULL_DATA_RES_SIZE,      // OBJ_DATUM_FULL
+    OBJ_DATUM_EXTEND_RES_SIZE,      // OBJ_DATUM_EXTEND
     OBJ_DATUM_DECIMALINT_MAX_RES_SIZE, // OBJ_DATUM_DECIMALINT
   };
   static_assert(sizeof(OBOBJ_DATUM_MAP_TYPE_TO_RES_SIZE_MAP)
@@ -168,11 +168,19 @@ DEF_TO_STRING(ObDatum)
 OB_DEF_SERIALIZE(ObDatum)
 {
   int ret = OB_SUCCESS;
-  OB_UNIS_ENCODE(pack_);
-  if (OB_NOT_NULL(ptr_)) {
-    if (len_ > 0) {
-      MEMCPY(buf + pos, ptr_, len_);
-      pos += len_;
+  const uint32_t wire_pack = get_wire_pack();
+  const uint32_t wire_len = is_native_extend() ? DATUM_LEGACY_EXTEND_SIZE : len_;
+  OB_UNIS_ENCODE(wire_pack);
+  if (OB_SUCC(ret) && wire_len > 0) {
+    if (OB_ISNULL(ptr_)) {
+      ret = OB_INVALID_ARGUMENT;
+    } else if (OB_UNLIKELY(pos > buf_len || wire_len > buf_len - pos)) {
+      ret = OB_SIZE_OVERFLOW;
+    } else {
+      char scratch[DATUM_LEGACY_EXTEND_SIZE];
+      const char *payload = is_native_extend() ? get_wire_ext_payload(scratch) : ptr_;
+      MEMCPY(buf + pos, payload, wire_len);
+      pos += wire_len;
     }
   }
   return ret;
@@ -181,12 +189,20 @@ OB_DEF_SERIALIZE(ObDatum)
 OB_DEF_DESERIALIZE(ObDatum)
 {
   int ret = OB_SUCCESS;
-  uint32_t pack = pack_;
+  uint32_t pack = 0;
   OB_UNIS_DECODE(pack);
   if (OB_SUCC(ret)) {
-    pack_ = pack;
-    ptr_ = buf + pos;
-    pos += len_;
+    ObDatumDesc value;
+    value.pack_ = pack;
+    if (OB_UNLIKELY(pos > data_len || value.len_ > data_len - pos
+        || (value.is_ext() && value.len_ != DATUM_EXTEND_PAYLOAD_SIZE
+                           && value.len_ != DATUM_LEGACY_EXTEND_SIZE))) {
+      ret = OB_DESERIALIZE_ERROR;
+    } else {
+      pack_ = pack;
+      ptr_ = buf + pos;
+      pos += len_;
+    }
   }
   return ret;
 }
@@ -194,8 +210,9 @@ OB_DEF_DESERIALIZE(ObDatum)
 OB_DEF_SERIALIZE_SIZE(ObDatum)
 {
   int64_t len = 0;
-  OB_UNIS_ADD_LEN(pack_);
-  len += len_;
+  const uint32_t wire_pack = get_wire_pack();
+  OB_UNIS_ADD_LEN(wire_pack);
+  len += is_native_extend() ? DATUM_LEGACY_EXTEND_SIZE : len_;
   return len;
 }
 

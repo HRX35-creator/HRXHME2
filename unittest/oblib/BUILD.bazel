@@ -22,3 +22,19 @@ cc_test(
     linkstatic = True,
     deps = [":jemalloc_hook_cases", "//src/oblib:oblib_test_runtime"],
 )
+
+cc_library(
+    name = "datum_extend_cases",
+    srcs = ["test_datum_extend.cpp"],
+    alwayslink = True,
+    deps = [
+        "//src/oblib:oblib_unit_test_internal_headers",
+        "//bazel/third_party:gtest",
+    ],
+)
+
+cc_test(
+    name = "test_datum_extend",
+    linkstatic = True,
+    deps = [":datum_extend_cases", "//src/oblib:oblib_test_runtime"],
+)

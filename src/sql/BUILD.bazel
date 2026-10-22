@@ -164,7 +164,7 @@ cc_library(
         if dep not in _SQL_PUBLIC_CLOSURE_SHARE_DEPS
     ],
     tags = ["manual"],
-    visibility = ["//src:__subpackages__"],
+    visibility = ["//unittest/sql:__pkg__", "//src:__subpackages__"],
 )
 
 # Observer is the final composition root for the legacy physical retrieval
@@ -202,7 +202,7 @@ cc_library(
     ],
     implementation_deps = _SQL_PRIVATE_HEADER_SHARE_DEPS,
     tags = ["manual"],
-    visibility = ["//src/sql:__subpackages__"],
+    visibility = ["//unittest/sql:__pkg__", "//src/sql:__subpackages__"],
 )
 
 _SQL_RUNTIME_UNITY_GROUPS = groups_without(

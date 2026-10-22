@@ -1277,8 +1277,8 @@ public:
   // The reason for adding this function instead of using set_cmp_func is because this function is called in calc_reult_2, and this function is
   // const modified, adding this function is for compatibility with the former. At the same time, modify cmp_op_func2_ to mutable.
   // Prepare for pl's udt comparison, when comparing udt, compare the values of its internal elements rather than the udt itself.
-  static int pl_udt_compare2(CollectionPredRes &cmp_result, const common::ObObj &obj1,
-                      const common::ObObj &obj2, ObExecContext &exec_ctx,
+  static int pl_udt_compare2(CollectionPredRes &cmp_result, const common::ObDatum &obj1,
+                      const common::ObDatum &obj2, ObExecContext &exec_ctx,
                       const common::ObCmpOp cmp_op);
 
   static int eval_pl_udt_compare(const ObExpr &expr, ObEvalCtx &ctx, ObDatum &expr_datum);
@@ -1329,8 +1329,8 @@ public:
   }
 
   static int eval_compare_composite(CollectionPredRes &cmp_result,
-                                    const common::ObObj &obj1,
-                                    const common::ObObj &obj2,
+                                    const common::ObDatum &obj1,
+                                    const common::ObDatum &obj2,
                                     ObExecContext &exec_ctx,
                                     const ObCmpOp cmp_op);
 

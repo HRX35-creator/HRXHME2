@@ -102,8 +102,8 @@ int ObExecuteResult::get_next_result_row(ObExecContext &ctx, ResultRowView &view
       can_view_datums_ = spec.output_.count() > 0;
       for (int64_t i = 0; can_view_datums_ && i < spec.output_.count(); ++i) {
         const ObExpr &e = *spec.output_.at(i);
-        // Keep potentially failing/full adapters on the old eager path.
-        can_view_datums_ = e.obj_datum_map_ < OBJ_DATUM_FULL
+        // Keep potentially failing/extended adapters on the old eager path.
+        can_view_datums_ = e.obj_datum_map_ < OBJ_DATUM_EXTEND
                           || e.obj_datum_map_ == OBJ_DATUM_DECIMALINT;
         can_view_datums_ &= !e.obj_meta_.is_decimal_int() || e.obj_meta_.get_scale() >= 0;
       }

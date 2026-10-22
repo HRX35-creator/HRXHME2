@@ -302,8 +302,7 @@ public:
   virtual int decode(const ObColumnDecoderCtx &ctx, common::ObDatum &datum, const int64_t row_id,
       const ObBitStream &bs, const char *data, const int64_t len)const override
   {
-    datum.set_ext();
-    datum.no_cv(datum.extend_obj_)->set_ext(common::ObActionFlag::OP_NOP);
+    datum.set_ext_value(common::ObActionFlag::OP_NOP);
     return common::OB_SUCCESS;
   }
 

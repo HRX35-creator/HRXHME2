@@ -1210,7 +1210,7 @@ int ObSumOpSizeAggCell::set_op_size()
         op_size_ = sizeof(ObDatum) + 10;
         break;
       }
-      case common::OBJ_DATUM_FULL : {
+      case common::OBJ_DATUM_EXTEND : {
         op_size_ = sizeof(ObDatum) + 16;
         break;
       }

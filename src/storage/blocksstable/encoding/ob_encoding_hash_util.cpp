@@ -190,7 +190,7 @@ int ObEncodingHashTableBuilder::build(const ObColDatums &col_datums, const ObCol
           } else if (datum.is_ext()) {
             ret = common::OB_NOT_SUPPORTED;
             STORAGE_LOG(WARN, "not supported extend object type",
-                        K(ret), K(row_id), K(datum), K(*datum.extend_obj_));
+                        K(ret), K(row_id), K(datum));
           } else if (!need_batch_hash) {
             uint64_t pos = 0;
             if (OB_FAIL(hash(datum, hash_func, need_binary_hash, pos))) {

@@ -61,8 +61,7 @@ int ObConstDecoder::decode_without_dict(
     } else if (1 == ref) { // null
       datum.set_null();
     } else if (2 == ref) { // nope
-      datum.set_ext();
-      datum.no_cv(datum.extend_obj_)->set_ext(common::ObActionFlag::OP_NOP);
+      datum.set_ext_value(common::ObActionFlag::OP_NOP);
 
     } else {
       ret = OB_ERR_UNEXPECTED;

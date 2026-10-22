@@ -225,7 +225,7 @@ int ObDASScanIter::set_scan_datum_rowkey(ObEvalCtx *eval_ctx,
     const ObExpr &expr = *rowkey_exprs.at(i);
     use_datums = expr.type_ != T_PSEUDO_GROUP_ID
                  && expr.type_ != T_PSEUDO_ROW_TRANS_INFO_COLUMN
-                 && expr.obj_datum_map_ != OBJ_DATUM_FULL
+                 && expr.obj_datum_map_ != OBJ_DATUM_EXTEND
                  && expr.obj_datum_map_ < OBJ_DATUM_MAPPING_MAX
                  && !expr.obj_meta_.is_lob_storage()
                  && !(expr.obj_meta_.is_decimal_int() && expr.obj_meta_.get_scale() < 0);

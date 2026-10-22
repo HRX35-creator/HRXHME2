@@ -2567,8 +2567,8 @@ int ObRelationalExprOperator::set_cmp_func(const ObObjType type1,
 
 
 int ObRelationalExprOperator::pl_udt_compare2(CollectionPredRes &cmp_result,
-                                              const ObObj &obj1,
-                                              const ObObj &obj2,
+                                              const ObDatum &obj1,
+                                              const ObDatum &obj2,
                                               ObExecContext &exec_ctx,
                                               const ObCmpOp cmp_op)
 {
@@ -2589,8 +2589,8 @@ int ObRelationalExprOperator::pl_udt_compare2(CollectionPredRes &cmp_result,
   */
   if (OB_ISNULL(c1) || OB_ISNULL(c2)) {
     ret = OB_ERR_UNEXPECTED;
-  } else if ((pl::PL_NESTED_TABLE_TYPE != obj1.get_meta().get_extend_type() && pl::PL_VARRAY_TYPE != obj1.get_meta().get_extend_type())
-               || (pl::PL_NESTED_TABLE_TYPE != obj2.get_meta().get_extend_type() && pl::PL_VARRAY_TYPE != obj2.get_meta().get_extend_type())
+  } else if ((pl::PL_NESTED_TABLE_TYPE != obj1.get_extend_type() && pl::PL_VARRAY_TYPE != obj1.get_extend_type())
+               || (pl::PL_NESTED_TABLE_TYPE != obj2.get_extend_type() && pl::PL_VARRAY_TYPE != obj2.get_extend_type())
                || (pl::PL_NESTED_TABLE_TYPE != c1->get_type() && pl::PL_VARRAY_TYPE != c1->get_type())
                || (pl::PL_NESTED_TABLE_TYPE != c2->get_type() && pl::PL_VARRAY_TYPE != c2->get_type())) {
     ret = OB_NOT_SUPPORTED;
@@ -2724,7 +2724,7 @@ int ObRelationalExprOperator::eval_pl_udt_compare(const ObExpr &expr,
       expr_datum.set_null();
     } else {
       CollectionPredRes cmp_res = CollectionPredRes::COLL_PRED_INVALID;
-      OZ(pl_udt_compare2(cmp_res, *l->extend_obj_, *r->extend_obj_,
+      OZ(pl_udt_compare2(cmp_res, *l, *r,
                          ctx.exec_ctx_, get_cmp_op(expr.type_)));
       if (OB_SUCC(ret)) {
         switch (cmp_res) {
@@ -2747,8 +2747,8 @@ int ObRelationalExprOperator::eval_pl_udt_compare(const ObExpr &expr,
 }
 
 int ObRelationalExprOperator::eval_compare_composite(CollectionPredRes &cmp_result,
-                                                     const common::ObObj &obj1,
-                                                     const common::ObObj &obj2,
+                                                     const common::ObDatum &obj1,
+                                                     const common::ObDatum &obj2,
                                                      ObExecContext &exec_ctx,
                                                      const ObCmpOp cmp_op)
 {

@@ -278,8 +278,7 @@ OB_INLINE void set_stored_ext_value(common::ObDatum &datum, const ObStoredExtVal
   if (STORED_NULL == v) {
     datum.set_null();
   } else if (STORED_NOPE == v) {
-    datum.set_ext();
-    datum.no_cv(datum.extend_obj_)->set_ext(common::ObActionFlag::OP_NOP);
+    datum.set_ext_value(common::ObActionFlag::OP_NOP);
   }
 }
 

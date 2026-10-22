@@ -566,3 +566,12 @@ cc_import(
     testonly = True,
     visibility = ["//unittest:__subpackages__"],
 )
+
+# Keep the original library path in test runfiles as well as cc_import's solib
+# path. Tests can load it without depending on a generated solib directory name.
+filegroup(
+    name = "liboceanbase_test_runtime",
+    srcs = [":_liboceanbase_link"],
+    testonly = True,
+    visibility = ["//unittest:__subpackages__"],
+)

@@ -476,7 +476,7 @@ int ObDatumObjParam::construct_array_param_datum(const ObObjParam &obj_param, Ob
     }
 
     if (OB_SUCC(ret)) {
-      //you can't use datum_.extend_obj_ here, datum_.extend_obj_m is just to asign an ObObj pointer
+      // SQL arrays use an ordinary integer mapping for their address.
       //here you need to set the address of the constructed datum array
       datum_.set_int(reinterpret_cast<int64_t>(datum_array));
     }
@@ -488,7 +488,7 @@ int ObDatumObjParam::construct_sql_array_obj(ObObjParam &obj_param, ObIAllocator
 {
   int ret = OB_SUCCESS;
   if (OB_UNLIKELY(meta_.is_ext_sql_array())) {
-    //you can't call get_ext() here, get_ext() in Datum is to get an ObObj pointer
+    //you can't call get_ext() here, get_ext() in Datum reads a typed extended value
     //here you need to get the address of the constructed datum array
     const ObSqlDatumArray *datum_array = reinterpret_cast<const ObSqlDatumArray *>(datum_.get_int());
     ObSqlArrayObj *array_obj = ObSqlArrayObj::alloc(allocator, datum_array->count_);

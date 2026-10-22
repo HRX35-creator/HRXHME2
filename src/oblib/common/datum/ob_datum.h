@@ -57,7 +57,7 @@ namespace common
 //   | ObVarcharType       | char[]                        | 0          | type maximum length |
 //   | ObCharType          | char[]                        | 0          | type maximum length |
 //   | ObHexStringType     | char[]                        | 0          | type maximum length |
-//   | ObExtendType        | ObObj                         | 16         | 16                  |
+//   | ObExtendType        | typed Extend payload          | 15         | 16 (legacy view)    |
 //   | ObUnknownType       | int64_t                       | 8          | 8                   |
 //   | ObTinyTextType      | char[]                        | 0          | type maximum length |
 //   | ObTextType          | char[]                        | 0          | type maximum length |
@@ -81,12 +81,19 @@ enum ObObjDatumMapType : uint8_t {
   OBJ_DATUM_1BYTE_DATA, // 1 bytes ObObj::v_
   OBJ_DATUM_4BYTE_LEN_DATA, // 4 bytes ObObj::val_len_ + 8 bytes ObObj::v_
   OBJ_DATUM_2BYTE_LEN_DATA, // 2 bytes ObObj::val_len_ + 8 bytes ObObj::v_
-  OBJ_DATUM_FULL,  // full ObObj
+  OBJ_DATUM_EXTEND,  // typed extended value (subtype, size, payload)
   OBJ_DATUM_DECIMALINT, // decimal int
   OBJ_DATUM_MAPPING_MAX,
 };
 
-static_assert(sizeof(common::ObObj) == 16, "unexpected ObObj size");
+// Native Extend payload has no general-purpose value object or type tag:
+// [value:8][size:4][subtype:1][collation-level:1][collation:1]. The last two
+// attributes preserve legacy metadata, including sentinels cast to a column
+// collation. Persisted version-1 payloads remain readable as byte views.
+constexpr uint32_t DATUM_EXTEND_PAYLOAD_SIZE = 15;
+constexpr uint32_t DATUM_LEGACY_EXTEND_SIZE = 16;
+constexpr int64_t DATUM_MIN_EXT_VALUE = -3;
+constexpr int64_t DATUM_MAX_EXT_VALUE = -2;
 
 enum DatumReserveSize {
   OBJ_DATUM_NULL_RES_SIZE = 0,
@@ -95,7 +102,7 @@ enum DatumReserveSize {
   OBJ_DATUM_8BYTE_DATA_RES_SIZE = 8,
   OBJ_DATUM_2BYTE_LEN_DATA_RES_SIZE = 10,
   OBJ_DATUM_4BYTE_LEN_DATA_RES_SIZE = 12,
-  OBJ_DATUM_FULL_DATA_RES_SIZE = 16,
+  OBJ_DATUM_EXTEND_RES_SIZE = DATUM_LEGACY_EXTEND_SIZE, // accommodates old byte views too
   OBJ_DATUM_NUMBER_RES_SIZE = 40,
   OBJ_DATUM_DECIMALINT_MAX_RES_SIZE = 64,
   OBJ_DATUM_STRING_RES_SIZE = 128,
@@ -123,7 +130,6 @@ struct ObDatumPtr {
     const ObMemLobCommon *mem_lob_;
     const ObMySQLDate *mysql_date_;
     const ObMySQLDateTime *mysql_datetime_;
-    const ObObj *extend_obj_; // for extend type
     const ObDecimalInt *decimal_int_;
   };
 #if defined(__EMSCRIPTEN__) && __SIZEOF_POINTER__ == 4
@@ -158,7 +164,8 @@ struct ObDatumDesc {
   void set_null() { len_ = 0; null_ = 1; flag_ = FlagType::NONE; }
   bool is_null() const { return null_ == 1; }
   // interfaces following used for storage layer only
-  void set_ext() { len_ = 16; null_ = 0; flag_ = FlagType::EXT; }
+  void set_ext(uint32_t payload_size = DATUM_EXTEND_PAYLOAD_SIZE)
+  { len_ = payload_size; null_ = 0; flag_ = FlagType::EXT; }
   bool is_ext() const { return flag_ == FlagType::EXT; }
   void set_outrow() { null_ = 0; flag_ = FlagType::OUTROW; }
   bool is_outrow() const { return flag_ == FlagType::OUTROW; }
@@ -195,6 +202,12 @@ public:
     } else if (!r.is_null()) {
       if (r.pack_ != l.pack_) {
         equal = false;
+        if (r.is_ext() && l.is_ext() && r.get_wire_pack() == l.get_wire_pack()) {
+          char rbuf[DATUM_LEGACY_EXTEND_SIZE];
+          char lbuf[DATUM_LEGACY_EXTEND_SIZE];
+          equal = (0 == MEMCMP(r.get_wire_ext_payload(rbuf), l.get_wire_ext_payload(lbuf),
+                               DATUM_LEGACY_EXTEND_SIZE));
+        }
       } else {
         equal = (0 == MEMCMP(r.ptr_, l.ptr_, r.len_));
       }
@@ -222,9 +235,9 @@ public:
   inline bool get_bool() const { return 0 != get_int(); }
   inline bool is_false() const { return !is_null() && 0 == get_int(); }
   inline bool is_true() const { return  !is_null() && 0 != get_int(); }
-  inline bool is_min() const { return is_ext() && extend_obj_->is_min_value(); }
-  inline bool is_max() const { return is_ext() && extend_obj_->is_max_value(); }
-  inline bool is_nop() const { return is_ext() && extend_obj_->is_nop_value(); }
+  inline bool is_min() const { return has_ext_value() && get_ext() == DATUM_MIN_EXT_VALUE; }
+  inline bool is_max() const { return has_ext_value() && get_ext() == DATUM_MAX_EXT_VALUE; }
+  inline bool is_nop() const { return has_ext_value() && get_ext() == ObActionFlag::OP_NOP; }
   inline bool is_null_or_nop() const { return is_null() || is_nop(); }
   inline int8_t get_int8() const { return  *(reinterpret_cast<const int8_t*> (int_)); }
   inline int8_t get_tinyint() const { return *(reinterpret_cast<const int8_t*> (int_)); }
@@ -243,7 +256,71 @@ public:
   inline double get_double() const { return *double_; }
   inline float get_ufloat() const { return *float_; }
   inline double get_udouble() const { return *double_; }
-  inline int64_t get_ext() const { return extend_obj_->get_ext(); }
+  inline bool is_native_extend() const
+  { return is_ext() && len_ == DATUM_EXTEND_PAYLOAD_SIZE; }
+  inline bool has_ext_value() const
+  { return is_native_extend() || (is_ext() && len_ == DATUM_LEGACY_EXTEND_SIZE
+                                  && static_cast<uint8_t>(ptr_[0]) == ObExtendType); }
+  inline bool is_extended_null() const
+  { return is_ext() && len_ == DATUM_LEGACY_EXTEND_SIZE
+           && static_cast<uint8_t>(ptr_[0]) == ObNullType; }
+  inline int64_t get_ext() const
+  {
+    OB_ASSERT(has_ext_value());
+    int64_t value = 0;
+    MEMCPY(&value, ptr_ + (is_native_extend() ? 0 : 8), sizeof(value));
+    return value;
+  }
+  inline int32_t get_extend_size() const
+  {
+    OB_ASSERT(has_ext_value());
+    int32_t size = 0;
+    MEMCPY(&size, ptr_ + (is_native_extend() ? 8 : 4), sizeof(size));
+    return size;
+  }
+  inline uint8_t get_extend_type() const
+  {
+    return has_ext_value() ? static_cast<uint8_t>(ptr_[is_native_extend() ? 12 : 3])
+                           : UINT8_MAX;
+  }
+  inline uint8_t get_extend_collation_level() const
+  { OB_ASSERT(has_ext_value()); return static_cast<uint8_t>(ptr_[is_native_extend() ? 13 : 1]); }
+  inline uint8_t get_extend_collation() const
+  { OB_ASSERT(has_ext_value()); return static_cast<uint8_t>(ptr_[is_native_extend() ? 14 : 2]); }
+  // The caller provides at least get_reserved_size(OBJ_DATUM_EXTEND) bytes.
+  inline void set_extend(int64_t value, uint8_t subtype, int32_t size = 0,
+                          uint8_t collation_level = CS_LEVEL_INVALID,
+                          uint8_t collation = CS_TYPE_INVALID)
+  {
+    MEMCPY(no_cv(ptr_), &value, sizeof(value));
+    MEMCPY(no_cv(ptr_) + 8, &size, sizeof(size));
+    no_cv(ptr_)[12] = static_cast<char>(subtype);
+    no_cv(ptr_)[13] = static_cast<char>(collation_level);
+    no_cv(ptr_)[14] = static_cast<char>(collation);
+    set_ext();
+  }
+  inline void set_ext_value(int64_t value) { set_extend(value, 0); }
+  // Canonical version-1 encoding and checksums are independent of the native
+  // layout. No value object is reconstructed by this compatibility codec.
+  inline uint32_t get_wire_pack() const
+  {
+    ObDatumDesc wire = desc();
+    if (is_native_extend()) { wire.len_ = DATUM_LEGACY_EXTEND_SIZE; }
+    return wire.pack_;
+  }
+  inline const char *get_wire_ext_payload(char (&buf)[DATUM_LEGACY_EXTEND_SIZE]) const
+  {
+    if (is_native_extend()) {
+      buf[0] = static_cast<char>(ObExtendType);
+      buf[1] = ptr_[13];
+      buf[2] = ptr_[14];
+      buf[3] = ptr_[12];
+      MEMCPY(buf + 4, ptr_ + 8, 4);
+      MEMCPY(buf + 8, ptr_, 8);
+      return buf;
+    }
+    return ptr_;
+  }
   inline int64_t get_unknown() const {return *unknown_; }
   inline uint64_t get_bit() const { return *uint_; }
   inline uint64_t get_enum() const { return *uint_; }
@@ -699,23 +776,36 @@ inline void ObDatum::datum2obj<OBJ_DATUM_2BYTE_LEN_DATA>(ObObj &obj) const
 }
 
 template <>
-inline void ObDatum::obj2datum<OBJ_DATUM_FULL>(const ObObj &obj)
+inline void ObDatum::obj2datum<OBJ_DATUM_EXTEND>(const ObObj &obj)
 {
-  *no_cv(extend_obj_) = obj;
-  set_ext();
+  OB_ASSERT(obj.is_ext());
+  set_extend(obj.get_ext(), obj.get_meta().get_extend_type(), obj.get_val_len(),
+              static_cast<uint8_t>(obj.get_collation_level()),
+              static_cast<uint8_t>(obj.get_collation_type()));
 }
 
 template <>
-inline void ObDatum::datum2obj<OBJ_DATUM_FULL>(ObObj &obj) const
+inline void ObDatum::datum2obj<OBJ_DATUM_EXTEND>(ObObj &obj) const
 {
-  obj = *extend_obj_;
+  if (is_native_extend()) {
+    obj.set_extend(get_ext(), get_extend_type(), get_extend_size());
+    obj.set_collation_level(static_cast<ObCollationLevel>(get_extend_collation_level()));
+    obj.set_collation_type(static_cast<ObCollationType>(get_extend_collation()));
+  } else {
+    // Temporary bridge for remaining legacy callers, not a payload object.
+    // The byte codec above and native readers do not depend on this bridge.
+    OB_ASSERT(len_ == DATUM_LEGACY_EXTEND_SIZE);
+    MEMCPY(&obj.meta_, ptr_, 4);
+    MEMCPY(&obj.val_len_, ptr_ + 4, 4);
+    MEMCPY(&obj.v_.uint64_, ptr_ + 8, 8);
+  }
 }
 
 template <>
-inline void ObDatum::datum2datum<OBJ_DATUM_FULL>(const ObDatum &datum)
+inline void ObDatum::datum2datum<OBJ_DATUM_EXTEND>(const ObDatum &datum)
 {
-  *no_cv(extend_obj_) = *no_cv(datum.extend_obj_);
-  set_ext();
+  MEMCPY(no_cv(ptr_), datum.ptr_, datum.len_);
+  pack_ = datum.pack_;
 }
 
 template <>
@@ -754,7 +844,14 @@ inline int ObDatum::from_obj(const ObObj &obj, const ObObjDatumMapType map_type)
       case OBJ_DATUM_1BYTE_DATA: { obj2datum<OBJ_DATUM_1BYTE_DATA>(obj); break; }
       case OBJ_DATUM_4BYTE_LEN_DATA: { obj2datum<OBJ_DATUM_4BYTE_LEN_DATA>(obj); break; }
       case OBJ_DATUM_2BYTE_LEN_DATA: { obj2datum<OBJ_DATUM_2BYTE_LEN_DATA>(obj); break; }
-      case OBJ_DATUM_FULL: { obj2datum<OBJ_DATUM_FULL>(obj); break; }
+      case OBJ_DATUM_EXTEND: {
+        if (OB_UNLIKELY(!obj.is_ext())) {
+          ret = common::OB_ERR_UNEXPECTED;
+        } else {
+          obj2datum<OBJ_DATUM_EXTEND>(obj);
+        }
+        break;
+      }
       case OBJ_DATUM_DECIMALINT: { obj2datum<OBJ_DATUM_DECIMALINT>(obj); break; }
       case OBJ_DATUM_MAPPING_MAX: {
         ret = common::OB_ERR_UNEXPECTED;
@@ -787,7 +884,7 @@ inline int ObDatum::from_storage_datum(const ObDatum &datum, const ObObjDatumMap
       case OBJ_DATUM_4BYTE_LEN_DATA:
       case OBJ_DATUM_2BYTE_LEN_DATA:
         { datum2datum<OBJ_DATUM_NUMBER>(datum); break; }
-      case OBJ_DATUM_FULL: { datum2datum<OBJ_DATUM_FULL>(datum); break; }
+      case OBJ_DATUM_EXTEND: { datum2datum<OBJ_DATUM_EXTEND>(datum); break; }
       case OBJ_DATUM_DECIMALINT: { datum2datum<OBJ_DATUM_DECIMALINT>(datum); break; }
       case OBJ_DATUM_MAPPING_MAX: {
         ret = common::OB_ERR_UNEXPECTED;
@@ -800,9 +897,17 @@ inline int ObDatum::from_storage_datum(const ObDatum &datum, const ObObjDatumMap
 
 inline int64_t ObDatum::checksum(const int64_t current) const
 {
-  int64_t result = ob_crc64_sse42(current, &pack_, sizeof(pack_));
-  if (len_ > 0) {
-    result = ob_crc64_sse42(result, ptr_, len_);
+  int64_t result = current;
+  if (OB_UNLIKELY(is_native_extend())) {
+    const uint32_t wire_pack = get_wire_pack();
+    char buf[DATUM_LEGACY_EXTEND_SIZE];
+    result = ob_crc64_sse42(result, &wire_pack, sizeof(wire_pack));
+    result = ob_crc64_sse42(result, get_wire_ext_payload(buf), sizeof(buf));
+  } else {
+    result = ob_crc64_sse42(result, &pack_, sizeof(pack_));
+    if (len_ > 0) {
+      result = ob_crc64_sse42(result, ptr_, len_);
+    }
   }
   return result;
 }
@@ -874,7 +979,7 @@ inline int ObDatum::from_obj(const ObObj &obj)
         break;
       }
       case ObExtendType: {
-        obj2datum<OBJ_DATUM_FULL>(obj);
+        obj2datum<OBJ_DATUM_EXTEND>(obj);
         break;
       }
       case ObDecimalIntType: {
@@ -915,7 +1020,7 @@ inline int ObDatum::to_obj(
         case OBJ_DATUM_1BYTE_DATA: { datum2obj<OBJ_DATUM_1BYTE_DATA>(obj); break; }
         case OBJ_DATUM_4BYTE_LEN_DATA: { datum2obj<OBJ_DATUM_4BYTE_LEN_DATA>(obj); break; }
         case OBJ_DATUM_2BYTE_LEN_DATA: { datum2obj<OBJ_DATUM_2BYTE_LEN_DATA>(obj); break; }
-        case OBJ_DATUM_FULL: { datum2obj<OBJ_DATUM_FULL>(obj); break; }
+        case OBJ_DATUM_EXTEND: { datum2obj<OBJ_DATUM_EXTEND>(obj); break; }
         case OBJ_DATUM_DECIMALINT: { datum2obj<OBJ_DATUM_DECIMALINT>(obj); break; }
         case OBJ_DATUM_MAPPING_MAX: {
           ret = common::OB_ERR_UNEXPECTED;
@@ -1011,7 +1116,7 @@ inline int ObDatum::to_obj(ObObj &obj, const ObObjMeta &meta) const
         break;
       }
       case ObExtendType: {
-        datum2obj<OBJ_DATUM_FULL>(obj);
+        datum2obj<OBJ_DATUM_EXTEND>(obj);
         break;
       }
       case ObDecimalIntType: {
