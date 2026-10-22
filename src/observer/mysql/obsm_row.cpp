@@ -31,12 +31,21 @@ bool DatumMysqlRow::can_encode(const oceanbase::sql::ObExpr &expr, const ObField
   if (direct && meta.is_integer_type()) {
     direct = expr.obj_datum_map_ == OBJ_DATUM_8BYTE_DATA;
   } else if (direct && (meta.get_type() == ObVarcharType || meta.get_type() == ObCharType)) {
-    // Match the existing no-conversion branch, including its charset validity
-    // check. Other collations keep the established charset/warning handling.
-    direct = expr.obj_datum_map_ == OBJ_DATUM_STRING
-             && meta.get_collation_type() == ObCharset::get_default_collation(result_charset)
-             && CS_TYPE_INVALID != meta.get_collation_type()
-             && nullptr != ObCharset::get_charset(meta.get_collation_type());
+    // Match both no-conversion cases in ObObj::convert_string_value_charset:
+    // different collations in the same charset, and binary/no result charset.
+    const ObCollationType from = meta.get_collation_type();
+    const ObCollationType to = ObCharset::get_default_collation(result_charset);
+    direct = expr.obj_datum_map_ == OBJ_DATUM_STRING && CS_TYPE_INVALID != from;
+    if (direct && from == to) {
+      direct = nullptr != ObCharset::get_charset(from);
+    } else if (direct && ObCharset::is_valid_charset(result_charset)
+               && CHARSET_BINARY != result_charset) {
+      const ObCharsetInfo *from_info = ObCharset::get_charset(from);
+      const ObCharsetInfo *to_info = ObCharset::get_charset(to);
+      direct = nullptr != from_info && nullptr != to_info && CS_TYPE_INVALID != to
+               && (CS_TYPE_BINARY == from || CS_TYPE_BINARY == to
+                   || 0 == strcmp(from_info->csname, to_info->csname));
+    }
   } else {
     direct = false;
   }
