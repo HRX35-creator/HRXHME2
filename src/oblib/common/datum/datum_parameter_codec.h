@@ -38,6 +38,11 @@ public:
   // Store wire is the existing count + parameter sequence. A failed store
   // decode leaves the store empty and the caller position unchanged; payload
   // allocations remain in allocator, as for the single-value decoder.
+  static int array_size(const DatumParameterArray &array, int64_t &size);
+  static int encode_array(const DatumParameterArray &array, char *buf, int64_t length, int64_t &pos);
+  static int decode_array(const char *buf, int64_t length, int64_t &pos,
+                         ObIAllocator &allocator, DatumParameterArray *&array);
+
   static int store_size(const DatumParamStore &store, int64_t &size);
   static int encode_store(const DatumParamStore &store, char *buf, int64_t length, int64_t &pos);
   static int decode_store(const char *buf, int64_t length, int64_t &pos,

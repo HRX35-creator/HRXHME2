@@ -263,9 +263,7 @@ int ObInfixExpression::calc(common::ObExprCtx &expr_ctx,
     if (OB_FAIL(exprs_.at(0).get_item_value_directly(*expr_ctx.phy_plan_ctx_, row, value))
         || OB_ISNULL(value)) {
       ret = COVER_SUCC(OB_ERR_UNEXPECTED);
-    } else if (value->is_ext() && ObSqlExpressionUtil::expand_array_params(expr_ctx, *value, value)) {
-    } else {
-      val= *value;
+    } else if (OB_FAIL(ObSqlExpressionUtil::expand_array_params(expr_ctx, *value, val))) {
     }
   } else if (OB_UNLIKELY(exprs_.at(0).get_item_type() == T_OP_SHADOW_UK_PROJECT)) {
     if (OB_FAIL(uk_fast_project(expr_ctx, row, val))) {
@@ -446,9 +444,7 @@ int ObInfixExpression::eval(common::ObExprCtx &ctx, const common::ObNewRow &row,
       const ObObj *obj = NULL;
       if (OB_FAIL(item.get_indirect_const(*ctx.phy_plan_ctx_, obj)) || OB_ISNULL(obj)) {
         ret = COVER_SUCC(OB_ERR_UNEXPECTED);
-      } else if (obj->is_ext() && OB_FAIL(ObSqlExpressionUtil::expand_array_params(ctx, *obj, obj))) {
-      } else {
-        stack[pos] = *obj;
+      } else if (OB_FAIL(ObSqlExpressionUtil::expand_array_params(ctx, *obj, stack[pos]))) {
       }
     } else if (IS_DATATYPE_OP(item.get_item_type())) {
       stack[pos] = item.get_obj();

@@ -46,6 +46,40 @@ struct DatumParameterArray
     return array;
   }
 
+  int serialize(char *buf, int64_t length, int64_t &pos) const;
+  int64_t get_serialize_size() const;
+
+  // Recursively owns array descriptors and payloads in allocator. Unlike a
+  // shallow parameter copy, this is safe after the source arena is reset.
+  static int clone_parameter(const DatumParameter &source, DatumParameter &output,
+                             ObIAllocator &allocator, int depth = 0)
+  {
+    int ret = OB_SUCCESS;
+    DatumParameter copy;
+    if (depth > 64) { ret = OB_SIZE_OVERFLOW; }
+    else if (!source.is_ext_sql_array() || source.is_null()) { ret = copy.deep_copy(source, allocator); }
+    else {
+      const DatumParameterArray *array = source.get_array<DatumParameterArray>();
+      DatumParameterArray *owned = nullptr;
+      if (array == nullptr || array->count_ < 0 || (array->count_ > 0 && array->data_ == nullptr)) {
+        ret = OB_INVALID_ARGUMENT;
+      } else if ((owned = alloc(allocator, array->count_)) == nullptr) { ret = OB_ALLOCATE_MEMORY_FAILED; }
+      else {
+        owned->element_ = array->element_;
+        for (int64_t i = 0; ret == OB_SUCCESS && i < array->count_; ++i) {
+          ret = clone_parameter(array->data_[i], owned->data_[i], allocator, depth + 1);
+        }
+        if (ret == OB_SUCCESS) {
+          copy = source;
+          ret = copy.alloc_datum_reserved_buff(source.get_type_meta(), source.get_precision(), allocator);
+          if (ret == OB_SUCCESS) { copy.set_array_address(owned); }
+        }
+      }
+    }
+    if (ret == OB_SUCCESS) { output = copy; }
+    return ret;
+  }
+
   typedef ObArrayWrap<DatumParameter> Values;
   TO_STRING_KV("data", Values(data_, count_), K_(count), K_(element));
   DatumParameter *data_;

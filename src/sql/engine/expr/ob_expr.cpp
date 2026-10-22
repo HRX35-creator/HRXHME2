@@ -396,34 +396,6 @@ void *ObExprStrResAlloc::alloc(const int64_t size)
   return mem;
 }
 
-namespace {
-int import_legacy_array(const ObObjParam &source, DatumParameter &destination,
-                         ObIAllocator &allocator)
-{
-  int ret = OB_SUCCESS;
-  const ObSqlArrayObj *source_array = reinterpret_cast<const ObSqlArrayObj *>(source.get_ext());
-  DatumParameterArray *array = nullptr;
-  if (OB_ISNULL(source_array)) {
-    ret = OB_ERR_UNEXPECTED;
-  } else if (OB_ISNULL(array = DatumParameterArray::alloc(allocator, source_array->count_))) {
-    ret = OB_ALLOCATE_MEMORY_FAILED;
-  } else {
-    array->element_ = source_array->element_;
-  }
-  for (int64_t i = 0; OB_SUCC(ret) && i < source_array->count_; ++i) {
-    const ObObjParam &value = source_array->data_[i];
-    if (OB_FAIL(array->data_[i].alloc_datum_reserved_buff(
-            value.get_meta(), value.get_precision(), allocator))) {
-    } else if (OB_FAIL(import_legacy_parameter(value, array->data_[i], &allocator))) {
-    }
-  }
-  if (OB_SUCC(ret)) {
-    destination.set_array_address(array);
-  }
-  return ret;
-}
-} // namespace
-
 int import_legacy_parameter(const ObObjParam &source, DatumParameter &destination,
                             ObIAllocator *allocator)
 {
@@ -431,7 +403,10 @@ int import_legacy_parameter(const ObObjParam &source, DatumParameter &destinatio
   if (source.is_ext_sql_array()) {
     if (OB_ISNULL(allocator)) {
       ret = OB_INVALID_ARGUMENT;
-    } else if (OB_FAIL(import_legacy_array(source, destination, *allocator))) {
+    } else if (source.get_ext() == 0) {
+      ret = OB_ERR_UNEXPECTED;
+    } else {
+      destination.set_array_address(reinterpret_cast<const DatumParameterArray *>(source.get_ext()));
     }
   } else if (OB_FAIL(destination.datum_.from_obj(source))) {
   }
@@ -445,6 +420,46 @@ int import_legacy_parameter(const ObObjParam &source, DatumParameter &destinatio
     if (source.has_lob_header()) {
       destination.set_result_flag(HAS_LOB_HEADER_FLAG);
     }
+  }
+  return ret;
+}
+
+int copy_legacy_parameter(const ObObjParam &source, DatumParameter &destination, ObIAllocator &allocator)
+{
+  int ret = OB_SUCCESS;
+  DatumParameter copy;
+  if (OB_FAIL(copy.alloc_datum_reserved_buff(source.get_meta(), source.get_precision(), allocator))) {
+  } else if (OB_FAIL(import_legacy_parameter(source, copy, &allocator))) {
+  } else if (source.is_string_type() || source.is_decimal_int() || source.is_json() ||
+             source.is_geometry() || source.is_collection_sql_type() || source.get_type() == ObUserDefinedSQLType) {
+    ObDatum owned;
+    if (OB_FAIL(owned.deep_copy(copy.datum_, allocator))) {
+    } else { copy.set_datum(owned); }
+  }
+  if (OB_SUCC(ret) && source.is_ext_sql_array()) {
+    ret = DatumParameterArray::clone_parameter(copy, copy, allocator);
+  }
+  if (OB_SUCC(ret)) { destination = copy; }
+  return ret;
+}
+
+// Only scalar consumers of the old ParamStore need this materialization. Array
+// payloads themselves remain native; remove this bridge with the scalar store.
+int materialize_legacy_parameter(const DatumParameter &source, ObObjParam &destination)
+{
+  int ret = OB_SUCCESS;
+  ObObjParam output;
+  if (source.is_ext_sql_array() && !source.is_null()) {
+    output.set_extend(reinterpret_cast<int64_t>(source.get_array<DatumParameterArray>()), T_EXT_SQL_ARRAY);
+    output.set_meta_type(source.get_type_meta());
+  } else { ret = source.datum_.to_obj(output, source.get_type_meta()); }
+  if (OB_SUCC(ret)) {
+    output.set_accuracy(source.get_accuracy());
+    output.set_result_flag(source.get_result_flag());
+    output.set_param_flag(source.get_param_flag());
+    output.set_param_meta(source.get_param_meta());
+    output.set_raw_text_info(source.get_raw_text_pos(), source.get_raw_text_len());
+    destination = output;
   }
   return ret;
 }

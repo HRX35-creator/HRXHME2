@@ -305,7 +305,7 @@ int ObPlanSet::match_multi_stmt_info(const ParamStore &params,
   } else {
     // check all rowkey are different
     int64_t stmt_count = 0;
-    ObSEArray<const ObObj*, 16> binding_data;
+    ObSEArray<const DatumParameter*, 16> binding_data;
     for (int64_t i = 0; OB_SUCC(ret) && i < multi_stmt_rowkey_pos.count(); i++) {
       int64_t pos = multi_stmt_rowkey_pos.at(i);
       if (OB_UNLIKELY(pos < 0 || pos >= params.count())) {
@@ -313,7 +313,7 @@ int ObPlanSet::match_multi_stmt_info(const ParamStore &params,
       } else if (OB_UNLIKELY(!params.at(pos).is_ext_sql_array())) {
         ret = OB_ERR_UNEXPECTED;
       } else {
-        const ObSqlArrayObj *array_params = reinterpret_cast<const ObSqlArrayObj*>(
+        const DatumParameterArray *array_params = reinterpret_cast<const DatumParameterArray*>(
                                                   params.at(pos).get_ext());
         if (OB_ISNULL(array_params)) {
           ret = OB_ERR_UNEXPECTED;
@@ -334,7 +334,9 @@ int ObPlanSet::match_multi_stmt_info(const ParamStore &params,
         for (int64_t i = 0; OB_SUCC(ret) && is_match && i < stmt_count; i++) {
           hash_key.reuse();
           for (int64_t j = 0; OB_SUCC(ret) && j < binding_data.count(); j++) {
-            ret = hash_key.rowkey_.push_back(binding_data.at(j)[i]);
+            ObObjParam value;
+            if (OB_FAIL(materialize_legacy_parameter(binding_data.at(j)[i], value))) {
+            } else { ret = hash_key.rowkey_.push_back(value); }
           }
           if (OB_SUCC(ret)) {
             ret = unique_ctx.exist_refactored(hash_key);

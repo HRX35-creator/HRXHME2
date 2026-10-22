@@ -272,7 +272,7 @@ private:
   // for das batch rescan
   uint64_t current_group_;  //The group id in this time right iter rescan;
   
-  common::ObArrayWrap<ObSqlArrayObj> das_batch_params_;
+  common::ObArrayWrap<DatumParameterArray> das_batch_params_;
   // for das batch rescan end
   ObChunkDatumStore left_rows_;
   ObChunkDatumStore::Iterator left_rows_iter_;

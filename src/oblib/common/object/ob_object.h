@@ -17,6 +17,7 @@
 #ifndef OCEANBASE_COMMON_OB_OBJECT_H_
 #define OCEANBASE_COMMON_OB_OBJECT_H_
 
+#include "common/datum/datum_parameter_array.h"
 #include "lib/ob_define.h"
 #include "common/object/ob_type_metadata.h"
 #include "common/enumset/enumset_value.h"
@@ -2612,41 +2613,6 @@ private:
   int32_t raw_text_len_;
   ObObjMeta param_meta_; // meta for objparam, preserves NULL and empty-string metadata
 };
-
-struct ObSqlArrayObj
-{
-  ObSqlArrayObj()
-    : data_(nullptr),
-      count_(0),
-      element_()
-  {
-  }
-  typedef common::ObArrayWrap<common::ObObjParam> DataArray;
-  static ObSqlArrayObj *alloc(common::ObIAllocator &allocator, int64_t count);
-  static int do_real_deserialize(common::ObIAllocator &allocator, char *buf, int64_t data_len, ObSqlArrayObj *&array_obj);
-  int serialize(char* buf, const int64_t buf_len, int64_t& pos) const;
-  int deserialize(common::ObIAllocator &allocator, const char* buf, const int64_t data_len, int64_t& pos);
-  int64_t get_serialize_size(void) const;
-  TO_STRING_KV("data", DataArray(data_, count_), K_(count), K_(element));
-  common::ObObjParam *data_;
-  int64_t count_;
-  common::ObDataType element_;
-};
-
-OB_INLINE ObSqlArrayObj *ObSqlArrayObj::alloc(common::ObIAllocator &allocator, int64_t count)
-{
-  ObSqlArrayObj *array_obj = nullptr;
-  void *array_buf = nullptr;
-  void *data_buf = nullptr;
-  int64_t array_size = sizeof(ObSqlArrayObj) + sizeof(common::ObObjParam) * count;
-  if (OB_NOT_NULL(array_buf = allocator.alloc(array_size))) {
-    array_obj = new (array_buf) ObSqlArrayObj();
-    data_buf = static_cast<char*>(array_buf) + sizeof(ObSqlArrayObj);
-    array_obj->data_ = new (data_buf) common::ObObjParam[count];
-    array_obj->count_ = count;
-  }
-  return array_obj;
-}
 
 OB_INLINE int64_t ObObj::get_deep_copy_size() const
 {

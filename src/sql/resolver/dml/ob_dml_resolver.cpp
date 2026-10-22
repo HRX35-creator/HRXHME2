@@ -11611,14 +11611,15 @@ int ObDMLResolver::estimate_values_table_stats(ObValuesTableDef &table_def)
               ret = OB_ERR_UNEXPECTED;
             }
           } else if (param_store->at(param_idx).is_ext_sql_array()) {
-            const ObSqlArrayObj *array_obj =
-                      reinterpret_cast<const ObSqlArrayObj*>(param_store->at(param_idx).get_ext());
+            const DatumParameterArray *array_obj =
+                      reinterpret_cast<const DatumParameterArray*>(param_store->at(param_idx).get_ext());
             if (OB_ISNULL(array_obj)) {
               ret = OB_ERR_UNEXPECTED;
             } else {
               for (int64_t i = 0; OB_SUCC(ret) && i < array_obj->count_ && i < compute_ndv_thredhold; i++) {
-                const ObObjParam &obj_param = array_obj->data_[i];
-                if (OB_FAIL(add_obj_to_llc_bitmap(obj_param, llc_bitmap, num_null))) {
+                ObObjParam obj_param;
+                if (OB_FAIL(materialize_legacy_parameter(array_obj->data_[i], obj_param))) {
+                } else if (OB_FAIL(add_obj_to_llc_bitmap(obj_param, llc_bitmap, num_null))) {
                 }
               }
             }

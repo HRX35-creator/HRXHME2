@@ -1902,7 +1902,7 @@ int ObRawExprResolverImpl::process_datatype_or_questionmark(const ParseNode &nod
           if (param.is_ext()) {
             // values statement
             if (param.is_ext_sql_array()) {
-              ObSqlArrayObj *param_array = reinterpret_cast<ObSqlArrayObj*>(param.get_ext());
+              DatumParameterArray *param_array = reinterpret_cast<DatumParameterArray*>(param.get_ext());
               const ObExecContext *exec_ctx = NULL;
               const ObPhysicalPlanCtx *phy_ctx = NULL;
               if (OB_ISNULL(param_array) || OB_ISNULL(ctx_.session_info_) ||

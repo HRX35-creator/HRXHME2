@@ -15,6 +15,7 @@
  */
 
 #include <memory>
+#include <vector>
 #include <gtest/gtest.h>
 #include "sql/ob_sql_utils.h"
 #include "sql/engine/ob_exec_context.h"
@@ -156,91 +157,161 @@ TEST(DatumParameterConstraints, numeric_payload_is_contiguous_and_not_a_legacy_o
   EXPECT_EQ(0, memcmp(value.datum_.get_number_digits(), number.get_digits(), number.get_length() * sizeof(uint32_t)));
 }
 
-TEST(DatumParameterConstraints, imports_legacy_array_into_native_datum_elements)
+TEST(DatumParameterConstraints, scalar_input_envelope_shares_canonical_native_array)
 {
   ObArenaAllocator allocator;
-  ObSqlArrayObj *old = ObSqlArrayObj::alloc(allocator, 2);
-  ASSERT_NE(nullptr, old);
-  old->element_.set_obj_type(ObIntType);
-  old->data_[0].set_int(123);
-  old->data_[0].set_precision(19);
-  old->data_[0].set_result_flag(ZEROFILL_FLAG);
-  old->data_[0].set_raw_text_info(17, 3);
-  old->data_[1].set_varchar("bytes");
-  old->data_[1].set_length(37);
-  old->data_[1].set_collation_type(CS_TYPE_UTF8MB4_BIN);
-  old->data_[1].set_param_meta(old->data_[1].get_meta());
-  ObObjParam source;
-  source.set_extend(reinterpret_cast<int64_t>(old), T_EXT_SQL_ARRAY);
+  DatumParameterArray *array = DatumParameterArray::alloc(allocator, 2);
+  ASSERT_NE(nullptr, array);
+  array->element_.set_obj_type(ObIntType);
+  ObObjParam integer, text;
+  integer.set_int(123); integer.set_precision(19); integer.set_result_flag(ZEROFILL_FLAG); integer.set_raw_text_info(17, 3);
+  text.set_varchar("bytes"); text.set_length(37); text.set_collation_type(CS_TYPE_UTF8MB4_BIN); text.set_param_meta(text.get_meta());
+  ASSERT_EQ(OB_SUCCESS, copy_legacy_parameter(integer, array->data_[0], allocator));
+  ASSERT_EQ(OB_SUCCESS, copy_legacy_parameter(text, array->data_[1], allocator));
+  ObObjParam source; source.set_extend(reinterpret_cast<int64_t>(array), T_EXT_SQL_ARRAY);
   DatumParameter value;
   ASSERT_EQ(OB_SUCCESS, value.alloc_datum_reserved_buff(source.get_meta(), source.get_precision(), allocator));
   ASSERT_EQ(OB_SUCCESS, import_legacy_parameter(source, value, &allocator));
-  const DatumParameterArray *array = value.get_array<DatumParameterArray>();
-  ASSERT_NE(nullptr, array); ASSERT_EQ(2, array->count_);
-  EXPECT_EQ(123, array->data_[0].datum_.get_int());
-  EXPECT_EQ(ObIntType, array->data_[0].get_type());
-  EXPECT_EQ(19, array->data_[0].get_precision());
-  EXPECT_TRUE(array->data_[0].has_result_flag(ZEROFILL_FLAG));
-  EXPECT_EQ(17, array->data_[0].get_raw_text_pos());
-  EXPECT_EQ(ObVarcharType, array->data_[1].get_type());
-  EXPECT_EQ(37, array->data_[1].get_length());
-  EXPECT_EQ(old->data_[1].get_meta(), array->data_[1].get_param_meta());
+  EXPECT_EQ(array, value.get_array<DatumParameterArray>());
+  EXPECT_EQ(123, array->data_[0].datum_.get_int()); EXPECT_EQ(ObIntType, array->data_[0].get_type());
+  EXPECT_EQ(19, array->data_[0].get_precision()); EXPECT_TRUE(array->data_[0].has_result_flag(ZEROFILL_FLAG));
+  EXPECT_EQ(17, array->data_[0].get_raw_text_pos()); EXPECT_EQ(ObVarcharType, array->data_[1].get_type());
+  EXPECT_EQ(37, array->data_[1].get_length()); EXPECT_EQ(text.get_meta(), array->data_[1].get_param_meta());
   EXPECT_EQ(ObString("bytes"), array->data_[1].datum_.get_string());
 }
 
 TEST(DatumParameterConstraints, batch_frames_select_full_native_array_values)
 {
   ObArenaAllocator allocator;
-  ObSqlArrayObj *old = ObSqlArrayObj::alloc(allocator, 3);
-  ASSERT_NE(nullptr, old);
-  old->data_[0].set_int(123);
-  old->data_[1].set_varchar("bytes");
-  old->data_[2].set_null();
-  ObObjParam source;
-  source.set_extend(reinterpret_cast<int64_t>(old), T_EXT_SQL_ARRAY);
+  DatumParameterArray *array = DatumParameterArray::alloc(allocator, 3);
+  ASSERT_NE(nullptr, array);
+  ObObjParam integer, text; integer.set_int(123); text.set_varchar("bytes");
+  ASSERT_EQ(OB_SUCCESS, copy_legacy_parameter(integer, array->data_[0], allocator));
+  ASSERT_EQ(OB_SUCCESS, copy_legacy_parameter(text, array->data_[1], allocator));
+  ObObjParam source; source.set_extend(reinterpret_cast<int64_t>(array), T_EXT_SQL_ARRAY);
   ObPhysicalPlanCtx context(allocator);
   ASSERT_EQ(OB_SUCCESS, context.get_param_store_for_update().push_back(source));
   ASSERT_EQ(OB_SUCCESS, context.init_datum_param_store());
+  EXPECT_EQ(array, context.get_datum_param_store().at(0).get_array<DatumParameterArray>());
   ASSERT_EQ(1, context.get_param_frame_ptrs().count());
   ObDatum *frame = reinterpret_cast<ObDatum *>(context.get_param_frame_ptrs().at(0));
-  ASSERT_EQ(OB_SUCCESS, context.replace_batch_param_datum(0, 0, 1));
-  EXPECT_EQ(123, frame->get_int());
-  ASSERT_EQ(OB_SUCCESS, context.replace_batch_param_datum(1, 0, 1));
-  EXPECT_EQ(ObString("bytes"), frame->get_string());
-  ASSERT_EQ(OB_SUCCESS, context.replace_batch_param_datum(2, 0, 1));
-  EXPECT_TRUE(frame->is_null());
+  ASSERT_EQ(OB_SUCCESS, context.replace_batch_param_datum(0, 0, 1)); EXPECT_EQ(123, frame->get_int());
+  ASSERT_EQ(OB_SUCCESS, context.replace_batch_param_datum(1, 0, 1)); EXPECT_EQ(ObString("bytes"), frame->get_string());
+  ASSERT_EQ(OB_SUCCESS, context.replace_batch_param_datum(2, 0, 1)); EXPECT_TRUE(frame->is_null());
   EXPECT_EQ(OB_ERR_UNEXPECTED, context.replace_batch_param_datum(-1, 0, 1));
   EXPECT_EQ(OB_ERR_UNEXPECTED, context.replace_batch_param_datum(3, 0, 1));
 }
 
-TEST(DatumParameterConstraints, nested_array_import_preserves_each_parameter)
+TEST(DatumParameterConstraints, nested_array_envelope_preserves_native_descriptors)
 {
   ObArenaAllocator allocator;
-  ObSqlArrayObj *inner = ObSqlArrayObj::alloc(allocator, 1);
-  ObSqlArrayObj *outer = ObSqlArrayObj::alloc(allocator, 1);
+  DatumParameterArray *inner = DatumParameterArray::alloc(allocator, 1);
+  DatumParameterArray *outer = DatumParameterArray::alloc(allocator, 1);
   ASSERT_NE(nullptr, inner); ASSERT_NE(nullptr, outer);
-  inner->data_[0].set_uint64(UINT64_MAX);
-  inner->data_[0].set_precision(20);
-  outer->data_[0].set_extend(reinterpret_cast<int64_t>(inner), T_EXT_SQL_ARRAY);
-  ObObjParam source;
-  source.set_extend(reinterpret_cast<int64_t>(outer), T_EXT_SQL_ARRAY);
+  ObObjParam integer; integer.set_uint64(UINT64_MAX); integer.set_precision(20);
+  ASSERT_EQ(OB_SUCCESS, copy_legacy_parameter(integer, inner->data_[0], allocator));
+  ObObjParam child; child.set_extend(reinterpret_cast<int64_t>(inner), T_EXT_SQL_ARRAY);
+  ASSERT_EQ(OB_SUCCESS, outer->data_[0].alloc_datum_reserved_buff(child.get_meta(), -1, allocator));
+  ASSERT_EQ(OB_SUCCESS, import_legacy_parameter(child, outer->data_[0], &allocator));
+  ObObjParam source; source.set_extend(reinterpret_cast<int64_t>(outer), T_EXT_SQL_ARRAY);
   DatumParameter destination;
   ASSERT_EQ(OB_SUCCESS, destination.alloc_datum_reserved_buff(source.get_meta(), -1, allocator));
   ASSERT_EQ(OB_SUCCESS, import_legacy_parameter(source, destination, &allocator));
   const DatumParameterArray *native_outer = destination.get_array<DatumParameterArray>();
-  ASSERT_NE(nullptr, native_outer);
+  ASSERT_EQ(outer, native_outer);
   const DatumParameterArray *native_inner = native_outer->data_[0].get_array<DatumParameterArray>();
-  ASSERT_NE(nullptr, native_inner);
-  ASSERT_EQ(1, native_inner->count_);
+  ASSERT_EQ(inner, native_inner); ASSERT_EQ(1, native_inner->count_);
   EXPECT_EQ(UINT64_MAX, native_inner->data_[0].datum_.get_uint());
-  EXPECT_EQ(20, native_inner->data_[0].get_precision());
-  EXPECT_EQ(ObUInt64Type, native_inner->data_[0].get_type());
+  EXPECT_EQ(20, native_inner->data_[0].get_precision()); EXPECT_EQ(ObUInt64Type, native_inner->data_[0].get_type());
 }
 
 TEST(DatumParameterConstraints, invalid_constraint_reports_an_error)
 {
   DatumParameter value; value.datum_.set_null(); bool matches = false;
   EXPECT_EQ(OB_ERR_UNEXPECTED, match(value, PRE_CALC_RESULT_NONE, matches));
+}
+
+TEST(DatumParameterConstraints, context_serialization_decodes_canonical_arrays_in_its_own_arena)
+{
+  ObArenaAllocator source_arena, output_arena;
+  DatumParameterArray *array = DatumParameterArray::alloc(source_arena, 2); ASSERT_NE(nullptr, array);
+  char bytes[] = "persisted array";
+  ObObjParam text, integer; text.set_varchar(ObString(sizeof(bytes)-1, bytes)); text.set_collation_type(CS_TYPE_UTF8MB4_BIN);
+  integer.set_uint64(UINT64_MAX); integer.set_precision(20);
+  ASSERT_EQ(OB_SUCCESS, copy_legacy_parameter(text, array->data_[0], source_arena));
+  ASSERT_EQ(OB_SUCCESS, copy_legacy_parameter(integer, array->data_[1], source_arena));
+  ObObjParam envelope; envelope.set_extend(reinterpret_cast<int64_t>(array), T_EXT_SQL_ARRAY);
+  ObPhysicalPlanCtx source(source_arena), output(output_arena);
+  ASSERT_EQ(OB_SUCCESS, source.get_param_store_for_update().push_back(envelope));
+  ASSERT_EQ(OB_SUCCESS, source.get_array_param_groups().push_back(ObArrayParamGroup(2, 1, 0)));
+  std::vector<char> wire(source.get_serialize_size()); int64_t pos = 0;
+  ASSERT_EQ(OB_SUCCESS, source.serialize(wire.data(), wire.size(), pos)); EXPECT_EQ(wire.size(), pos);
+  pos = 0; ASSERT_EQ(OB_SUCCESS, output.deserialize(wire.data(), wire.size(), pos)); EXPECT_EQ(wire.size(), pos);
+  std::vector<char> repeated(output.get_serialize_size()); pos = 0;
+  ASSERT_EQ(OB_SUCCESS, output.serialize(repeated.data(), repeated.size(), pos)); EXPECT_EQ(wire, repeated);
+  memset(wire.data(), 0xa5, wire.size()); memset(bytes, 'x', sizeof(bytes));
+  ASSERT_EQ(1, output.get_datum_param_store().count());
+  auto *owned = output.get_datum_param_store().at(0).get_array<DatumParameterArray>();
+  ASSERT_NE(nullptr, owned); EXPECT_NE(array, owned); ASSERT_EQ(2, owned->count_);
+  EXPECT_EQ(ObString("persisted array"), owned->data_[0].datum_.get_string());
+  EXPECT_EQ(UINT64_MAX, owned->data_[1].datum_.get_uint()); EXPECT_EQ(20, owned->data_[1].get_precision());
+  EXPECT_EQ(reinterpret_cast<int64_t>(owned), output.get_param_store().at(0).get_ext());
+}
+
+TEST(DatumParameterConstraints, owned_scalar_import_does_not_borrow_temporary_strings)
+{
+  ObArenaAllocator arena; char bytes[] = "utf8 bytes";
+  ObObjParam source; source.set_varchar(ObString(sizeof(bytes)-1, bytes)); source.set_collation_type(CS_TYPE_UTF8MB4_BIN);
+  source.set_length(77); source.set_result_flag(ZEROFILL_FLAG); source.set_raw_text_info(3, 7); source.set_param_meta(source.get_meta());
+  DatumParameter native; ASSERT_EQ(OB_SUCCESS, copy_legacy_parameter(source, native, arena));
+  memset(bytes, 'x', sizeof(bytes)); EXPECT_EQ(ObString("utf8 bytes"), native.datum_.get_string());
+  ObObjParam result; ASSERT_EQ(OB_SUCCESS, materialize_legacy_parameter(native, result));
+  EXPECT_EQ(native.datum_.get_string(), result.get_string()); EXPECT_EQ(source.get_accuracy(), result.get_accuracy());
+  EXPECT_EQ(source.get_result_flag(), result.get_result_flag()); EXPECT_EQ(source.get_param_meta(), result.get_param_meta());
+  EXPECT_EQ(3, result.get_raw_text_pos()); EXPECT_EQ(7, result.get_raw_text_len());
+}
+
+TEST(DatumParameterConstraints, context_rejects_trailing_bytes_in_deferred_native_array)
+{
+  ObArenaAllocator arena; auto *array = DatumParameterArray::alloc(arena, 0); ASSERT_NE(nullptr, array);
+  ObObjParam envelope; envelope.set_extend(reinterpret_cast<int64_t>(array), T_EXT_SQL_ARRAY);
+  ObPhysicalPlanCtx source(arena), output(arena);
+  ASSERT_EQ(OB_SUCCESS, source.get_param_store_for_update().push_back(envelope));
+  ASSERT_EQ(OB_SUCCESS, source.get_array_param_groups().push_back(ObArrayParamGroup(0, 1, 0)));
+  std::vector<char> wire(source.get_serialize_size()); int64_t pos = 0;
+  ASSERT_EQ(OB_SUCCESS, source.serialize(wire.data(), wire.size(), pos));
+  int64_t cursor = 0, version = 0, payload_length = 0;
+  ASSERT_EQ(OB_SUCCESS, serialization::decode(wire.data(), wire.size(), cursor, version));
+  const int64_t outer_length_pos = cursor;
+  ASSERT_EQ(OB_SUCCESS, serialization::decode(wire.data(), wire.size(), cursor, payload_length));
+  // The remaining legacy scalar envelope is metadata, zero marker, body size.
+  const unsigned char marker[] = {25, 7, 0, 100, 0};
+  int64_t body_length_pos = -1;
+  for (int64_t i = cursor; i + sizeof(marker) < wire.size(); ++i) {
+    if (memcmp(wire.data() + i, marker, sizeof(marker)) == 0) { ASSERT_EQ(-1, body_length_pos); body_length_pos = i + sizeof(marker); }
+  }
+  ASSERT_GE(body_length_pos, 0); cursor = body_length_pos; int64_t body_length = 0;
+  ASSERT_EQ(OB_SUCCESS, serialization::decode(wire.data(), wire.size(), cursor, body_length));
+  ASSERT_EQ(serialization::encoded_length(body_length), serialization::encoded_length(body_length + 1));
+  wire.insert(wire.begin() + cursor + body_length, '\x55');
+  cursor = body_length_pos;
+  ASSERT_EQ(OB_SUCCESS, serialization::encode(wire.data(), wire.size(), cursor, body_length + 1));
+  cursor = outer_length_pos;
+  ASSERT_EQ(OB_SUCCESS, serialization::encode_fixed_bytes_i64(wire.data(), wire.size(), cursor, payload_length + 1));
+  pos = 0; EXPECT_EQ(OB_DESERIALIZE_ERROR, output.deserialize(wire.data(), wire.size(), pos));
+}
+
+TEST(DatumParameterConstraints, scalar_array_boundary_preserves_full_metadata_and_runtime_flags)
+{
+  ObArenaAllocator arena; auto *array = DatumParameterArray::alloc(arena, 0); ASSERT_NE(nullptr, array);
+  DatumParameter source; ObObjMeta meta; meta.set_ext(); meta.set_extend_type(T_EXT_SQL_ARRAY); meta.set_cs_level(0xa7);
+  source.set_type_meta(meta); source.set_param_meta(meta); source.set_raw_text_info(17, 19);
+  source.set_result_flags(0x1234); source.get_param_flag().flag_ = 0xa5;
+  ASSERT_EQ(OB_SUCCESS, source.alloc_datum_reserved_buff(meta, -1, arena)); source.set_array_address(array);
+  ObObjParam output; ASSERT_EQ(OB_SUCCESS, materialize_legacy_parameter(source, output));
+  EXPECT_EQ(0, memcmp(&meta, &output.get_meta(), sizeof(meta))); EXPECT_EQ(meta, output.get_param_meta());
+  EXPECT_EQ(reinterpret_cast<int64_t>(array), output.get_ext()); EXPECT_EQ(0x1234, output.get_result_flag());
+  EXPECT_EQ(0xa5, output.get_param_flag().flag_); EXPECT_EQ(17, output.get_raw_text_pos()); EXPECT_EQ(19, output.get_raw_text_len());
 }
 
 int main(int argc, char **argv)

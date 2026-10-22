@@ -167,11 +167,33 @@ template <typename Archive> void parameter(ParameterView<Archive> &, Archive &, 
 template <typename Archive>
 void array_body(const DatumParameterArray &array, Archive &archive, int depth)
 {
+  if (depth > MAX_ARRAY_DEPTH) { archive.ret_ = OB_SIZE_OVERFLOW; }
+  if (array.count_ < 0 || (array.count_ > 0 && array.data_ == nullptr)) { archive.ret_ = OB_INVALID_ARGUMENT; }
   archive.field(array.element_);
   archive.field(array.count_);
   for (int64_t i = 0; archive.ret_ == OB_SUCCESS && i < array.count_; ++i) {
     parameter(array.data_[i], archive, depth + 1);
   }
+}
+
+void read_array_body(ReadArchive &archive, DatumParameterArray *&output, int depth)
+{
+  if (depth > MAX_ARRAY_DEPTH) { archive.ret_ = OB_SIZE_OVERFLOW; }
+  ObDataType element;
+  int64_t count = 0;
+  archive.field(element); archive.field(count);
+  if (archive.ret_ == OB_SUCCESS && (count < 0 || count > (archive.length_ - archive.pos_) / 6)) {
+    archive.ret_ = OB_DESERIALIZE_ERROR;
+  }
+  DatumParameterArray *array = nullptr;
+  if (archive.ret_ == OB_SUCCESS && (array = DatumParameterArray::alloc(archive.allocator_, count)) == nullptr) {
+    archive.ret_ = OB_ALLOCATE_MEMORY_FAILED;
+  }
+  if (archive.ret_ == OB_SUCCESS) { array->element_ = element; }
+  for (int64_t i = 0; archive.ret_ == OB_SUCCESS && i < count; ++i) {
+    parameter(array->data_[i], archive, depth + 1);
+  }
+  if (archive.ret_ == OB_SUCCESS) { output = array; }
 }
 
 template <typename Archive, typename Wire, auto Getter, auto Setter>
@@ -320,22 +342,8 @@ void value(ObDatum &datum, ObObjMeta &meta, Archive &archive, int depth)
             const int64_t end = archive.pos_ + length;
             const int64_t parent_end = archive.length_;
             archive.length_ = end;
-            ObDataType element;
-            int64_t count = 0;
-            archive.field(element); archive.field(count);
-            // Every parameter has at least four metadata bytes and two scalar fields.
-            if (archive.ret_ == OB_SUCCESS && (count < 0 || count > (end - archive.pos_) / 6)) {
-              archive.ret_ = OB_DESERIALIZE_ERROR;
-            }
             DatumParameterArray *array = nullptr;
-            if (archive.ret_ == OB_SUCCESS &&
-                (array = DatumParameterArray::alloc(archive.allocator_, count)) == nullptr) {
-              archive.ret_ = OB_ALLOCATE_MEMORY_FAILED;
-            }
-            if (archive.ret_ == OB_SUCCESS) { array->element_ = element; }
-            for (int64_t i = 0; archive.ret_ == OB_SUCCESS && i < count; ++i) {
-              parameter(array->data_[i], archive, depth + 1);
-            }
+            read_array_body(archive, array, depth);
             if (archive.ret_ == OB_SUCCESS && archive.pos_ != end) { archive.ret_ = OB_DESERIALIZE_ERROR; }
             archive.length_ = parent_end;
             archive.allocate(datum, sizeof(int64_t));
@@ -429,6 +437,47 @@ int64_t DatumParamStore::get_serialize_size() const
     COMMON_LOG(WARN, "native parameter store has no supported wire size", K(ret));
   }
   return size;
+}
+
+int DatumParameterArray::serialize(char *buf, int64_t length, int64_t &pos) const
+{
+  return DatumParameterCodec::encode_array(*this, buf, length, pos);
+}
+
+int64_t DatumParameterArray::get_serialize_size() const
+{
+  int64_t size = 0;
+  const int ret = DatumParameterCodec::array_size(*this, size);
+  if (ret != OB_SUCCESS) { COMMON_LOG(WARN, "native parameter array has no supported wire size", K(ret)); }
+  return size;
+}
+
+int DatumParameterCodec::array_size(const DatumParameterArray &array, int64_t &size)
+{
+  SizeArchive archive;
+  array_body(array, archive, 0);
+  if (archive.ret_ == OB_SUCCESS) { size = archive.pos_; }
+  return archive.ret_;
+}
+
+int DatumParameterCodec::encode_array(const DatumParameterArray &array, char *buf, int64_t length, int64_t &pos)
+{
+  if (!valid_buffer(buf, length, pos)) { return OB_INVALID_ARGUMENT; }
+  WriteArchive archive(buf, length, pos);
+  array_body(array, archive, 0);
+  if (archive.ret_ == OB_SUCCESS) { pos = archive.pos_; }
+  return archive.ret_;
+}
+
+int DatumParameterCodec::decode_array(const char *buf, int64_t length, int64_t &pos,
+                                     ObIAllocator &allocator, DatumParameterArray *&array)
+{
+  if (!valid_buffer(buf, length, pos)) { return OB_INVALID_ARGUMENT; }
+  ReadArchive archive(buf, length, pos, allocator);
+  DatumParameterArray *decoded = nullptr;
+  read_array_body(archive, decoded, 0);
+  if (archive.ret_ == OB_SUCCESS) { array = decoded; pos = archive.pos_; }
+  return archive.ret_;
 }
 
 int DatumParameterCodec::store_size(const DatumParamStore &store, int64_t &size)

@@ -627,10 +627,10 @@ int ObPlanCacheValue::resolve_insert_multi_values_param(ObPlanCacheCtx &pc_ctx,
       }
       // set type and external type
       for (int64_t j = 0; OB_SUCC(ret) && j < params_num; j++) {
-        ObSqlArrayObj *array_params = nullptr;
+        DatumParameterArray *array_params = nullptr;
         if (OB_UNLIKELY(!param_store.at(j).is_ext_sql_array())) {
           ret = OB_ERR_UNEXPECTED;
-        } else if (OB_ISNULL(array_params = reinterpret_cast<ObSqlArrayObj*>(param_store.at(j).get_ext()))) {
+        } else if (OB_ISNULL(array_params = reinterpret_cast<DatumParameterArray*>(param_store.at(j).get_ext()))) {
           ret = OB_ERR_UNEXPECTED;
         } else {
           array_params->element_.set_meta_type(temp_obj_params.at(j).get_meta());
@@ -641,15 +641,15 @@ int ObPlanCacheValue::resolve_insert_multi_values_param(ObPlanCacheCtx &pc_ctx,
 
     // copy data
     for (int64_t j = 0; OB_SUCC(ret) && j < params_num; j++) {
-      ObSqlArrayObj *array_params = nullptr;
+      DatumParameterArray *array_params = nullptr;
       if (OB_UNLIKELY(!param_store.at(j).is_ext_sql_array())) {
         ret = OB_ERR_UNEXPECTED;
       } else if (OB_ISNULL(array_params =
-          reinterpret_cast<ObSqlArrayObj*>(param_store.at(j).get_ext()))
+          reinterpret_cast<DatumParameterArray*>(param_store.at(j).get_ext()))
           || OB_ISNULL(array_params->data_)) {
         ret = OB_ERR_UNEXPECTED;
       } else {
-        array_params->data_[i] = temp_obj_params.at(j);
+        ret = copy_legacy_parameter(temp_obj_params.at(j), array_params->data_[i], pc_ctx.allocator_);
       }
     } // end copy
   }
@@ -687,10 +687,10 @@ int ObPlanCacheValue::check_multi_stmt_param_type(ObPlanCacheCtx &pc_ctx,
       ret = first_obj_params.assign(temp_obj_params);
       // set type and external type
       for (int64_t j = 0; OB_SUCC(ret) && j < param_num; j++) {
-        ObSqlArrayObj *array_params = nullptr;
+        DatumParameterArray *array_params = nullptr;
         if (OB_UNLIKELY(!param_store.at(j).is_ext_sql_array())) {
           ret = OB_ERR_UNEXPECTED;
-        } else if (OB_ISNULL(array_params = reinterpret_cast<ObSqlArrayObj*>(param_store.at(j).get_ext()))) {
+        } else if (OB_ISNULL(array_params = reinterpret_cast<DatumParameterArray*>(param_store.at(j).get_ext()))) {
           ret = OB_ERR_UNEXPECTED;
         } else {
           array_params->element_.set_meta_type(temp_obj_params.at(j).get_meta());
@@ -700,15 +700,15 @@ int ObPlanCacheValue::check_multi_stmt_param_type(ObPlanCacheCtx &pc_ctx,
     }
     // copy data
     for (int64_t j = 0; OB_SUCC(ret) && j < param_num; j++) {
-      ObSqlArrayObj *array_params = nullptr;
+      DatumParameterArray *array_params = nullptr;
       if (OB_UNLIKELY(!param_store.at(j).is_ext_sql_array())) {
         ret = OB_ERR_UNEXPECTED;
       } else if (OB_ISNULL(array_params =
-          reinterpret_cast<ObSqlArrayObj*>(param_store.at(j).get_ext()))
+          reinterpret_cast<DatumParameterArray*>(param_store.at(j).get_ext()))
           || OB_ISNULL(array_params->data_)) {
         ret = OB_ERR_UNEXPECTED;
       } else {
-        array_params->data_[i] = temp_obj_params.at(j);
+        ret = copy_legacy_parameter(temp_obj_params.at(j), array_params->data_[i], pc_ctx.allocator_);
       }
     }
   }
@@ -813,16 +813,19 @@ int ObPlanCacheValue::get_one_group_params(int64_t pos, const ParamStore &src_pa
   }
   for (int64_t i = 0; OB_SUCC(ret) && i < N; ++i) {
     const ObObjParam &objparam = src_params.at(i);
-    const ObSqlArrayObj *array_obj = NULL;
+    const DatumParameterArray *array_obj = NULL;
     if (OB_UNLIKELY(!objparam.is_ext_sql_array())) {
       if (OB_FAIL(dst_params.push_back(objparam))) {
       }
-    } else if (OB_ISNULL(array_obj = reinterpret_cast<const ObSqlArrayObj*>(objparam.get_ext()))) {
+    } else if (OB_ISNULL(array_obj = reinterpret_cast<const DatumParameterArray*>(objparam.get_ext()))) {
       ret = OB_ERR_UNEXPECTED;
     } else if (array_obj->count_ <= pos) {
       ret = OB_ERR_UNEXPECTED;
-    } else if (OB_FAIL(dst_params.push_back(array_obj->data_[pos]))) {
     } else {
+      ObObjParam value;
+      if (OB_FAIL(materialize_legacy_parameter(array_obj->data_[pos], value))) {
+      } else if (OB_FAIL(dst_params.push_back(value))) {
+      }
     }
   }
   return ret;

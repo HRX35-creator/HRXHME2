@@ -428,20 +428,22 @@ int ObValuesTableCompression::resolve_params_for_values_clause(ObPlanCacheCtx &p
       for (int64_t j = 0; OB_SUCC(ret) && j < param_num; j++, raw_idx++, array_param_idx++) {
         ObArrayPCParam *raw_array_param = pc_ctx.fp_result_.array_params_.at(array_param_idx);
         ObSEArray<ObExprResType, 4> res_types;
-        ObSqlArrayObj *array_param_ptr = ObSqlArrayObj::alloc(pc_ctx.allocator_, batch_num);
+        DatumParameterArray *array_param_ptr = DatumParameterArray::alloc(pc_ctx.allocator_, batch_num);
         bool is_same = true;
         ObExprResType new_res_type;
         if (OB_ISNULL(array_param_ptr) || OB_ISNULL(raw_array_param)) {
           ret = OB_ALLOCATE_MEMORY_FAILED;
         } else {
           for (int64_t k = 0; OB_SUCC(ret) && k < batch_num; k++) {
+            ObObjParam resolved;
             if (OB_FAIL(ObResolverUtils::resolver_param(pc_ctx, *session, phy_param_store, stmt_type,
                         param_charset_type.at(raw_idx), neg_param_index, not_param_index,
                         must_be_positive_idx, formalize_prec_idx, raw_array_param->at(k), raw_idx,
-                        enable_mysql_compatible_dates, array_param_ptr->data_[k], is_param,
+                        enable_mysql_compatible_dates, resolved, is_param,
                         enable_decimal_int))) {
+            } else if (OB_FAIL(copy_legacy_parameter(resolved, array_param_ptr->data_[k], pc_ctx.allocator_))) {
             } else {
-              const ObObjParam &param = array_param_ptr->data_[k];
+              const ObObjParam &param = resolved;
               ObExprResType res_type;
               res_type.set_meta(ObSQLUtils::is_empty_string_typed_null(param) ? param.get_param_meta() : param.get_meta());
               res_type.set_accuracy(param.get_accuracy());
@@ -565,19 +567,21 @@ int ObValuesTableCompression::resolve_params_for_values_clause(ObPlanCacheCtx &p
       for (int64_t j = 0; OB_SUCC(ret) && j < param_num; j++, raw_idx++, array_param_idx++) {
         ObArrayPCParam *raw_array_param = pc_ctx.fp_result_.array_params_.at(array_param_idx);
         ObSEArray<ObExprResType, 4> res_types;
-        ObSqlArrayObj *array_param_ptr = ObSqlArrayObj::alloc(pc_ctx.allocator_, batch_num);
+        DatumParameterArray *array_param_ptr = DatumParameterArray::alloc(pc_ctx.allocator_, batch_num);
         bool is_same = true;
         ObExprResType new_res_type;
         if (OB_ISNULL(array_param_ptr) || OB_ISNULL(raw_array_param)) {
           ret = OB_ALLOCATE_MEMORY_FAILED;
         } else {
           for (int64_t k = 0; OB_SUCC(ret) && k < batch_num; k++) {
+            ObObjParam resolved;
             if (OB_FAIL(ObResolverUtils::resolver_param(pc_ctx, *session, phy_param_store, stmt::T_SELECT,
                         param_charset_type.at(raw_idx), bit_set_dummy, bit_set_dummy,
                         bit_set_dummy, bit_set_dummy, raw_array_param->at(k), raw_idx, enable_mysql_compatible_dates,
-                        array_param_ptr->data_[k], is_param, enable_decimal_int))) {
+                        resolved, is_param, enable_decimal_int))) {
+            } else if (OB_FAIL(copy_legacy_parameter(resolved, array_param_ptr->data_[k], pc_ctx.allocator_))) {
             } else {
-              const ObObjParam &param = array_param_ptr->data_[k];
+              const ObObjParam &param = resolved;
               ObExprResType res_type;
               res_type.set_meta(ObSQLUtils::is_empty_string_typed_null(param) ? param.get_param_meta() : param.get_meta());
               res_type.set_accuracy(param.get_accuracy());

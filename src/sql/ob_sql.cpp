@@ -1650,10 +1650,10 @@ int ObSql::init_execute_params_for_ab(ObIAllocator &allocator,
     for (int64_t i = 0; OB_SUCC(ret) && i < first_group_params->count(); i++) {
       ObObjParam &obj_param = first_group_params->at(i);
       const ObObjParam &src_param = params_store.at(i);
-      const ObSqlArrayObj *array_obj = NULL;
+      const DatumParameterArray *array_obj = NULL;
       if (OB_UNLIKELY(!src_param.is_ext_sql_array())) {
         // do not need set accuracy
-      } else if (OB_ISNULL(array_obj = reinterpret_cast<const ObSqlArrayObj*>(src_param.get_ext()))) {
+      } else if (OB_ISNULL(array_obj = reinterpret_cast<const DatumParameterArray*>(src_param.get_ext()))) {
         ret = OB_ERR_UNEXPECTED;
       } else {
         obj_param.set_accuracy(array_obj->element_.get_accuracy());

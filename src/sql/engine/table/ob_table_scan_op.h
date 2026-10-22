@@ -110,7 +110,7 @@ struct GroupRescanParamInfo
       gr_param_(nullptr),
       cur_param_()
   { }
-  GroupRescanParamInfo(int64_t param_idx, ObSqlArrayObj *gr_param)
+  GroupRescanParamInfo(int64_t param_idx, DatumParameterArray *gr_param)
   : param_idx_(param_idx),
     gr_param_(gr_param)
   { }
@@ -118,7 +118,7 @@ struct GroupRescanParamInfo
                KPC_(gr_param),
                K_(cur_param));
   int64_t param_idx_;
-  ObSqlArrayObj *gr_param_; //group rescan param
+  DatumParameterArray *gr_param_; //group rescan param
   common::ObObjParam cur_param_; //current param in param store, used to restore paramstore state after the completion of group rescan.
 };
 typedef common::ObFixedArray<GroupRescanParamInfo, common::ObIAllocator> GroupRescanParamArray;
@@ -657,17 +657,22 @@ protected:
       range_buffer_idx_ = tsc_rtdef_.range_buffer_idx_;
     }
 
-    void switch_group_rescan_param(int64_t group_idx)
+    int switch_group_rescan_param(int64_t group_idx)
     {
+      int ret = common::OB_SUCCESS;
       //replace real param to param store to execute group rescan in TSC
-      for (int64_t i = 0; i < tsc_rtdef_.bnlj_params_.count(); ++i) {
-        ObSqlArrayObj *array_obj = tsc_rtdef_.bnlj_params_.at(i).gr_param_;
+      for (int64_t i = 0; OB_SUCC(ret) && i < tsc_rtdef_.bnlj_params_.count(); ++i) {
+        DatumParameterArray *array_obj = tsc_rtdef_.bnlj_params_.at(i).gr_param_;
         int64_t param_idx = tsc_rtdef_.bnlj_params_.at(i).param_idx_;
         common::ObObjParam &dst_param = param_store_.at(param_idx);
-        dst_param = array_obj->data_[group_idx];
-        dst_param.set_param_meta();
+        if (array_obj == nullptr || group_idx < 0 || group_idx >= array_obj->count_) {
+          ret = common::OB_ERR_UNEXPECTED;
+        } else if (OB_SUCC(ret = materialize_legacy_parameter(array_obj->data_[group_idx], dst_param))) {
+          dst_param.set_param_meta();
+        }
       }
-      tsc_rtdef_.range_buffer_idx_ = group_idx;
+      if (OB_SUCC(ret)) { tsc_rtdef_.range_buffer_idx_ = group_idx; }
+      return ret;
     }
 
     ~GroupRescanParamGuard()

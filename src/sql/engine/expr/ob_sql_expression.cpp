@@ -339,7 +339,7 @@ int ObSqlExpressionUtil::make_expr(ObPhysicalPlan *physical_plan, T  *&expr)
 
 int ObSqlExpressionUtil::expand_array_params(ObExprCtx &expr_ctx,
                                              const ObObj &src_param,
-                                             const ObObj *&result)
+                                             ObObj &result)
 {
   int ret = OB_SUCCESS;
   if (src_param.is_ext()) {
@@ -347,11 +347,11 @@ int ObSqlExpressionUtil::expand_array_params(ObExprCtx &expr_ctx,
     CK (expr_ctx.exec_ctx_);
     CK (expr_ctx.exec_ctx_->get_sql_ctx());
     if (expr_ctx.exec_ctx_->get_sql_ctx()->multi_stmt_item_.is_batched_multi_stmt()) {
-      const ObObjParam *array_data = NULL;
-      const ObSqlArrayObj *array_params = nullptr;
+      const DatumParameter *array_data = NULL;
+      const DatumParameterArray *array_params = nullptr;
       if (OB_UNLIKELY(!src_param.is_ext_sql_array())) {
         ret = OB_ERR_UNEXPECTED;
-      } else if (OB_ISNULL(array_params = reinterpret_cast<ObSqlArrayObj*>(src_param.get_ext()))) {
+      } else if (OB_ISNULL(array_params = reinterpret_cast<DatumParameterArray*>(src_param.get_ext()))) {
         ret = OB_ERR_UNEXPECTED;
       } else if (OB_UNLIKELY(array_params->count_ <= expr_ctx.cur_array_index_)) {
         if (expr_ctx.is_pre_calculation_) {
@@ -363,13 +363,13 @@ int ObSqlExpressionUtil::expand_array_params(ObExprCtx &expr_ctx,
       } else if (OB_ISNULL(array_data = array_params->data_)) {
         ret = OB_ERR_UNEXPECTED;
       } else {
-        result = &array_data[expr_ctx.cur_array_index_];
+        ret = array_data[expr_ctx.cur_array_index_].datum_.to_obj(result, array_data[expr_ctx.cur_array_index_].get_type_meta());
       }
     } else {
-      result = &src_param;
+      result = src_param;
     }
   } else {
-    result = &src_param;
+    result = src_param;
   }
   return ret;
 }

@@ -1334,13 +1334,13 @@ int ObSubPlanFilterOp::alloc_das_batch_params(uint64_t group_size)
     ret = das_batch_params_.allocate_array(ctx_.get_allocator(),
                                            MY_SPEC.rescan_params_.count());
     if(OB_SUCC(ret)) {
-      uint64_t obj_buf_size = sizeof(ObObjParam) * group_size;
+      uint64_t obj_buf_size = sizeof(DatumParameter) * group_size;
       for (int64_t i = 0; OB_SUCC(ret) && i < das_batch_params_.count(); ++i) {
         void *buf = ctx_.get_allocator().alloc(obj_buf_size);
         if (NULL == buf) {
           ret = OB_ALLOCATE_MEMORY_FAILED;
         } else {
-          das_batch_params_.at(i).data_ = reinterpret_cast<ObObjParam*>(buf);
+          das_batch_params_.at(i).data_ = new(buf) DatumParameter[group_size];
           das_batch_params_.at(i).count_ = 0;
           ObExpr *dst_expr = MY_SPEC.rescan_params_.at(i).dst_;
           das_batch_params_.at(i).element_.set_meta_type(dst_expr->obj_meta_);
@@ -1385,9 +1385,9 @@ int ObSubPlanFilterOp::deep_copy_dynamic_obj()
     if (OB_FAIL(rescan_param.set_dynamic_param(eval_ctx_, param))) {
     } else if (OB_ISNULL(param)) {
       ret = OB_ERR_UNEXPECTED;
-    } else if (OB_FAIL(ob_write_obj(last_store_row_mem_->get_arena_allocator(),
-                                    *param,
-                                    das_batch_params_.at(i).data_[das_batch_params_.at(i).count_]))) {
+    } else if (OB_FAIL(copy_legacy_parameter(*param,
+                                    das_batch_params_.at(i).data_[das_batch_params_.at(i).count_],
+                                    last_store_row_mem_->get_arena_allocator()))) {
     } else {
       ++das_batch_params_.at(i).count_;
     }
@@ -1411,12 +1411,13 @@ int ObSubPlanFilterOp::fill_cur_row_das_batch_param(ObEvalCtx& eval_ctx, uint64_
       int64_t param_idx = rescan_param.param_idx_;
       ObExpr *dst = rescan_param.dst_;
       ObDatum &param_datum = dst->locate_datum_for_write(eval_ctx);
-      const ObSqlArrayObj &arr = das_batch_params_.at(i);
+      const DatumParameterArray &arr = das_batch_params_.at(i);
       dst->get_eval_info(eval_ctx).clear_evaluated_flag();
       ObDynamicParamSetter::clear_parent_evaluated_flag(eval_ctx, *dst);
-      if (OB_FAIL(param_datum.from_obj(arr.data_[current_group], dst->obj_datum_map_))) {
+      if (OB_FAIL(materialize_legacy_parameter(arr.data_[current_group], plan_ctx->get_param_store_for_update().at(param_idx)))) {
+      } else if (dst->res_buf_off_ != 0 && OB_FAIL(dst->deep_copy_datum(eval_ctx, arr.data_[current_group].datum_))) {
       } else {
-        plan_ctx->get_param_store_for_update().at(param_idx) = arr.data_[current_group];
+        if (dst->res_buf_off_ == 0) { param_datum = arr.data_[current_group].datum_; }
         dst->set_evaluated_projected(eval_ctx);
       }
     }

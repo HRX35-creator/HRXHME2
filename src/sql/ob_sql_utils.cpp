@@ -55,12 +55,12 @@ ObSqlArrayExpandGuard::ObSqlArrayExpandGuard(ParamStore &params, ObIAllocator &a
     if (params.at(i).is_ext_sql_array()) {
       int64_t param_addr = 0;
       param_addr = params.at(i).get_ext();
-      const ObSqlArrayObj *array_param = reinterpret_cast<const ObSqlArrayObj*>(param_addr);
+      const DatumParameterArray *array_param = reinterpret_cast<const DatumParameterArray*>(param_addr);
       if (array_param->count_ > 0) {
         ArrayObjPair array_pair(&params.at(i), params.at(i));
         if (OB_FAIL(array_obj_list_.push_back(array_pair))) {
         } else {
-          params.at(i) = array_param->data_[0];
+          ret = materialize_legacy_parameter(array_param->data_[0], params.at(i));
         }
       }
     }
@@ -2465,7 +2465,7 @@ int ObSQLUtils::get_ext_obj_data_type(const ObObjParam &obj, ObDataType &data_ty
 {
   int ret = OB_SUCCESS;
   if (obj.is_ext_sql_array()) {
-    const ObSqlArrayObj *array_params = reinterpret_cast<const ObSqlArrayObj*>(obj.get_ext());
+    const DatumParameterArray *array_params = reinterpret_cast<const DatumParameterArray*>(obj.get_ext());
     if (OB_ISNULL(array_params)) {
       ret = OB_ERR_UNEXPECTED;
     } else {
@@ -3511,20 +3511,13 @@ int ObSQLUtils::create_multi_stmt_param_store(common::ObIAllocator &allocator,
   int ret = OB_SUCCESS;
   if (OB_FAIL(param_store.reserve(param_num))) {
   } else {
-    void *ptr = NULL;
-    void *data_ptr = NULL;
-    ObSqlArrayObj *array_params = NULL;
+    DatumParameterArray *array_params = NULL;
     ObObjParam param;
     for (int64_t i = 0; OB_SUCC(ret) && i < param_num; i++) {
       param.reset();
-      if (OB_ISNULL(ptr = allocator.alloc(sizeof(ObSqlArrayObj)))) {
-        ret = OB_ALLOCATE_MEMORY_FAILED;
-      } else if (OB_ISNULL(data_ptr = allocator.alloc(sizeof(ObObjParam) * query_num))) {
+      if (OB_ISNULL(array_params = DatumParameterArray::alloc(allocator, query_num))) {
         ret = OB_ALLOCATE_MEMORY_FAILED;
       } else {
-        array_params = new(ptr) ObSqlArrayObj();
-        array_params->count_ = query_num;
-        array_params->data_ = new(data_ptr) ObObjParam[query_num];
         param.set_extend(reinterpret_cast<int64_t>(array_params), T_EXT_SQL_ARRAY);
         param.set_param_meta();
         if (OB_FAIL(param_store.push_back(param))) {

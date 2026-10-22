@@ -923,13 +923,14 @@ int ObTableScanOp::prepare_all_das_tasks()
       GroupRescanParamGuard grp_guard(tsc_rtdef_, GET_PHY_PLAN_CTX(ctx_)->get_param_store_for_update());
       for (int64_t i = 0; OB_SUCC(ret) && i < group_size; ++i) {
         if (need_perform_real_batch_rescan()) {
-          grp_guard.switch_group_rescan_param(i);
+          ret = grp_guard.switch_group_rescan_param(i);
         }
 
         // When using batch rescan, the actual scan order of storage must be KEEP_ORDER，thus the original ordering
         // may be disrupted when dealing with multiple range segments.
         // Therefore we need to sort the scan ranges when upper operator used the tsc ordering.
-        if (MY_CTDEF.use_index_merge_ && OB_FAIL(prepare_index_merge_scan_range(i, need_sort))) {
+        if (OB_FAIL(ret)) {
+        } else if (MY_CTDEF.use_index_merge_ && OB_FAIL(prepare_index_merge_scan_range(i, need_sort))) {
         } else if (!MY_CTDEF.use_index_merge_ && OB_FAIL(prepare_single_scan_range(i, need_sort))) {
         } else if (OB_FAIL(prepare_das_task())) {
         } else {
@@ -1208,13 +1209,13 @@ int ObTableScanOp::prepare_batch_scan_range()
   GroupRescanParamGuard grp_guard(tsc_rtdef_, GET_PHY_PLAN_CTX(ctx_)->get_param_store_for_update());
   for (int64_t i = 0; OB_SUCC(ret) && i < tsc_rtdef_.group_size_; ++i) {
     //replace real param to param store to extract scan range
-    grp_guard.switch_group_rescan_param(i);
+    ret = grp_guard.switch_group_rescan_param(i);
     LOG_DEBUG("replace bnlj param to extract range", K(plan_ctx->get_param_store()));
 
     // When using batch rescan, the actual scan order of storage must be KEEP_ORDER，thus the original ordering
     // may be disrupted when dealing with multiple range segments.
     // Therefore we need to sort the scan ranges when upper operator used the tsc ordering.
-    if (OB_FAIL(prepare_single_scan_range(i, need_sort))) {
+    if (OB_SUCC(ret) && OB_FAIL(prepare_single_scan_range(i, need_sort))) {
     }
   }
   return ret;

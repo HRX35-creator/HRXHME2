@@ -68,13 +68,14 @@ int ObFastColumnConvExpr::calc(ObExprCtx &expr_ctx, const ObNewRow &row, ObObj &
   } else {
     bool is_strict = is_strict_mode(expr_ctx.my_session_->get_sql_mode());
     const ObObj *value = NULL;
+    ObObj expanded;
     const ObString *column_info = NULL;
     if (has_column_info()) {
       column_info = &column_info_;
     }
     if (OB_FAIL(value_item_.get_item_value_directly(*expr_ctx.phy_plan_ctx_, row, value))) {
-    } else if (OB_FAIL(ObSqlExpressionUtil::expand_array_params(expr_ctx, *value, value))) {
-    } else if (OB_FAIL(ObExprColumnConv::convert_skip_null_check(result, *value, column_type_,
+    } else if (OB_FAIL(ObSqlExpressionUtil::expand_array_params(expr_ctx, *value, expanded))) {
+    } else if (OB_FAIL(ObExprColumnConv::convert_skip_null_check(result, expanded, column_type_,
                                          is_strict, expr_ctx.column_conv_ctx_,
                                          &str_values_, column_info))) {
     }

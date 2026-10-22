@@ -1882,8 +1882,8 @@ int ObObj::get_real_param_count(int64_t &count) const
   int ret = OB_SUCCESS;
   count = 1;
   if (ObExtendType == meta_.get_type()) {
-    const ObSqlArrayObj *array_obj = NULL;
-    if (OB_ISNULL(array_obj = reinterpret_cast<const ObSqlArrayObj*>(v_.ext_))) {
+    const DatumParameterArray *array_obj = NULL;
+    if (OB_ISNULL(array_obj = reinterpret_cast<const DatumParameterArray*>(v_.ext_))) {
       ret = OB_ERR_UNEXPECTED;
     } else if (array_obj->count_ < 0) {
       ret = OB_ERR_UNEXPECTED;
@@ -2102,57 +2102,6 @@ int64_t ObHexEscapeSqlStr::get_extra_length() const
   return ret_length;
 }
 
-int ObSqlArrayObj::do_real_deserialize(common::ObIAllocator &allocator, char *buf, int64_t data_len,
-                                       ObSqlArrayObj *&array_obj)
-{
-  int ret = OB_SUCCESS;
-  int64_t n = sizeof(ObSqlArrayObj);
-  void *array_buf = allocator.alloc(n);
-  int64_t pos = 0;
-  if (OB_ISNULL(array_buf)) {
-    ret = OB_ALLOCATE_MEMORY_FAILED;
-  } else {
-    array_obj = new (array_buf) ObSqlArrayObj();
-    if (OB_FAIL(array_obj->deserialize(allocator, buf, data_len, pos))) {
-    }
-  }
-  return ret;
-}
-
-DEFINE_SERIALIZE(ObSqlArrayObj)
-{
-  int ret = OB_SUCCESS;
-  int64_t len = 0;
-  OB_UNIS_ENCODE(element_);
-  OB_UNIS_ENCODE_ARRAY(data_, count_);
-  return ret;
-}
-
-int ObSqlArrayObj::deserialize(ObIAllocator &allocator, const char* buf, const int64_t data_len,
-                               int64_t& pos)
-{
-  int ret = OB_SUCCESS;
-  OB_UNIS_DECODE(element_);
-  OB_UNIS_DECODE(count_);
-  if (OB_SUCC(ret) && count_ > 0) {
-    void *data_buf = allocator.alloc(sizeof(ObObjParam) * count_);
-    if (OB_ISNULL(data_buf)) {
-      ret = OB_ALLOCATE_MEMORY_FAILED;
-    } else {
-      data_ = new (data_buf) common::ObObjParam[count_];
-      OB_UNIS_DECODE_ARRAY(data_, count_);
-    }
-  }
-  return ret;
-}
-
-DEFINE_GET_SERIALIZE_SIZE(ObSqlArrayObj)
-{
-  int64_t len = 0;
-  OB_UNIS_ADD_LEN(element_);
-  OB_UNIS_ADD_LEN_ARRAY(data_, count_);
-  return len;
-}
 int ObObjUDTUtil::ob_udt_obj_value_serialize(const ObObj &obj, char* buf, const int64_t buf_len, int64_t& pos)
 {
   int ret = OB_SUCCESS;

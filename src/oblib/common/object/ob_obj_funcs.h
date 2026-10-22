@@ -2006,7 +2006,7 @@ inline int obj_val_serialize<ObExtendType>(const ObObj &obj, char* buf, const in
   } else if (obj.is_ext_sql_array()) {
     int64_t v = 0;
     OB_UNIS_ENCODE(v);
-    const ObSqlArrayObj *array_obj = reinterpret_cast<const ObSqlArrayObj*>(obj.get_ext());
+    const DatumParameterArray *array_obj = reinterpret_cast<const DatumParameterArray*>(obj.get_ext());
     if (OB_SUCC(ret) && NULL != array_obj) {
       int64_t len = array_obj->get_serialize_size();
       int64_t tmp_pos = pos;
@@ -2042,7 +2042,7 @@ inline int obj_val_deserialize<ObExtendType>(ObObj &obj, const char* buf, const 
         int64_t tmp_pos = pos;
         OB_UNIS_DECODE(len);
         /* record the buffer and delay it's deserialize.
-         * should call ObSqlArrayObj::do_real_deserialize which need an allocator
+         * the execution context decodes a DatumParameterArray with its arena
          */
         obj.set_extend(reinterpret_cast<int64_t>(buf + pos), T_EXT_SQL_ARRAY, int32_t(len));
         pos += len;
@@ -2069,7 +2069,7 @@ inline int64_t obj_val_get_serialize_size<ObExtendType>(const ObObj &obj)
   } else if (obj.is_ext_sql_array()) {
     int64_t v = 0;
     OB_UNIS_ADD_LEN(v);
-    const ObSqlArrayObj *array_obj = reinterpret_cast<const ObSqlArrayObj*>(obj.get_ext());
+    const DatumParameterArray *array_obj = reinterpret_cast<const DatumParameterArray*>(obj.get_ext());
     if (NULL != array_obj) {
       int64_t array_obj_len = array_obj->get_serialize_size();
       OB_UNIS_ADD_LEN(array_obj_len);

@@ -349,4 +349,71 @@ TEST(DatumCodec, native_store_generic_decoder_failure_and_missing_allocator) {
   EXPECT_NE(OB_SUCCESS, destination.deserialize(bytes.data(), bytes.size() - 1, pos)); EXPECT_EQ(0, pos); EXPECT_TRUE(destination.empty());
 }
 
+TEST(DatumCodec, array_body_entry_points_keep_captured_old_wire_and_reject_all_prefixes)
+{
+  std::ifstream input("unittest/oblib/data/datum_parameter_codec.golden"); ASSERT_TRUE(input.good());
+  std::string line; int arrays = 0;
+  while (std::getline(input, line)) {
+    if (line.rfind("array-", 0) != 0) { continue; }
+    std::istringstream record(line); std::string label, encoded;
+    std::getline(record, label, '\t'); std::getline(record, encoded, '\t');
+    SCOPED_TRACE(label); std::string wire = unhex(encoded);
+    int64_t cursor = 4, zero = -1, length = -1;
+    ASSERT_EQ(OB_SUCCESS, serialization::decode(wire.data(), wire.size(), cursor, zero)); ASSERT_EQ(0, zero);
+    ASSERT_EQ(OB_SUCCESS, serialization::decode(wire.data(), wire.size(), cursor, length)); ASSERT_EQ(wire.size() - cursor, length);
+    const std::string body = wire.substr(cursor);
+    ObArenaAllocator arena; DatumParameterArray *array = nullptr; int64_t pos = 0;
+    ASSERT_EQ(OB_SUCCESS, DatumParameterCodec::decode_array(body.data(), body.size(), pos, arena, array));
+    ASSERT_NE(nullptr, array); EXPECT_EQ(body.size(), pos); EXPECT_EQ(body.size(), array->get_serialize_size());
+    std::string repeated(body.size(), '\0'); pos = 0;
+    ASSERT_EQ(OB_SUCCESS, array->serialize(&repeated[0], repeated.size(), pos)); EXPECT_EQ(body, repeated);
+    for (int64_t prefix = 0; prefix < body.size(); ++prefix) {
+      ObArenaAllocator rejected; DatumParameterArray *output = array; pos = 0;
+      EXPECT_NE(OB_SUCCESS, DatumParameterCodec::decode_array(body.data(), prefix, pos, rejected, output));
+      EXPECT_EQ(0, pos); EXPECT_EQ(array, output);
+    }
+    RejectAllocator reject; DatumParameterArray *output = array; pos = 0;
+    EXPECT_EQ(OB_ALLOCATE_MEMORY_FAILED, DatumParameterCodec::decode_array(body.data(), body.size(), pos, reject, output));
+    EXPECT_EQ(0, pos); EXPECT_EQ(array, output); ++arrays;
+  }
+  EXPECT_EQ(4, arrays);
+}
+
+TEST(DatumCodec, clone_nested_arrays_owns_payload_and_preserves_runtime_metadata)
+{
+  ObArenaAllocator source_arena, output_arena;
+  DatumParameter source = make_array(source_arena, 1), child = make_array(source_arena, 1);
+  source.set_raw_text_info(17, 19); source.get_param_flag().extend_flag_ = 0x5a;
+  auto *inner = child.get_array<DatumParameterArray>();
+  char bytes[] = "owned bytes"; DatumParameter &text = inner->data_[0];
+  ObObjMeta type; type.set_varchar(); type.set_collation_type(CS_TYPE_UTF8MB4_BIN);
+  text.set_type_meta(type); text.set_param_meta(type); text.datum_.set_string(bytes, sizeof(bytes)-1);
+  text.set_length(37); text.set_result_flags(0x1234); text.set_raw_text_info(23, 29); text.get_param_flag().flag_ = 0xa5;
+  source.get_array<DatumParameterArray>()->data_[0] = child;
+  DatumParameter output;
+  ASSERT_EQ(OB_SUCCESS, DatumParameterArray::clone_parameter(source, output, output_arena));
+  EXPECT_NE(source.get_array<DatumParameterArray>(), output.get_array<DatumParameterArray>());
+  auto *owned = output.get_array<DatumParameterArray>()->data_[0].get_array<DatumParameterArray>();
+  ASSERT_NE(inner, owned); EXPECT_NE(bytes, owned->data_[0].datum_.ptr_);
+  memset(bytes, 'x', sizeof(bytes)); source_arena.reset();
+  EXPECT_EQ(ObString("owned bytes"), owned->data_[0].datum_.get_string());
+  EXPECT_EQ(type, owned->data_[0].get_type_meta()); EXPECT_EQ(type, owned->data_[0].get_param_meta());
+  EXPECT_EQ(37, owned->data_[0].get_length()); EXPECT_EQ(0x1234, owned->data_[0].get_result_flag());
+  EXPECT_EQ(23, owned->data_[0].get_raw_text_pos()); EXPECT_EQ(29, owned->data_[0].get_raw_text_len());
+  EXPECT_EQ(0xa5, owned->data_[0].get_param_flag().flag_); EXPECT_EQ(17, output.get_raw_text_pos());
+  EXPECT_EQ(0x5a, output.get_param_flag().extend_flag_);
+}
+
+TEST(DatumCodec, array_clone_bounds_cycles_and_allocation_errors_preserve_output)
+{
+  ObArenaAllocator arena; DatumParameter source = make_array(arena, 1), output = integer(arena, 99);
+  source.get_array<DatumParameterArray>()->data_[0] = source;
+  EXPECT_EQ(OB_SIZE_OVERFLOW, DatumParameterArray::clone_parameter(source, output, arena)); EXPECT_EQ(99, output.datum_.get_int());
+  RejectAllocator reject;
+  EXPECT_EQ(OB_ALLOCATE_MEMORY_FAILED, DatumParameterArray::clone_parameter(source, output, reject)); EXPECT_EQ(99, output.datum_.get_int());
+  DatumParameterArray invalid; invalid.count_ = -1; int64_t size = 123, pos = 0; char bytes[64];
+  EXPECT_EQ(OB_INVALID_ARGUMENT, DatumParameterCodec::array_size(invalid, size)); EXPECT_EQ(123, size);
+  EXPECT_EQ(OB_INVALID_ARGUMENT, invalid.serialize(bytes, sizeof(bytes), pos)); EXPECT_EQ(0, pos);
+}
+
 int main(int argc, char **argv) { ::testing::InitGoogleTest(&argc, argv); return RUN_ALL_TESTS(); }

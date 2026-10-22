@@ -760,6 +760,10 @@ int import_legacy_parameter(const common::ObObjParam &source,
                             DatumParameter &destination,
                             common::ObIAllocator *allocator);
 
+int copy_legacy_parameter(const common::ObObjParam &source, DatumParameter &destination,
+                          common::ObIAllocator &allocator);
+int materialize_legacy_parameter(const DatumParameter &source, common::ObObjParam &destination);
+
 using common::DatumParamStore;
 
 // Helper function for print datum which interpreted by expression

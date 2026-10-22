@@ -138,18 +138,18 @@ int ObValuesTableAccessOp::get_real_src_obj_type(const int64_t row_idx,
   if (T_QUESTIONMARK == src_expr.type_) {
     int64_t param_idx = src_expr.extra_;
     ObPhysicalPlanCtx *plan_ctx = GET_PHY_PLAN_CTX(ctx_);
-    const ObSqlArrayObj *array_obj = NULL;
+    const DatumParameterArray *array_obj = NULL;
     if (OB_UNLIKELY(param_idx < 0 || param_idx >= plan_ctx->get_param_store().count())) {
       ret = OB_INVALID_ARGUMENT;
     } else if (plan_ctx->get_param_store().at(param_idx).is_ext_sql_array()) {
       // If the parameter is is_ext_sql_array
-      if (OB_ISNULL(array_obj = reinterpret_cast<const ObSqlArrayObj*>(
+      if (OB_ISNULL(array_obj = reinterpret_cast<const DatumParameterArray*>(
                                             plan_ctx->get_param_store().at(param_idx).get_ext()))) {
         ret = OB_ERR_UNEXPECTED;
       } else if (array_obj->count_ <= row_idx) {
         ret = OB_ERR_UNEXPECTED;
       } else {
-        src_obj_meta = array_obj->data_[row_idx].meta_;
+        src_obj_meta = array_obj->data_[row_idx].get_type_meta();
         const ObAccuracy &src_obj_acc = array_obj->data_[row_idx].get_accuracy();
         update_src_meta(src_obj_meta, src_obj_acc, src_meta);
       }

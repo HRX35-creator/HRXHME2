@@ -1163,11 +1163,12 @@ int ObPhysicalPlanCtx::init_param_store_after_deserialize()
     ObObjParam &obj_param = param_store_.at(i);
     DatumParameter &datum_param = datum_param_store_.at(i);
     if (obj_param.is_ext_sql_array()) {
-      ObSqlArrayObj *array_obj = NULL;
-      if (OB_FAIL(ObSqlArrayObj::do_real_deserialize(allocator_,
-                                                     reinterpret_cast<char *>(obj_param.get_ext()),
-                                                     obj_param.get_val_len(),
-                                                     array_obj))) {
+      DatumParameterArray *array_obj = NULL;
+      int64_t array_pos = 0;
+      if (OB_FAIL(DatumParameterCodec::decode_array(reinterpret_cast<const char *>(obj_param.get_ext()),
+                                                     obj_param.get_val_len(), array_pos, allocator_, array_obj))) {
+      } else if (OB_UNLIKELY(array_pos != obj_param.get_val_len())) {
+        ret = OB_DESERIALIZE_ERROR;
       } else {
         obj_param.set_extend(reinterpret_cast<int64_t>(array_obj), T_EXT_SQL_ARRAY);
       }

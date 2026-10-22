@@ -246,12 +246,13 @@ int ObGroupJoinBufffer::fill_cur_row_group_param()
       int64_t param_idx = rescan_param.param_idx_;
       ObExpr *dst = rescan_param.dst_;
       ObDatum &param_datum = dst->locate_datum_for_write(*eval_ctx_);
-      ObSqlArrayObj &arr = group_params_.at(i);
+      DatumParameterArray &arr = group_params_.at(i);
       dst->get_eval_info(*eval_ctx_).clear_evaluated_flag();
       ObDynamicParamSetter::clear_parent_evaluated_flag(*eval_ctx_, *dst);
-      if (OB_FAIL(param_datum.from_obj(arr.data_[cur_group_idx_], dst->obj_datum_map_))) {
+      if (OB_FAIL(materialize_legacy_parameter(arr.data_[cur_group_idx_], plan_ctx->get_param_store_for_update().at(param_idx)))) {
+      } else if (dst->res_buf_off_ != 0 && OB_FAIL(dst->deep_copy_datum(*eval_ctx_, arr.data_[cur_group_idx_].datum_))) {
       } else {
-        plan_ctx->get_param_store_for_update().at(param_idx) = arr.data_[cur_group_idx_];
+        if (dst->res_buf_off_ == 0) { param_datum = arr.data_[cur_group_idx_].datum_; }
         dst->set_evaluated_projected(*eval_ctx_);
       }
     }
@@ -268,14 +269,15 @@ int ObGroupJoinBufffer::fill_cur_row_group_param()
         int64_t param_idx = rescan_param.param_idx_;
         ObExpr *dst = rescan_param.dst_;
         ObDatum &param_datum = dst->locate_datum_for_write(*eval_ctx_);
-        ObSqlArrayObj *arr = above_right_group_params_.at(i);
+        DatumParameterArray *arr = above_right_group_params_.at(i);
         dst->get_eval_info(*eval_ctx_).clear_evaluated_flag();
         ObDynamicParamSetter::clear_parent_evaluated_flag(*eval_ctx_, *dst);
         if (OB_UNLIKELY(above_group_idx_for_read_ >= arr->count_)) {
           ret = OB_ERR_UNEXPECTED;
-        } else if (OB_FAIL(param_datum.from_obj(arr->data_[above_group_idx_for_read_], dst->obj_datum_map_))) {
+        } else if (OB_FAIL(materialize_legacy_parameter(arr->data_[above_group_idx_for_read_], plan_ctx->get_param_store_for_update().at(param_idx)))) {
+        } else if (dst->res_buf_off_ != 0 && OB_FAIL(dst->deep_copy_datum(*eval_ctx_, arr->data_[above_group_idx_for_read_].datum_))) {
         } else {
-          plan_ctx->get_param_store_for_update().at(param_idx) = arr->data_[above_group_idx_for_read_];
+          if (dst->res_buf_off_ == 0) { param_datum = arr->data_[above_group_idx_for_read_].datum_; }
           dst->set_evaluated_projected(*eval_ctx_);
         }
       }
@@ -295,7 +297,7 @@ int ObGroupJoinBufffer::get_next_left_iter()
     above_group_idx_for_expand_++;
     ObPhysicalPlanCtx *plan_ctx = ctx_->get_physical_plan_ctx();
     for (int64_t i = 0; OB_SUCC(ret) && i < above_left_group_params_.count(); ++i) {
-      ObSqlArrayObj *array_obj = above_left_group_params_.at(i);
+      DatumParameterArray *array_obj = above_left_group_params_.at(i);
       if (NULL == array_obj) {
         // skip
       } else {
@@ -305,9 +307,10 @@ int ObGroupJoinBufffer::get_next_left_iter()
         ObDatum &param_datum = dst->locate_datum_for_write(*eval_ctx_);
         dst->get_eval_info(*eval_ctx_).clear_evaluated_flag();
         ObDynamicParamSetter::clear_parent_evaluated_flag(*eval_ctx_, *dst);
-        if (OB_FAIL(param_datum.from_obj(array_obj->data_[above_group_idx_for_expand_], dst->obj_datum_map_))) {
+        if (OB_FAIL(materialize_legacy_parameter(array_obj->data_[above_group_idx_for_expand_], plan_ctx->get_param_store_for_update().at(param_idx)))) {
+        } else if (dst->res_buf_off_ != 0 && OB_FAIL(dst->deep_copy_datum(*eval_ctx_, array_obj->data_[above_group_idx_for_expand_].datum_))) {
         } else {
-          plan_ctx->get_param_store_for_update().at(param_idx) = array_obj->data_[above_group_idx_for_expand_];
+          if (dst->res_buf_off_ == 0) { param_datum = array_obj->data_[above_group_idx_for_expand_].datum_; }
           dst->set_evaluated_projected(*eval_ctx_);
         }
       }
@@ -733,14 +736,14 @@ int ObGroupJoinBufffer::init_group_params()
   } else if (OB_FAIL(group_params_.allocate_array(ctx_->get_allocator(),
                                                   rescan_params_->count()))) {
   } else {
-    int64_t obj_buf_size = sizeof(ObObjParam) * max_group_size_;
+    int64_t obj_buf_size = sizeof(DatumParameter) * max_group_size_;
     for (int64_t i = 0; OB_SUCC(ret) && i < group_params_.count(); ++i) {
       ObExpr *dst_expr = rescan_params_->at(i).dst_;
       void *buf = ctx_->get_allocator().alloc(obj_buf_size);
       if (OB_ISNULL(buf)) {
         ret = OB_ALLOCATE_MEMORY_FAILED;
       } else {
-        group_params_.at(i).data_ = reinterpret_cast<ObObjParam*>(buf);
+        group_params_.at(i).data_ = new(buf) DatumParameter[max_group_size_];
         group_params_.at(i).count_ = 0;
         group_params_.at(i).element_.set_meta_type(dst_expr->obj_meta_);
       }
@@ -755,14 +758,14 @@ int ObGroupJoinBufffer::init_group_params()
   } else if (OB_FAIL(above_group_params_.allocate_array(
           ctx_->get_allocator(), right_rescan_params_->count()))) {
   } else {
-    int64_t obj_buf_size = sizeof(ObObjParam) * max_group_size_;
+    int64_t obj_buf_size = sizeof(DatumParameter) * max_group_size_;
     for (int64_t i = 0; OB_SUCC(ret) && i < above_group_params_.count(); ++i) {
       ObExpr *dst_expr = right_rescan_params_->at(i).dst_;
       void *buf = ctx_->get_allocator().alloc(obj_buf_size);
       if (OB_ISNULL(buf)) {
         ret = OB_ALLOCATE_MEMORY_FAILED;
       } else {
-        above_group_params_.at(i).data_ = reinterpret_cast<ObObjParam*>(buf);
+        above_group_params_.at(i).data_ = new(buf) DatumParameter[max_group_size_];
         above_group_params_.at(i).count_ = 0;
         above_group_params_.at(i).element_.set_meta_type(dst_expr->obj_meta_);
       }
@@ -799,9 +802,9 @@ int ObGroupJoinBufffer::deep_copy_dynamic_obj()
   for (int64_t i = 0; OB_SUCC(ret) && i < rescan_params_->count(); ++i) {
     const ObDynamicParamSetter &rescan_param = rescan_params_->at(i);
     int64_t param_idx = rescan_param.param_idx_;
-    if (OB_FAIL(ob_write_obj(mem_context_->get_arena_allocator(),
-                             param_store.at(param_idx),
-                             group_params_.at(i).data_[group_params_.at(i).count_]))) {
+    if (OB_FAIL(copy_legacy_parameter(param_store.at(param_idx),
+                             group_params_.at(i).data_[group_params_.at(i).count_],
+                             mem_context_->get_arena_allocator()))) {
     } else {
       group_params_.at(i).count_++;
     }
@@ -813,13 +816,13 @@ int ObGroupJoinBufffer::deep_copy_dynamic_obj()
       ret = OB_ERR_UNEXPECTED;
     }
     for (int64_t i = 0; OB_SUCC(ret) && i < above_group_params_.count(); i++) {
-      ObSqlArrayObj *arr = above_right_group_params_.at(i);
+      DatumParameterArray *arr = above_right_group_params_.at(i);
       if (NULL == arr) {
         // skip
-      } else if (OB_FAIL(ob_write_obj(
-              mem_context_->get_arena_allocator(),
+      } else if (OB_FAIL(DatumParameterArray::clone_parameter(
               arr->data_[above_group_idx_for_expand_],
-              above_group_params_.at(i).data_[above_group_params_.at(i).count_]))) {
+              above_group_params_.at(i).data_[above_group_params_.at(i).count_],
+              mem_context_->get_arena_allocator()))) {
       } else {
         ++above_group_params_.at(i).count_;
       }
@@ -849,7 +852,7 @@ int ObGroupJoinBufffer::add_row_to_store()
 
 int ObGroupJoinBufffer::build_above_group_params(
         const common::ObIArray<ObDynamicParamSetter> &above_rescan_params,
-        common::ObIArray<ObSqlArrayObj *> &above_group_params,
+        common::ObIArray<DatumParameterArray *> &above_group_params,
         int64_t &group_size)
 {
   int ret = OB_SUCCESS;
@@ -863,7 +866,7 @@ int ObGroupJoinBufffer::build_above_group_params(
   } else {
     for (int64_t i = 0; OB_SUCC(ret) && i < above_rescan_params.count(); i++) {
       int64_t param_idx = above_rescan_params.at(i).param_idx_;
-      ObSqlArrayObj *array_obj = NULL;
+      DatumParameterArray *array_obj = NULL;
       uint64_t array_idx = OB_INVALID_ID;
       bool exist = false;
       if (OB_FAIL(ctx_->get_das_ctx().find_group_param_by_param_idx(param_idx, exist, array_idx))) {
