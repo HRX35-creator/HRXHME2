@@ -154,13 +154,10 @@ int ObPhysicalPlanCtx::set_runtime_parameter(int64_t index, const DatumParameter
   int ret = OB_SUCCESS;
   if (index < 0 || index >= datum_param_store_.count() || index >= param_store_.count()) {
     ret = OB_INVALID_ARGUMENT;
+  } else if (OB_FAIL(materialize_legacy_parameter(parameter, param_store_.at(index)))) {
+    // The boundary helper leaves its destination unchanged on failure.
   } else {
-    ObObjParam legacy_view;
-    if (OB_FAIL(materialize_legacy_parameter(parameter, legacy_view))) {
-    } else {
-      datum_param_store_.at(index) = parameter;
-      param_store_.at(index) = legacy_view;
-    }
+    datum_param_store_.at(index) = parameter;
   }
   return ret;
 }

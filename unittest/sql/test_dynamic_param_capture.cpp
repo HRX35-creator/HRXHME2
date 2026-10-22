@@ -257,6 +257,13 @@ TEST(DynamicParamCapture, native_runtime_binding_preserves_metadata_and_commits_
   EXPECT_EQ(42, f.legacy().get_int());
   EXPECT_EQ(OB_INVALID_ARGUMENT, plan->set_runtime_parameter(-1, value));
   EXPECT_EQ(OB_INVALID_ARGUMENT, plan->set_runtime_parameter(1, value));
+  // A binding can refer to the current native slot while repairing its old view.
+  const char *payload = f.native().datum_.ptr_;
+  f.legacy().set_int(99);
+  ASSERT_EQ(OB_SUCCESS, plan->set_runtime_parameter(0, f.native()));
+  EXPECT_EQ(payload, f.native().datum_.ptr_);
+  EXPECT_EQ(42, f.native().datum_.get_int());
+  EXPECT_EQ(42, f.legacy().get_int());
 }
 TEST(DynamicParamCapture, native_runtime_null_keeps_declared_type_and_flags) {
   Frame f;
