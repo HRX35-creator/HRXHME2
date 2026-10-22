@@ -54,13 +54,16 @@ class ObIAllocator;
 struct ObDatum;
 class ObSMUtils {
 public:
-  // Scalar numeric, temporal, BIT, NULL and plain CHAR/VARCHAR/hex values.
+  // Scalar numeric, temporal, BIT, NULL and CHAR/VARCHAR/hex values.
   // The caller retains the Datum payload through synchronous encoding and
-  // handles casts and character-set conversion.
+  // handles casts; string conversion uses the packet scratch allocator.
   static int build_datum_cell_value(const ObDatum &datum, const ObObjMeta &meta,
                    obmysql::MYSQL_PROTOCOL_TYPE type, ObIAllocator &scratch_allocator,
                    obmysql::ObMySQLCellValue &out, const ObField *field,
                    const ObDataTypeCastParams &dtc_params);
+  static int build_converted_string_cell_value(const ObDatum &datum, const ObObjMeta &meta,
+                   ObCharsetType result_charset, ObIAllocator &scratch_allocator,
+                   obmysql::ObMySQLCellValue &out);
   static int
   build_cell_value(const ObObj &obj, obmysql::MYSQL_PROTOCOL_TYPE type,
                    ObIAllocator &scratch_allocator,

@@ -85,12 +85,15 @@ public:
                 const ObIArray<int64_t> &obj_indexes, const ObIArray<ObObj> &objects,
                 const ObDataTypeCastParams &dtc_params,
                 const sql::ObSQLSessionInfo &session, const ColumnsFieldIArray &fields,
+                ObCharsetType result_charset,
                 share::schema::ObSchemaGetterGuard *schema_guard)
       : ObMySQLRow(type), row_(row), obj_indexes_(&obj_indexes.at(0)),
         objects_(objects.empty() ? nullptr : &objects.at(0)),
-        dtc_params_(dtc_params), session_(session), fields_(fields), schema_guard_(schema_guard) {}
+        dtc_params_(dtc_params), session_(session), fields_(fields),
+        result_charset_(result_charset), schema_guard_(schema_guard) {}
   static bool can_encode(const sql::ObExpr &expr, const ObField &field,
-                          ObCharsetType result_charset, bool need_ps_cast);
+                          ObCharsetType result_charset, bool need_ps_cast,
+                          bool &convert_charset);
   int build_cell_value(int64_t idx, ObIAllocator &scratch_allocator,
                        obmysql::ObMySQLCellValue &out) const override;
   int get_packed_row_blob(const char *&data, int64_t &len) const override
@@ -104,6 +107,7 @@ private:
   const ObDataTypeCastParams &dtc_params_;
   const sql::ObSQLSessionInfo &session_;
   const ColumnsFieldIArray &fields_;
+  ObCharsetType result_charset_;
   share::schema::ObSchemaGetterGuard *schema_guard_;
 };
 

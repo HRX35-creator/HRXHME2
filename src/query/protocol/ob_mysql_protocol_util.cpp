@@ -627,6 +627,27 @@ int ObSMUtils::build_datum_cell_value(const ObDatum &datum, const ObObjMeta &met
   return ret;
 }
 
+int ObSMUtils::build_converted_string_cell_value(const ObDatum &datum, const ObObjMeta &meta,
+                                                 ObCharsetType result_charset,
+                                                 ObIAllocator &scratch_allocator,
+                                                 ObMySQLCellValue &out)
+{
+  int ret = OB_SUCCESS;
+  out.reset();
+  if (datum.is_null()) {
+    out.kind_ = ObMySQLCellValueKind::NULL_VALUE;
+  } else {
+    ObString value = datum.get_string();
+    ObCollationType collation = meta.get_collation_type();
+    if (OB_FAIL(ObCharsetUtils::convert_string_value_charset(value, collation,
+                                                             result_charset, scratch_allocator))) {
+    } else {
+      ret = set_borrowed_lenenc_bytes(value, out);
+    }
+  }
+  return ret;
+}
+
 int ObSMUtils::build_cell_value(const ObObj &obj, MYSQL_PROTOCOL_TYPE type,
                                 ObIAllocator &scratch_allocator,
                                 ObMySQLCellValue &out,

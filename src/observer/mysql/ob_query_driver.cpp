@@ -180,9 +180,12 @@ int ObQueryDriver::response_query_result(ObResultSet &result,
         if (OB_FAIL(obj_indexes.prepare_allocate(result_view.count()))) {
         } else {
           for (int64_t i = 0; i < result_view.count(); ++i) {
+            bool convert_charset = false;
+            // Negative entries select raw Datum bytes or charset conversion;
+            // nonnegative entries address the remaining legacy cells.
             obj_indexes.at(i) = DatumMysqlRow::can_encode(
-                result_view.expr(i), fields->at(i), charset_type, result.is_ps_protocol())
-                                    ? -1 : obj_count++;
+                result_view.expr(i), fields->at(i), charset_type, result.is_ps_protocol(), convert_charset)
+                                    ? (convert_charset ? -2 : -1) : obj_count++;
           }
           ret = fallback_cells.prepare_allocate(obj_count);
         }
@@ -247,7 +250,7 @@ int ObQueryDriver::response_query_result(ObResultSet &result,
     if (OB_SUCC(ret)) {
       if (result_view.is_datum_row()) {
         DatumMysqlRow sm(protocol_type, result_view, obj_indexes, fallback_cells,
-                        dtc_params, session_, *fields, ctx_.schema_guard_);
+                        dtc_params, session_, *fields, charset_type, ctx_.schema_guard_);
         OMPKRow rp(sm);
         ret = sender_.response_packet(rp);
       } else {

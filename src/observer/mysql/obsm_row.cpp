@@ -24,20 +24,12 @@ using namespace oceanbase::common;
 using namespace oceanbase::obmysql;
 
 bool DatumMysqlRow::can_encode(const oceanbase::sql::ObExpr &expr, const ObField &field,
-                               ObCharsetType result_charset, bool need_ps_cast)
+                               ObCharsetType result_charset, bool need_ps_cast, bool &convert_charset)
 {
+  convert_charset = false;
   const ObObjMeta &meta = expr.obj_meta_;
   bool direct = !need_ps_cast || meta.get_type() == field.type_.get_type();
-  if (direct && meta.is_null()) {
-    direct = expr.obj_datum_map_ == OBJ_DATUM_NULL;
-  } else if (direct && (meta.get_type_class() == ObFloatTC || meta.is_date()
-                        || meta.get_type() == ObMySQLDateType)) {
-    direct = expr.obj_datum_map_ == OBJ_DATUM_4BYTE_DATA;
-  } else if (direct && meta.is_year()) {
-    direct = expr.obj_datum_map_ == OBJ_DATUM_1BYTE_DATA;
-  } else if (direct && (meta.get_type_class() == ObDoubleTC || meta.is_time() || meta.is_bit())) {
-    direct = expr.obj_datum_map_ == OBJ_DATUM_8BYTE_DATA;
-  } else if (direct && meta.is_integer_type()) {
+  if (direct && meta.is_integer_type()) {
     direct = expr.obj_datum_map_ == OBJ_DATUM_8BYTE_DATA;
   } else if (direct && meta.get_type_class() == ObNumberTC) {
     direct = expr.obj_datum_map_ == OBJ_DATUM_NUMBER;
@@ -48,21 +40,28 @@ bool DatumMysqlRow::can_encode(const oceanbase::sql::ObExpr &expr, const ObField
     direct = expr.obj_datum_map_ == OBJ_DATUM_8BYTE_DATA;
   } else if (direct && (meta.get_type() == ObVarcharType || meta.get_type() == ObCharType
                         || meta.get_type() == ObHexStringType)) {
-    // Match both no-conversion cases in ObObj::convert_string_value_charset:
-    // different collations in the same charset, and binary/no result charset.
     const ObCollationType from = meta.get_collation_type();
     const ObCollationType to = ObCharset::get_default_collation(result_charset);
     direct = expr.obj_datum_map_ == OBJ_DATUM_STRING && CS_TYPE_INVALID != from;
-    if (direct && from == to) {
-      direct = nullptr != ObCharset::get_charset(from);
-    } else if (direct && ObCharset::is_valid_charset(result_charset)
-               && CHARSET_BINARY != result_charset) {
+    // Charset conversion works on borrowed Datum bytes. Validate the same
+    // charset descriptions as the old result adapter before taking this path.
+    if (direct && (from == to || (ObCharset::is_valid_charset(result_charset)
+                                   && CHARSET_BINARY != result_charset))) {
       const ObCharsetInfo *from_info = ObCharset::get_charset(from);
       const ObCharsetInfo *to_info = ObCharset::get_charset(to);
-      direct = nullptr != from_info && nullptr != to_info && CS_TYPE_INVALID != to
-               && (CS_TYPE_BINARY == from || CS_TYPE_BINARY == to
-                   || 0 == strcmp(from_info->csname, to_info->csname));
+      direct = nullptr != from_info && nullptr != to_info && CS_TYPE_INVALID != to;
+      convert_charset = direct && CS_TYPE_BINARY != from && CS_TYPE_BINARY != to
+                        && 0 != strcmp(from_info->csname, to_info->csname);
     }
+  } else if (direct && meta.is_null()) {
+    direct = expr.obj_datum_map_ == OBJ_DATUM_NULL;
+  } else if (direct && (meta.get_type_class() == ObFloatTC || meta.is_date()
+                        || meta.get_type() == ObMySQLDateType)) {
+    direct = expr.obj_datum_map_ == OBJ_DATUM_4BYTE_DATA;
+  } else if (direct && meta.is_year()) {
+    direct = expr.obj_datum_map_ == OBJ_DATUM_1BYTE_DATA;
+  } else if (direct && (meta.get_type_class() == ObDoubleTC || meta.is_time() || meta.is_bit())) {
+    direct = expr.obj_datum_map_ == OBJ_DATUM_8BYTE_DATA;
   } else {
     direct = false;
   }
@@ -77,6 +76,9 @@ int DatumMysqlRow::build_cell_value(int64_t idx, ObIAllocator &scratch_allocator
   int ret = OB_SUCCESS;
   if (OB_UNLIKELY(idx < 0 || idx >= row_.count())) {
     ret = OB_INVALID_ARGUMENT;
+  } else if (-2 == obj_indexes_[idx]) {
+    ret = ObSMUtils::build_converted_string_cell_value(
+        row_.datum(idx), row_.expr(idx).obj_meta_, result_charset_, scratch_allocator, out);
   } else if (obj_indexes_[idx] < 0) {
     ret = ObSMUtils::build_datum_cell_value(row_.datum(idx), row_.expr(idx).obj_meta_,
                                            type_, scratch_allocator, out, &fields_.at(idx), dtc_params_);

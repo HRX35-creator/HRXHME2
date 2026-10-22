@@ -1899,66 +1899,13 @@ int ObObj::convert_string_value_charset(ObCharsetType charset_type, ObIAllocator
 {
   int ret = OB_SUCCESS;
   ObString str;
+  ObCollationType collation = get_collation_type();
   if (OB_FAIL(get_string(str))) {
-  } else if (ObCharset::is_valid_charset(charset_type) && CHARSET_BINARY != charset_type) {
-    ObCollationType collation_type = ObCharset::get_default_collation(charset_type);
-    const ObCharsetInfo *from_charset_info = ObCharset::get_charset(get_collation_type());
-    const ObCharsetInfo *to_charset_info = ObCharset::get_charset(collation_type);
-    if (OB_ISNULL(from_charset_info) || OB_ISNULL(to_charset_info)) {
-      ret = OB_ERR_UNEXPECTED;
-    } else if (CS_TYPE_INVALID == get_collation_type() || CS_TYPE_INVALID == collation_type) {
-      ret = OB_ERR_UNEXPECTED;
-    } else if (CS_TYPE_BINARY != get_collation_type() && CS_TYPE_BINARY != collation_type
-        && strcmp(from_charset_info->csname, to_charset_info->csname) != 0) {
-      char *buf = NULL;
-      int32_t buf_len = str.length() * ObCharset::CharConvertFactorNum;
-      uint32_t result_len = 0;
-      if (0 == buf_len) {
-        //do noting
-      } else if (OB_UNLIKELY(NULL == (buf = static_cast<char *>(
-                allocator.alloc(buf_len))))) {
-        ret = OB_ALLOCATE_MEMORY_FAILED;
-        LOG_ERROR("alloc memory failed", K(ret), K(buf_len));
-      } else {
-        ret = ObCharset::charset_convert(get_collation_type(), str.ptr(),
-            str.length(),collation_type, buf, buf_len, result_len);
-        if (OB_SUCCESS != ret) {
-          int32_t str_offset = 0;
-          int64_t buf_offset = 0;
-          ObString question_mark = ObCharsetUtils::get_const_str(collation_type, '?');
-          while (str_offset < str.length() && buf_offset + question_mark.length() <= buf_len) {
-            int64_t offset = ObCharset::charpos(get_collation_type(),
-                                                str.ptr() + str_offset,
-                                                str.length() - str_offset,
-                                                1);
-            ret = ObCharset::charset_convert(get_collation_type(),
-                                              str.ptr() + str_offset,
-                                              offset,
-                                              collation_type,
-                                              buf + buf_offset,
-                                              buf_len - buf_offset,
-                                              result_len);
-            str_offset += offset;
-            if (OB_SUCCESS == ret) {
-              buf_offset += result_len;
-            } else {
-              MEMCPY(buf + buf_offset, question_mark.ptr(), question_mark.length());
-              buf_offset += question_mark.length();
-            }
-          }
-          if (str_offset < str.length()) {
-            ret = OB_SIZE_OVERFLOW;
-          } else {
-            result_len = buf_offset;
-            ret = OB_SUCCESS;
-          }
-        }
-        if (OB_SUCC(ret)) {
-          set_string(get_type(), buf, static_cast<int32_t>(result_len));
-          set_collation_type(collation_type);
-        }
-      }
-    }
+  } else if (OB_FAIL(ObCharsetUtils::convert_string_value_charset(str, collation,
+                                                                 charset_type, allocator))) {
+  } else if (collation != get_collation_type()) {
+    set_string(get_type(), str.ptr(), str.length());
+    set_collation_type(collation);
   }
   return ret;
 }
