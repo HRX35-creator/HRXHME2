@@ -595,6 +595,32 @@ int ObTempExpr::eval(ObExecContext &exec_ctx, const ObNewRow &row, ObObj &result
   return ret;
 }
 
+int ObTempExpr::eval_datum(ObExecContext &exec_ctx, ObIAllocator &result_allocator,
+                            ObDatum &result) const
+{
+  int ret = OB_SUCCESS;
+  ObDatum *res_datum = nullptr;
+  ObTempExprCtx *temp_expr_ctx = nullptr;
+  result.set_null();
+  if (OB_UNLIKELY(!idx_col_arr_.empty() || expr_idx_ < 0 || expr_idx_ >= rt_exprs_.count())) {
+    ret = OB_INVALID_ARGUMENT;
+  } else {
+    OZ(exec_ctx.get_temp_expr_eval_ctx(*this, temp_expr_ctx));
+    CK(OB_NOT_NULL(temp_expr_ctx));
+    OX(ObSQLUtils::clear_expr_eval_flags(rt_exprs_.at(expr_idx_), *temp_expr_ctx));
+    if (OB_SUCC(ret)) {
+      ObTempExprCtxReplaceGuard exec_ctx_backup_guard(exec_ctx, *temp_expr_ctx);
+      OZ(rt_exprs_.at(expr_idx_).eval(*temp_expr_ctx, res_datum));
+      CK(OB_NOT_NULL(res_datum));
+      OZ(result.deep_copy(*res_datum, result_allocator));
+      if (!exec_ctx.use_temp_expr_ctx_cache()) {
+        temp_expr_ctx->~ObTempExprCtx();
+      }
+    }
+  }
+  return ret;
+}
+
 int ObTempExpr::row_to_frame(const ObNewRow &row, ObTempExprCtx &temp_expr_ctx) const
 {
   int ret = OB_SUCCESS;

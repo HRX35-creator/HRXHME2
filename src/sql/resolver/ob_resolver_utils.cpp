@@ -6663,8 +6663,7 @@ int ObResolverUtils::resolve_file_format_string_value(const ParseNode *node,
   char *buf = nullptr;
   int64_t buf_size = 0;
   RowDesc row_desc;
-  ObNewRow tmp_row;
-  ObObj value_obj;
+  ObDatum value;
   ObTempExpr *temp_expr = NULL;
   ObExecContext *exec_ctx = NULL;
   if (OB_ISNULL(node) || OB_ISNULL(expr_factory) || OB_ISNULL(session_info)
@@ -6720,11 +6719,11 @@ int ObResolverUtils::resolve_file_format_string_value(const ParseNode *node,
                                                             temp_expr))) {
     } else if (OB_ISNULL(temp_expr)) {
       ret = OB_INVALID_ARGUMENT;
-    } else if (OB_FAIL(temp_expr->eval(*exec_ctx, tmp_row, value_obj))) {
-    } else if (value_obj.is_null()) {
+    } else if (OB_FAIL(temp_expr->eval_datum(*exec_ctx, exec_ctx->get_allocator(), value))) {
+    } else if (value.is_null()) {
       result_value = ObString();
     } else {
-      result_value = value_obj.get_string();
+      result_value = value.get_string();
     }
     if (result_value.length() > 0
         && format_charset != expr->get_result_type().get_charset_type()

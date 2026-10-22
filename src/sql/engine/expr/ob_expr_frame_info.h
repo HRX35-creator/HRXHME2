@@ -221,6 +221,10 @@ public:
   {
   }
   int eval(ObExecContext &exec_ctx, const common::ObNewRow &row, ObObj &result) const;
+  // Input-free range/DDL expressions return an allocator-owned Datum. Copy
+  // before releasing the temporary context, also when its cache is disabled.
+  int eval_datum(ObExecContext &exec_ctx, common::ObIAllocator &result_allocator,
+                  common::ObDatum &result) const;
   int deep_copy(ObIAllocator &allocator, ObTempExpr *&dst) const;
   INHERIT_TO_STRING_KV("temp expr", ObExprFrameInfo, K_(expr_idx), K(idx_col_arr_));
 

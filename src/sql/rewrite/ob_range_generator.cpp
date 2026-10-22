@@ -999,19 +999,24 @@ int ObRangeGenerator::calc_result_value(ObIAllocator &allocator,
       }
     } else if (expr_info.is_expr_) {
       ObTempExpr *temp_expr = expr_info.temp_expr_;
-      ObNewRow tmp_row;
-      ObObj result;
+      ObDatum result;
       if (OB_ISNULL(temp_expr)) {
         ret = OB_ERR_UNEXPECTED;
-      } else if (OB_FAIL(temp_expr->eval(exec_ctx, tmp_row, result))) {
-      } else if (OB_UNLIKELY(result.is_nop_value())) {
+      } else if (OB_FAIL(temp_expr->eval_datum(exec_ctx, allocator, result))) {
+      } else if (OB_UNLIKELY(result.is_nop())) {
         ret = OB_ERR_UNEXPECTED;
-      } else if (result.is_lob_storage() && !result.is_inrow()) {
-        if (OB_FAIL(exec_ctx.get_lob_read_options(lob_read_options))) {
-        } else if (OB_FAIL(ObTextStringIter::convert_outrow_lob_to_inrow_templob(
-                       result, value, lob_read_options, &allocator, true, true))) {
+      } else {
+        // ObTmpRange still owns legacy bounds during the repository-wide
+        // migration. Adapt once at that boundary; the Datum payload is already
+        // owned by the range allocator, not by the temporary expression frame.
+        const ObExpr &expr = temp_expr->rt_exprs_.at(temp_expr->expr_idx_);
+        if (OB_FAIL(result.to_obj(value, expr.obj_meta_, expr.obj_datum_map_))) {
+        } else if (value.is_lob_storage() && !value.is_inrow()) {
+          if (OB_FAIL(exec_ctx.get_lob_read_options(lob_read_options))) {
+          } else if (OB_FAIL(ObTextStringIter::convert_outrow_lob_to_inrow_templob(
+                         value, value, lob_read_options, &allocator, true))) {
+          }
         }
-      } else if (OB_FAIL(ob_write_obj(allocator, result, value))) {
       }
     } else {
       ret = OB_ERR_UNEXPECTED;
