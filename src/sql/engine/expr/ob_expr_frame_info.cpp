@@ -468,13 +468,13 @@ OB_NOINLINE int ObPreCalcExprFrameInfo::do_batch_stmt_eval(ObExecContext &exec_c
   ObDatum *res_datum = NULL;
   DatumParameter datum_param;
   int64_t group_cnt = exec_ctx.get_sql_ctx()->get_batch_params_count();
-  ObSqlDatumArray *datum_array = nullptr;
+  DatumParameterArray *datum_array = nullptr;
   //construct sql array obj
   for (int64_t i = 0; OB_SUCC(ret) && i < pre_calc_rt_exprs_.count(); ++i) {
     ObExpr *rt_expr = NULL;
     if (OB_ISNULL(rt_expr = pre_calc_rt_exprs_.at(i))) {
       ret = OB_ERR_UNEXPECTED;
-    } else if (OB_ISNULL(datum_array = ObSqlDatumArray::alloc(exec_ctx.get_allocator(), group_cnt))) {
+    } else if (OB_ISNULL(datum_array = DatumParameterArray::alloc(exec_ctx.get_allocator(), group_cnt))) {
       ret = OB_ALLOCATE_MEMORY_FAILED;
     } else {
       datum_array->element_.set_obj_type(rt_expr->datum_meta_.type_);
@@ -511,11 +511,20 @@ OB_NOINLINE int ObPreCalcExprFrameInfo::do_batch_stmt_eval(ObExecContext &exec_c
     clear_datum_evaluted_flags(exec_ctx.get_frames());
     for (int64_t i = 0; OB_SUCC(ret) && i < pre_calc_rt_exprs_.count(); ++i) {
       ObExpr *rt_expr = pre_calc_rt_exprs_.at(i);
-      datum_array = res_datum_params.at(i).get_array<ObSqlDatumArray>();
+      datum_array = res_datum_params.at(i).get_array<DatumParameterArray>();
       if (OB_FAIL(rt_expr->eval(eval_ctx, res_datum))) {
-      } else if (OB_FAIL(datum_array->data_[group_id].deep_copy(*res_datum,
+      } else if (OB_FAIL(datum_array->data_[group_id].datum_.deep_copy(*res_datum,
                                                                 exec_ctx.get_allocator()))) {
       } else {
+        DatumParameter &value = datum_array->data_[group_id];
+        value.set_type_meta(rt_expr->obj_meta_);
+        ObAccuracy accuracy;
+        accuracy.set_scale(rt_expr->datum_meta_.scale_);
+        accuracy.set_precision(rt_expr->datum_meta_.precision_);
+        value.set_accuracy(accuracy);
+        if (rt_expr->obj_meta_.has_lob_header()) {
+          value.set_result_flag(HAS_LOB_HEADER_FLAG);
+        }
       }
     }
   }

@@ -402,22 +402,19 @@ int import_legacy_array(const ObObjParam &source, DatumParameter &destination,
 {
   int ret = OB_SUCCESS;
   const ObSqlArrayObj *source_array = reinterpret_cast<const ObSqlArrayObj *>(source.get_ext());
-  ObSqlDatumArray *array = nullptr;
+  DatumParameterArray *array = nullptr;
   if (OB_ISNULL(source_array)) {
     ret = OB_ERR_UNEXPECTED;
-  } else if (OB_ISNULL(array = ObSqlDatumArray::alloc(allocator, source_array->count_))) {
+  } else if (OB_ISNULL(array = DatumParameterArray::alloc(allocator, source_array->count_))) {
     ret = OB_ALLOCATE_MEMORY_FAILED;
   } else {
     array->element_ = source_array->element_;
   }
   for (int64_t i = 0; OB_SUCC(ret) && i < source_array->count_; ++i) {
     const ObObjParam &value = source_array->data_[i];
-    const ObObjDatumMapType mapping = ObDatum::get_obj_datum_map_type(value.get_type());
-    if (mapping != OBJ_DATUM_NULL &&
-        OB_ISNULL(array->data_[i].ptr_ = static_cast<char *>(allocator.alloc(
-            ObDatum::get_reserved_size(mapping, value.get_precision()))))) {
-      ret = OB_ALLOCATE_MEMORY_FAILED;
-    } else if (OB_FAIL(array->data_[i].from_obj(value))) {
+    if (OB_FAIL(array->data_[i].alloc_datum_reserved_buff(
+            value.get_meta(), value.get_precision(), allocator))) {
+    } else if (OB_FAIL(import_legacy_parameter(value, array->data_[i], &allocator))) {
     }
   }
   if (OB_SUCC(ret)) {

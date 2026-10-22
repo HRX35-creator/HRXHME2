@@ -56,7 +56,6 @@ typedef int (*RowCmpFunc) (const common::ObObjMeta &l_meta, const common::ObObjM
 
 class ObExecContext;
 struct ObIExprExtraInfo;
-struct ObSqlDatumArray;
 class ObDatumCaster;
 using common::ObDatum;
 using common::ObDatumVector;

@@ -428,12 +428,13 @@ int ObPhysicalPlanCtx::replace_batch_param_datum(const int64_t cur_group_id,
         ObDatum *datum = nullptr;
         ObEvalInfo *eval_info = nullptr;
         get_param_frame_info(i, datum, eval_info);
-        const ObSqlDatumArray *datum_array = datum_param_store_.at(i).get_array<ObSqlDatumArray>();;
-        if (OB_UNLIKELY(cur_group_id < 0) || OB_UNLIKELY(cur_group_id >= datum_array->count_)) {
+        const DatumParameterArray *datum_array = datum_param_store_.at(i).get_array<DatumParameterArray>();
+        if (OB_ISNULL(datum_array) || OB_UNLIKELY(cur_group_id < 0) ||
+            OB_UNLIKELY(cur_group_id >= datum_array->count_)) {
           ret = OB_ERR_UNEXPECTED;
         } else {
           //assign datum ptr to the real param datum
-          *datum = datum_array->data_[cur_group_id];
+          *datum = datum_array->data_[cur_group_id].datum_;
           eval_info->evaluated_ = true;
         }
       }

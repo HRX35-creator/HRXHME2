@@ -17,6 +17,7 @@
 #include "common/datum/datum_core.h"
 #include "common/datum/datum_parameter.h"
 #include "common/datum/datum_param_store.h"
+#include "common/datum/datum_parameter_array.h"
 
 #ifdef OCEANBASE_COMMON_OB_OBJECT_H_
 #error "Native Datum headers must not include the legacy value definition"
@@ -145,6 +146,31 @@ TEST(DatumCore, lob_views_keep_borrowed_locator_and_storage_header)
   ObLobCommon storage_header;
   value.set_lob_data(storage_header, sizeof(storage_header));
   EXPECT_EQ(&storage_header, &value.get_lob_data());
+}
+
+TEST(DatumCore, native_array_checks_count_and_keeps_element_metadata)
+{
+  ObArenaAllocator arena;
+  EXPECT_EQ(nullptr, DatumParameterArray::alloc(arena, -1));
+  EXPECT_EQ(nullptr, DatumParameterArray::alloc(arena, INT64_MAX));
+  DatumParameterArray *empty = DatumParameterArray::alloc(arena, 0);
+  ASSERT_NE(nullptr, empty);
+  EXPECT_EQ(0, empty->count_);
+  DatumParameterArray *array = DatumParameterArray::alloc(arena, 2);
+  ASSERT_NE(nullptr, array);
+  ObObjMeta integer, text;
+  integer.set_uint64(); text.set_varchar();
+  array->data_[0].set_type_meta(integer);
+  array->data_[0].set_precision(20);
+  ASSERT_EQ(OB_SUCCESS, array->data_[0].alloc_datum_reserved_buff(integer, 20, arena));
+  array->data_[0].datum_.set_uint(UINT64_MAX);
+  array->data_[1].set_type_meta(text);
+  array->data_[1].set_length(37);
+  array->data_[1].datum_.set_string("bytes", 5);
+  EXPECT_EQ(UINT64_MAX, array->data_[0].datum_.get_uint());
+  EXPECT_EQ(20, array->data_[0].get_precision());
+  EXPECT_EQ(ObVarcharType, array->data_[1].get_type());
+  EXPECT_EQ(37, array->data_[1].get_length());
 }
 
 int main(int argc, char **argv)

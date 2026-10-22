@@ -18,6 +18,7 @@
 #include <gtest/gtest.h>
 #include "sql/ob_sql_utils.h"
 #include "sql/engine/ob_exec_context.h"
+#include "sql/engine/ob_physical_plan_ctx.h"
 #include "sql/engine/expr/ob_expr.h"
 #include "sql/rewrite/ob_query_range_define.h"
 
@@ -162,16 +163,78 @@ TEST(DatumParameterConstraints, imports_legacy_array_into_native_datum_elements)
   ASSERT_NE(nullptr, old);
   old->element_.set_obj_type(ObIntType);
   old->data_[0].set_int(123);
+  old->data_[0].set_precision(19);
+  old->data_[0].set_result_flag(ZEROFILL_FLAG);
+  old->data_[0].set_raw_text_info(17, 3);
   old->data_[1].set_varchar("bytes");
+  old->data_[1].set_length(37);
+  old->data_[1].set_collation_type(CS_TYPE_UTF8MB4_BIN);
+  old->data_[1].set_param_meta(old->data_[1].get_meta());
   ObObjParam source;
   source.set_extend(reinterpret_cast<int64_t>(old), T_EXT_SQL_ARRAY);
   DatumParameter value;
   ASSERT_EQ(OB_SUCCESS, value.alloc_datum_reserved_buff(source.get_meta(), source.get_precision(), allocator));
   ASSERT_EQ(OB_SUCCESS, import_legacy_parameter(source, value, &allocator));
-  const ObSqlDatumArray *array = value.get_array<ObSqlDatumArray>();
+  const DatumParameterArray *array = value.get_array<DatumParameterArray>();
   ASSERT_NE(nullptr, array); ASSERT_EQ(2, array->count_);
-  EXPECT_EQ(123, array->data_[0].get_int());
-  EXPECT_EQ(ObString("bytes"), array->data_[1].get_string());
+  EXPECT_EQ(123, array->data_[0].datum_.get_int());
+  EXPECT_EQ(ObIntType, array->data_[0].get_type());
+  EXPECT_EQ(19, array->data_[0].get_precision());
+  EXPECT_TRUE(array->data_[0].has_result_flag(ZEROFILL_FLAG));
+  EXPECT_EQ(17, array->data_[0].get_raw_text_pos());
+  EXPECT_EQ(ObVarcharType, array->data_[1].get_type());
+  EXPECT_EQ(37, array->data_[1].get_length());
+  EXPECT_EQ(old->data_[1].get_meta(), array->data_[1].get_param_meta());
+  EXPECT_EQ(ObString("bytes"), array->data_[1].datum_.get_string());
+}
+
+TEST(DatumParameterConstraints, batch_frames_select_full_native_array_values)
+{
+  ObArenaAllocator allocator;
+  ObSqlArrayObj *old = ObSqlArrayObj::alloc(allocator, 3);
+  ASSERT_NE(nullptr, old);
+  old->data_[0].set_int(123);
+  old->data_[1].set_varchar("bytes");
+  old->data_[2].set_null();
+  ObObjParam source;
+  source.set_extend(reinterpret_cast<int64_t>(old), T_EXT_SQL_ARRAY);
+  ObPhysicalPlanCtx context(allocator);
+  ASSERT_EQ(OB_SUCCESS, context.get_param_store_for_update().push_back(source));
+  ASSERT_EQ(OB_SUCCESS, context.init_datum_param_store());
+  ASSERT_EQ(1, context.get_param_frame_ptrs().count());
+  ObDatum *frame = reinterpret_cast<ObDatum *>(context.get_param_frame_ptrs().at(0));
+  ASSERT_EQ(OB_SUCCESS, context.replace_batch_param_datum(0, 0, 1));
+  EXPECT_EQ(123, frame->get_int());
+  ASSERT_EQ(OB_SUCCESS, context.replace_batch_param_datum(1, 0, 1));
+  EXPECT_EQ(ObString("bytes"), frame->get_string());
+  ASSERT_EQ(OB_SUCCESS, context.replace_batch_param_datum(2, 0, 1));
+  EXPECT_TRUE(frame->is_null());
+  EXPECT_EQ(OB_ERR_UNEXPECTED, context.replace_batch_param_datum(-1, 0, 1));
+  EXPECT_EQ(OB_ERR_UNEXPECTED, context.replace_batch_param_datum(3, 0, 1));
+}
+
+TEST(DatumParameterConstraints, nested_array_import_preserves_each_parameter)
+{
+  ObArenaAllocator allocator;
+  ObSqlArrayObj *inner = ObSqlArrayObj::alloc(allocator, 1);
+  ObSqlArrayObj *outer = ObSqlArrayObj::alloc(allocator, 1);
+  ASSERT_NE(nullptr, inner); ASSERT_NE(nullptr, outer);
+  inner->data_[0].set_uint64(UINT64_MAX);
+  inner->data_[0].set_precision(20);
+  outer->data_[0].set_extend(reinterpret_cast<int64_t>(inner), T_EXT_SQL_ARRAY);
+  ObObjParam source;
+  source.set_extend(reinterpret_cast<int64_t>(outer), T_EXT_SQL_ARRAY);
+  DatumParameter destination;
+  ASSERT_EQ(OB_SUCCESS, destination.alloc_datum_reserved_buff(source.get_meta(), -1, allocator));
+  ASSERT_EQ(OB_SUCCESS, import_legacy_parameter(source, destination, &allocator));
+  const DatumParameterArray *native_outer = destination.get_array<DatumParameterArray>();
+  ASSERT_NE(nullptr, native_outer);
+  const DatumParameterArray *native_inner = native_outer->data_[0].get_array<DatumParameterArray>();
+  ASSERT_NE(nullptr, native_inner);
+  ASSERT_EQ(1, native_inner->count_);
+  EXPECT_EQ(UINT64_MAX, native_inner->data_[0].datum_.get_uint());
+  EXPECT_EQ(20, native_inner->data_[0].get_precision());
+  EXPECT_EQ(ObUInt64Type, native_inner->data_[0].get_type());
 }
 
 TEST(DatumParameterConstraints, invalid_constraint_reports_an_error)
