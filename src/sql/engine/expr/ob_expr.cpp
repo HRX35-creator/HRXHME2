@@ -424,47 +424,136 @@ int import_legacy_parameter(const ObObjParam &source, DatumParameter &destinatio
   return ret;
 }
 
-int copy_legacy_parameter(const ObObjParam &source, DatumParameter &destination, ObIAllocator &allocator)
+int clone_datum_value(const ObDatum &source, const ObObjMeta &meta, ObDatum &destination,
+                      ObIAllocator &allocator)
 {
   int ret = OB_SUCCESS;
-  DatumParameter copy;
-  if (OB_FAIL(copy.alloc_datum_reserved_buff(source.get_meta(), source.get_precision(), allocator))) {
-  } else if (OB_FAIL(import_legacy_parameter(source, copy, &allocator))) {
-  } else if (source.is_string_type() || source.is_decimal_int() || source.is_json() ||
-             source.is_geometry() || source.is_collection_sql_type() || source.get_type() == ObUserDefinedSQLType) {
-    ObDatum owned;
-    if (OB_FAIL(owned.deep_copy(copy.datum_, allocator))) {
-    } else { copy.set_datum(owned); }
+  ObDatum owned;
+  if (meta.is_ext_sql_array() && !source.is_null()) {
+    DatumParameter input, copy;
+    input.set_datum(source);
+    input.set_type_meta(meta);
+    if (OB_FAIL(DatumParameterArray::clone_parameter(input, copy, allocator))) {
+    } else {
+      owned = copy.datum_;
+    }
+  } else {
+    ret = owned.deep_copy(source, allocator);
   }
-  if (OB_SUCC(ret) && source.is_ext_sql_array()) {
-    ret = DatumParameterArray::clone_parameter(copy, copy, allocator);
+  if (OB_SUCC(ret)) {
+    destination = owned;
   }
-  if (OB_SUCC(ret)) { destination = copy; }
   return ret;
 }
 
-// Only scalar consumers of the old ParamStore need this materialization. Array
-// payloads themselves remain native; remove this bridge with the scalar store.
+int copy_legacy_value(const ObObj &source, ObDatum &destination, ObObjMeta &meta,
+                      ObIAllocator &allocator)
+{
+  int ret = OB_SUCCESS;
+  ObDatum owned;
+  if (source.get_meta().is_invalid()) {
+    ret = OB_INVALID_ARGUMENT;
+  } else if (source.is_ext_sql_array() && !source.is_null()) {
+    int64_t address = source.get_ext();
+    ObDatum view;
+    view.set_string(reinterpret_cast<const char *>(&address), sizeof(address));
+    ret = clone_datum_value(view, source.get_meta(), owned, allocator);
+  } else {
+    const ObObjDatumMapType mapping = ObDatum::get_obj_datum_map_type(source.get_type());
+    if (source.is_null()) {
+      owned.set_null();
+    } else if (mapping == OBJ_DATUM_STRING) {
+      ObDatum borrowed;
+      if (OB_FAIL(borrowed.from_obj(source))) {
+      } else {
+        ret = owned.deep_copy(borrowed, allocator);
+      }
+    } else {
+      const int64_t size = mapping == OBJ_DATUM_NUMBER
+                               ? sizeof(number::ObNumber::Desc) + source.get_deep_copy_size()
+                               : (mapping == OBJ_DATUM_DECIMALINT
+                                      ? source.get_int_bytes()
+                                      : ObDatum::get_reserved_size(mapping, PRECISION_UNKNOWN_YET));
+      if (size < 0 || (mapping == OBJ_DATUM_DECIMALINT && size > sizeof(int512_t))) {
+        ret = OB_INVALID_ARGUMENT;
+      } else if (OB_ISNULL(owned.ptr_ =
+                               static_cast<char *>(allocator.alloc(std::max<int64_t>(size, 1))))) {
+        ret = OB_ALLOCATE_MEMORY_FAILED;
+      } else {
+        ret = owned.from_obj(source);
+      }
+    }
+  }
+  if (OB_SUCC(ret)) {
+    destination = owned;
+    meta = source.get_meta();
+  }
+  return ret;
+}
+
+int copy_legacy_parameter(const ObObjParam &source, DatumParameter &destination,
+                          ObIAllocator &allocator)
+{
+  int ret = OB_SUCCESS;
+  DatumParameter copy;
+  ObObjMeta meta;
+  if (OB_FAIL(copy_legacy_value(source, copy.datum_, meta, allocator))) {
+  } else {
+    copy.set_type_meta(meta);
+    copy.set_accuracy(source.get_accuracy());
+    copy.set_result_flags(source.get_result_flag());
+    copy.set_param_flag(source.get_param_flag());
+    copy.set_param_meta(source.get_param_meta());
+    copy.set_raw_text_info(source.get_raw_text_pos(), source.get_raw_text_len());
+    if (source.has_lob_header()) {
+      copy.set_result_flag(HAS_LOB_HEADER_FLAG);
+    }
+    destination = copy;
+  }
+  return ret;
+}
+
+namespace {
+int fill_legacy_value(const ObDatum &source, const ObObjMeta &meta, ObObj &output)
+{
+  int ret = OB_SUCCESS;
+  if (meta.is_ext_sql_array() && !source.is_null()) {
+    output.set_extend(source.get_int(), T_EXT_SQL_ARRAY);
+    output.set_meta_type(meta);
+  } else if (!source.is_null() && meta.is_decimal_int()) {
+    // Raw value wire allows negative decimal scale. Keep SQL expression casts'
+    // separate validation rules unchanged.
+    output.set_decimal_int(source.len_, meta.get_scale(),
+                           const_cast<ObDecimalInt *>(source.get_decimal_int()));
+    output.set_meta_type(meta);
+  } else {
+    ret = source.to_obj(output, meta);
+  }
+  // Generic to_obj() initializes NULL collation instead of preserving raw wire.
+  if (OB_SUCC(ret) && source.is_null() && meta.is_null()) {
+    output.set_meta_type(meta);
+  }
+  return ret;
+}
+} // namespace
+
+int materialize_legacy_value(const ObDatum &source, const ObObjMeta &meta, ObObj &destination)
+{
+  ObObj output;
+  const int ret = fill_legacy_value(source, meta, output);
+  if (ret == OB_SUCCESS) {
+    destination = output;
+  }
+  return ret;
+}
+
+// Array and string payloads remain native, owned by the parameter's arena.
 int materialize_legacy_parameter(const DatumParameter &source, ObObjParam &destination)
 {
   int ret = OB_SUCCESS;
   ObObjParam output;
-  if (source.is_ext_sql_array() && !source.is_null()) {
-    output.set_extend(reinterpret_cast<int64_t>(source.get_array<DatumParameterArray>()), T_EXT_SQL_ARRAY);
-    output.set_meta_type(source.get_type_meta());
-  } else if (!source.is_null() && source.get_type() == ObDecimalIntType) {
-    // Parameter wire permits raw decimal metadata (including negative scale).
-    // Preserve that representation without applying SQL-expression to_obj rules.
-    output.set_decimal_int(source.datum_.len_, source.get_type_meta().get_scale(),
-        const_cast<ObDecimalInt *>(source.datum_.get_decimal_int()));
-    output.set_meta_type(source.get_type_meta());
-  } else { ret = source.datum_.to_obj(output, source.get_type_meta()); }
-  // A decoded NULL has real wire metadata too. Generic to_obj() initializes
-  // its default NULL collation, which would change untouched sparse slots.
-  if (OB_SUCC(ret) && source.is_null() && source.get_type_meta().is_null()) {
-    output.set_meta_type(source.get_type_meta());
-  }
-  if (OB_SUCC(ret)) {
+  if (OB_FAIL(fill_legacy_value(source.datum_, source.get_type_meta(), output))) {
+  } else {
     output.set_accuracy(source.get_accuracy());
     output.set_result_flag(source.get_result_flag());
     output.set_param_flag(source.get_param_flag());
@@ -492,7 +581,7 @@ DEF_TO_STRING(ObToStringExpr)
     J_KV("Expr print ERROR", "vectorize execution but batch_size not specified");
     J_OBJ_END();
   } else if (c_.is_vectorized() && c_.get_batch_size() > 0 &&
-               c_.get_batch_idx() >= c_.get_batch_size()) {
+             c_.get_batch_idx() >= c_.get_batch_size()) {
     // vectorize execution but batch_idx is not set correctly, do nothing
     J_OBJ_START();
     J_KV("Expr print ERROR", "vectorize execution but batch_idx is not set correctly");

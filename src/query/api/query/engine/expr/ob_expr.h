@@ -760,6 +760,15 @@ int import_legacy_parameter(const common::ObObjParam &source,
                             DatumParameter &destination,
                             common::ObIAllocator *allocator);
 
+// Explicit value boundaries for remaining resolver / range interfaces. Values
+// and complete type metadata stay separate in native caches.
+int clone_datum_value(const common::ObDatum &source, const common::ObObjMeta &meta,
+                      common::ObDatum &destination, common::ObIAllocator &allocator);
+int copy_legacy_value(const common::ObObj &source, common::ObDatum &destination,
+                      common::ObObjMeta &meta, common::ObIAllocator &allocator);
+int materialize_legacy_value(const common::ObDatum &source, const common::ObObjMeta &meta,
+                             common::ObObj &destination);
+
 int copy_legacy_parameter(const common::ObObjParam &source, DatumParameter &destination,
                           common::ObIAllocator &allocator);
 int materialize_legacy_parameter(const DatumParameter &source, common::ObObjParam &destination);

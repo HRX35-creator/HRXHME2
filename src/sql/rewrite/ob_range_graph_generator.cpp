@@ -1172,15 +1172,13 @@ int ObRangeGraphGenerator::generate_expr_final_info()
       }
     } else if (expr->has_flag(IS_CONST)) {
       const ObConstRawExpr *const_expr = static_cast<const ObConstRawExpr *>(expr);
-      void *ptr = allocator_.alloc(sizeof(ObObj));
-      if (OB_ISNULL(ptr)) {
-        ret = OB_ALLOCATE_MEMORY_FAILED;
-        LOG_WARN("failed to allocate memeory for ObObj");
-      } else {
-        expr_info.const_val_ = new(ptr)ObObj();
+      void *ptr = allocator_.alloc(sizeof(ObDatum));
+      if (OB_ISNULL(ptr)) { ret = OB_ALLOCATE_MEMORY_FAILED; }
+      else {
+        expr_info.const_val_ = new(ptr)ObDatum();
         expr_info.is_const_ = true;
-        if (OB_FAIL(ob_write_obj(allocator_, const_expr->get_value(), *expr_info.const_val_))) {
-        }
+        ret = copy_legacy_value(const_expr->get_value(), *expr_info.const_val_,
+                                expr_info.const_meta_, allocator_);
       }
     } else if (OB_FAIL(ObStaticEngineExprCG::gen_expr_with_row_desc(
             expr, row_desc,

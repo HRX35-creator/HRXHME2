@@ -19,6 +19,7 @@
 #include "lib/list/ob_obj_store.h"
 #include "lib/allocator/ob_allocator.h"
 #include "common/object/ob_object.h"
+#include "common/datum/datum_core.h"
 #include "sql/engine/expr/ob_expr_frame_info.h"
 #include "share/geo/ob_geo_common.h"
 #include "sql/resolver/expr/ob_raw_expr.h"
@@ -217,6 +218,7 @@ public:
   struct ExprFinalInfo {
     ExprFinalInfo()
     : flags_(0),
+      const_meta_(),
       param_idx_(OB_INVALID_ID),
       related_raw_expr_(nullptr)
     {}
@@ -232,9 +234,11 @@ public:
         uint32_t reserved_:      18;
       };
     };
+    // Uses the existing four-byte padding between flags and the value slot.
+    common::ObObjMeta const_meta_;
     union {
       int64_t param_idx_;
-      common::ObObj* const_val_;
+      common::ObDatum* const_val_;
       ObTempExpr *temp_expr_;
     };
     ObRawExpr *related_raw_expr_;

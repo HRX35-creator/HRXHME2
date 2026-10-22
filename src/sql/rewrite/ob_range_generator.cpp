@@ -985,10 +985,10 @@ int ObRangeGenerator::calc_result_value(ObIAllocator &allocator,
         }
       }
     } else if (expr_info.is_const_) {
-      ObObj *const_obj = expr_info.const_val_;
-      if (OB_ISNULL(const_obj)) {
+      const ObDatum *const_datum = expr_info.const_val_;
+      if (OB_ISNULL(const_datum)) {
         ret = OB_ERR_UNEXPECTED;
-      } else if (OB_FALSE_IT(value = *const_obj)) {
+      } else if (OB_FAIL(materialize_legacy_value(*const_datum, expr_info.const_meta_, value))) {
       } else if (OB_UNLIKELY(value.is_nop_value())) {
         ret = OB_ERR_UNEXPECTED;
       } else if (value.is_lob_storage() && !value.is_inrow()) {
@@ -1882,12 +1882,21 @@ int ObRangeGenerator::generate_fast_nlj_range(const ObPreRangeGraph &pre_range_g
     } else {
       const ObRangeMap::ExprFinalInfo& expr_info = range_map.expr_final_infos_.at(start_idx);
       const ObObj* src_obj = nullptr;
+      ObObj constant_view;
       if (expr_info.is_param_) {
         src_obj = &param_store.at(expr_info.param_idx_);
       } else if (expr_info.is_const_) {
-        src_obj = expr_info.const_val_;
+        if (expr_info.const_val_ == nullptr) {
+          ret = OB_ERR_UNEXPECTED;
+        }
+        else if (OB_FAIL(materialize_legacy_value(*expr_info.const_val_, expr_info.const_meta_, constant_view))) {
+        } else {
+          src_obj = &constant_view;
+        }
       }
-      if (src_obj->is_null() && !expr_info.null_safe_) {
+      if (OB_FAIL(ret)) {
+      } else if (src_obj == nullptr) { ret = OB_ERR_UNEXPECTED;
+      } else if (src_obj->is_null() && !expr_info.null_safe_) {
         always_false = true;
       } else if (OB_FAIL(ob_write_obj(allocator, *src_obj, *(starts + i)))) {
       } else {
@@ -1935,7 +1944,7 @@ int ObRangeGenerator::check_can_final_fast_nlj_range(const ObPreRangeGraph &pre_
     int64_t end_idx = node->end_keys_[i];
     const ObRangeColumnMeta *meta = pre_range_graph.get_column_meta(i);
     int64_t cmp = 0;
-    const ObObj* src_obj = nullptr;
+    const ObObjMeta *source_meta = nullptr;
     if (OB_ISNULL(meta)) {
       ret = OB_ERR_UNEXPECTED;
     } else if (start_idx == OB_RANGE_MIN_VALUE &&
@@ -1950,19 +1959,23 @@ int ObRangeGenerator::check_can_final_fast_nlj_range(const ObPreRangeGraph &pre_
     } else if (start_idx == OB_RANGE_NULL_VALUE) {
       // do nothing
     } else if (range_map.expr_final_infos_.at(start_idx).is_param_) {
-      src_obj = &param_store.at(range_map.expr_final_infos_.at(start_idx).param_idx_);
+      source_meta = &param_store.at(range_map.expr_final_infos_.at(start_idx).param_idx_).get_meta();
     } else if (range_map.expr_final_infos_.at(start_idx).is_const_) {
-      src_obj = range_map.expr_final_infos_.at(start_idx).const_val_;
+      if (range_map.expr_final_infos_.at(start_idx).const_val_ == nullptr) {
+        ret = OB_ERR_UNEXPECTED;
+      } else {
+        source_meta = &range_map.expr_final_infos_.at(start_idx).const_meta_;
+      }
     } else {
       ret = OB_ERR_UNEXPECTED;
     }
 
     if (OB_FAIL(ret)) {
-    } else if (src_obj == nullptr) {
+    } else if (source_meta == nullptr) {
       // do nothing
-    } else if (OB_LIKELY(ObSQLUtils::is_same_type_for_compare(src_obj->get_meta(),
+    } else if (OB_LIKELY(ObSQLUtils::is_same_type_for_compare(*source_meta,
                                                               meta->column_type_.get_obj_meta()) &&
-                         !src_obj->is_decimal_int())) {
+                         !source_meta->is_decimal_int())) {
       // do nothing
     } else {
       is_valid = false;
