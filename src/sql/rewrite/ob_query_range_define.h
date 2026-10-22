@@ -530,7 +530,8 @@ public:
                      ObRawExpr *extra_value_expr = nullptr);
   int set_general_nlj_range_extraction(const ObIArray<ObFastFinalPos> &pos_arr);
   const ObIArray<ObFastFinalPos>& get_general_nlj_range_extraction() const { return fast_final_pos_arr_; }
-  static int is_precise_like_range(const ObObjParam &pattern, char escape, bool &is_precise);
+  static int is_precise_like_range(ObObjType type, const ObString &pattern, ObCollationType collation,
+                                   char escape, bool &is_precise);
   static bool check_like_range_precise(const ObString &pattern_str,
                                        const char *max_str_buf,
                                        const size_t max_str_len,

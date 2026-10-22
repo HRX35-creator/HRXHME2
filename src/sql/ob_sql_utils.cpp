@@ -3223,60 +3223,54 @@ int ObPreCalcExprConstraint::assign(const ObPreCalcExprConstraint &other, common
   return ret;
 }
 
-int ObPreCalcExprConstraint::check_is_match(ObDatumObjParam &datum_param, 
+int ObPreCalcExprConstraint::check_is_match(DatumParameter &parameter,
                                             ObExecContext &exec_ctx,
                                             bool &is_match) const
 {
+  UNUSED(exec_ctx);
   int ret = OB_SUCCESS;
-  ObObjParam obj_param;
-  ObDatum &datum = datum_param.datum_;
-  bool is_udt_type = false;
-  bool is_udt_null = false;
-  if (OB_FAIL(datum_param.to_objparam(obj_param, &exec_ctx.get_allocator()))) {
-  } else {
-    switch (expect_result_) {
-      case PRE_CALC_RESULT_NULL:
-        is_match = obj_param.is_null();
-        break;
-      case PRE_CALC_RESULT_NOT_NULL:
-        is_match = !obj_param.is_null();
-        break;
-      case PRE_CALC_RESULT_TRUE:
-        is_match = obj_param.get_bool() && !obj_param.is_null();
-        break;
-      case PRE_CALC_RESULT_FALSE:
-        is_match = !obj_param.get_bool() && !obj_param.is_null();
-        break;
-      case PRE_CALC_PRECISE:
-      case PRE_CALC_NOT_PRECISE: {
-        //default escape
-        //@todu JueHui: make escape value can be parameterized
-        char escape = '\\';
-        bool is_precise = false;
-        bool expect_precise = PRE_CALC_PRECISE == expect_result_;
-        if (OB_FAIL(ObPreRangeGraph::is_precise_like_range(obj_param, escape, is_precise))) {
-        } else {
-          is_match = is_precise == expect_precise;
-        }
-        break;
-      }
-      case PRE_CALC_RESULT_NO_WILDCARD: {
-        ObString pattern_val = obj_param.get_string();
-        if (obj_param.is_lob()) {
-          is_match = false;
-        } else if (!pattern_val.empty()) {
-          is_match = OB_ISNULL(pattern_val.find('%')) &&
-                    OB_ISNULL(pattern_val.find('_')) &&
-                    OB_ISNULL(pattern_val.find('\\'));
-        } else {
-          is_match = true;
-        }
+  const ObDatum &datum = parameter.datum_;
+  switch (expect_result_) {
+    case PRE_CALC_RESULT_NULL:
+      is_match = datum.is_null();
+      break;
+    case PRE_CALC_RESULT_NOT_NULL:
+      is_match = !datum.is_null();
+      break;
+    case PRE_CALC_RESULT_TRUE:
+      is_match = datum.is_true();
+      break;
+    case PRE_CALC_RESULT_FALSE:
+      is_match = datum.is_false();
+      break;
+    case PRE_CALC_PRECISE:
+    case PRE_CALC_NOT_PRECISE: {
+      bool precise = false;
+      // A NULL result has no string value, even if its declared SQL type is
+      // text. Keep it distinct from an empty (precise) string.
+      if (!datum.is_null() && parameter.is_string_type() &&
+          OB_FAIL(ObPreRangeGraph::is_precise_like_range(
+              parameter.get_type(), datum.get_string(), parameter.get_collation_type(), '\\', precise))) {
+      } else {
+        is_match = precise == (expect_result_ == PRE_CALC_PRECISE);
       }
       break;
-      default:
-        ret = OB_ERR_UNEXPECTED;
-        break;
-    } // switch end
+    }
+    case PRE_CALC_RESULT_NO_WILDCARD: {
+      if (!datum.is_null() && parameter.is_lob()) {
+        is_match = false;
+      } else {
+        const ObString pattern = !datum.is_null() && parameter.is_string_type()
+            ? datum.get_string() : ObString();
+        is_match = pattern.empty() || (OB_ISNULL(pattern.find('%')) &&
+                                      OB_ISNULL(pattern.find('_')) &&
+                                      OB_ISNULL(pattern.find('\\')));
+      }
+      break;
+    }
+    default:
+      ret = OB_ERR_UNEXPECTED;
+      break;
   }
   return ret;
 }

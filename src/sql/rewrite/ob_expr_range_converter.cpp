@@ -846,7 +846,9 @@ int ObExprRangeConverter::build_decode_like_expr(ObRawExpr *pattern,
       ctx_.cur_is_precise_ = false;
     } else if(pattern_val.is_null()) {
       ctx_.cur_is_precise_ = false;
-    } else if(OB_FAIL(ObPreRangeGraph::is_precise_like_range(pattern_val,
+    } else if(OB_FAIL(ObPreRangeGraph::is_precise_like_range(pattern_val.get_type(),
+                                                          pattern_val.get_string(),
+                                                          pattern_val.get_collation_type(),
                                                           escape_ch,
                                                           ctx_.cur_is_precise_))) {
     } else if (OB_FAIL(add_precise_constraint(pattern, ctx_.cur_is_precise_))) {

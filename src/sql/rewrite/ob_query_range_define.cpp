@@ -1722,21 +1722,20 @@ int ObPreRangeGraph::set_general_nlj_range_extraction(const ObIArray<ObFastFinal
 // Notes:
 // LIKE escape treats NULL differently from 0x00: NULL is equivalent to '\\',
 // but 0x00 is just 0x00. Therefore, before use this interface, PLEASE MAKE SURE escape is not null.
-int ObPreRangeGraph::is_precise_like_range(const ObObjParam &pattern, char escape, bool &is_precise)
+int ObPreRangeGraph::is_precise_like_range(ObObjType type, const ObString &pattern_str, ObCollationType cs_type,
+                                         char escape, bool &is_precise)
 {
   int ret = OB_SUCCESS;
 
-  ObCollationType cs_type = pattern.get_collation_type();
   int64_t mbmaxlen = 1;
   is_precise = false;
-  if (pattern.is_string_type()) {
-    ObString pattern_str = pattern.get_string();
+  if (ob_is_string_type(type)) {
     if (cs_type == CS_TYPE_INVALID || cs_type >= CS_TYPE_MAX) {
     } else if (ObCharset::is_cs_uca(cs_type)) {
     } else if (OB_FAIL(ObCharset::get_mbmaxlen_by_coll(cs_type, mbmaxlen))) {
     } else {
       ObArenaAllocator allocator;
-      size_t col_len = pattern.get_string_len();
+      size_t col_len = pattern_str.length();
       col_len = static_cast<int32_t>(col_len * mbmaxlen);
       size_t min_str_len = col_len;
       size_t max_str_len = col_len;

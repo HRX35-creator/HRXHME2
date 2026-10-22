@@ -21,3 +21,22 @@ cc_test(
     env = {"LD_LIBRARY_PATH": "src/observer"},
     deps = [":datum_collection_compare_cases", "//src/observer:liboceanbase"],
 )
+
+cc_library(
+    name = "datum_parameter_constraint_cases",
+    srcs = ["test_datum_parameter_constraints.cpp"],
+    alwayslink = True,
+    deps = [
+        "//src/sql:sql_runtime_interface",
+        "//src/sql:sql_runtime_internal_headers",
+        "//bazel/third_party:gtest",
+    ],
+)
+
+cc_test(
+    name = "test_datum_parameter_constraints",
+    linkstatic = True,
+    data = ["//src/observer:liboceanbase_test_runtime"],
+    env = {"LD_LIBRARY_PATH": "src/observer"},
+    deps = [":datum_parameter_constraint_cases", "//src/observer:liboceanbase"],
+)

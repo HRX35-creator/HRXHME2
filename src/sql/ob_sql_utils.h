@@ -1101,7 +1101,7 @@ struct ObPreCalcExprConstraint : public common::ObDLinkBase<ObPreCalcExprConstra
     {
     }
     virtual int assign(const ObPreCalcExprConstraint &other, common::ObIAllocator &allocator);
-    virtual int check_is_match(ObDatumObjParam &datum_param, 
+    virtual int check_is_match(DatumParameter &datum_param,
                                ObExecContext &exec_ctx,
                                bool &is_match) const;
     ObPreCalcExprFrameInfo pre_calc_expr_info_;

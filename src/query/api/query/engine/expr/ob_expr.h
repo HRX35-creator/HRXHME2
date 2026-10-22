@@ -21,6 +21,7 @@
 #include "lib/allocator/ob_allocator.h"
 #include "lib/oblog/ob_log.h"
 #include "common/datum/ob_datum.h"
+#include "common/datum/datum_parameter.h"
 #include "share/datum/ob_datum_funcs.h"
 #include "query/engine/ob_serializable_function.h"
 #include "query/parser/ob_item_type.h"
@@ -748,152 +749,22 @@ private:
   ObEvalCtx &ctx_;
 };
 
-struct ObDatumObj
-{
-public:
-  void set_scale(common::ObScale scale) {
-    meta_.scale_ = scale;
-  }
-  TO_STRING_KV(K_(meta));
-
-public:
-  ObDatumMeta meta_;
-  common::ObDatum datum_;
-};
+using common::DatumParameter;
 
 typedef common::ObIArray<ObExpr *> ObExprPtrIArray;
 typedef common::ObFixedArray<ObExpr *, common::ObIAllocator> ExprFixedArray;
 
-// copy from ObObjParam
-struct ObDatumObjParam : public ObDatumObj
-{
-  ObDatumObjParam() : ObDatumObj(), accuracy_(), res_flags_(0), flag_()
-  {
-  }
-  ObDatumObjParam(const ObDatumObj &other)
-    : ObDatumObj(other), accuracy_(), res_flags_(0), flag_()
-  {
-  }
+// Temporary input bridge. Parameter consumers use DatumParameter directly;
+// this bridge disappears when protocol / plan-cache inputs migrate too.
+int import_legacy_parameter(const common::ObObjParam &source,
+                            DatumParameter &destination,
+                            common::ObIAllocator *allocator);
 
-  TO_STRING_KV(K_(accuracy), K_(res_flags), K_(datum), K_(meta));
-public:
-  int from_objparam(const common::ObObjParam &objparam, common::ObIAllocator *allocator = nullptr);
-
-  int to_objparam(common::ObObjParam &obj_param, common::ObIAllocator *allocator = nullptr);
-  int construct_array_param_datum(const common::ObObjParam &obj_param, common::ObIAllocator &alloc);
-  int construct_sql_array_obj(common::ObObjParam &obj_param, common::ObIAllocator &allocator);
-  template<typename T>
-  int alloc_datum_reserved_buff(const T &obj_meta, const int16_t precision,
-                                common::ObIAllocator &allocator)
-  {
-    int ret = OB_SUCCESS;
-    common::ObObjType real_type = obj_meta.is_ext_sql_array() ? common::ObIntType : obj_meta.get_type();
-    common::ObObjDatumMapType obj_datum_map = common::ObDatum::get_obj_datum_map_type(real_type);
-    if (OB_LIKELY(common::OBJ_DATUM_NULL != obj_datum_map)) {
-      uint32_t def_res_len = common::ObDatum::get_reserved_size(obj_datum_map, precision);
-      if (OB_ISNULL(datum_.ptr_ = static_cast<char *>(allocator.alloc(def_res_len)))) {
-        ret = common::OB_ALLOCATE_MEMORY_FAILED;
-        SQL_ENG_LOG(WARN, "fail to alloc memory", K(def_res_len), K(ret));
-      }
-    }
-    return ret;
-  }
-  void set_sql_array_datum(const ObSqlDatumArray *datum_array)
-  {
-    // SQL arrays use the ordinary integer mapping to carry the address of
-    // the constructed array, not the typed extended-value representation.
-    datum_.set_int(reinterpret_cast<int64_t>(datum_array));
-  }
-  const ObSqlDatumArray *get_sql_datum_array() const
-  {
-    ObSqlDatumArray *datum_array = nullptr;
-    if (meta_.is_ext_sql_array()) {
-      //you can't call get_ext() here, get_ext() in Datum reads a typed extended value
-      //here you need to get the address of the constructed datum array
-      int64_t array_addr = datum_.get_int();
-      datum_array = reinterpret_cast<ObSqlDatumArray*>(array_addr);
-    }
-    return datum_array;
-  }
-  ObSqlDatumArray *get_sql_datum_array()
-  {
-    ObSqlDatumArray *datum_array = nullptr;
-    if (meta_.is_ext_sql_array()) {
-      //you can't call get_ext() here, get_ext() in Datum reads a typed extended value
-      //here you need to get the address of the constructed datum array
-      int64_t array_addr = datum_.get_int();
-      datum_array = reinterpret_cast<ObSqlDatumArray*>(array_addr);
-    }
-    return datum_array;
-  }
-
-  OB_INLINE void set_datum(const common::ObDatum &datum)
-  {
-    datum_ = datum;
-  }
-
-  OB_INLINE void set_meta(const ObDatumMeta &meta)
-  {
-    accuracy_.scale_ = meta.scale_;
-    accuracy_.precision_ = meta.precision_;
-    meta_ = meta;
-  }
-  // accuracy.
-  OB_INLINE void set_accuracy(const common::ObAccuracy &accuracy) { accuracy_.set_accuracy(accuracy); }
-  OB_INLINE void set_length(common::ObLength length) { accuracy_.set_length(length); }
-  OB_INLINE void set_precision(common::ObPrecision precision) { accuracy_.set_precision(precision); }
-  OB_INLINE void set_length_semantics(common::ObLengthSemantics length_semantics) { accuracy_.set_length_semantics(length_semantics); }
-  OB_INLINE void set_scale(common::ObScale scale) {
-    ObDatumObj::set_scale(scale);
-    accuracy_.set_scale(scale);
-  }
-  OB_INLINE void set_udt_id(uint64_t id) {
-    accuracy_.set_accuracy(id);
-  }
-  OB_INLINE const common::ObAccuracy &get_accuracy() const { return accuracy_; }
-  OB_INLINE common::ObLength get_length() const { return accuracy_.get_length(); }
-  OB_INLINE common::ObPrecision get_precision() const { return accuracy_.get_precision(); }
-  OB_INLINE common::ObScale get_scale() const { return accuracy_.get_scale(); }
-  OB_INLINE uint64_t get_udt_id() const {
-    return meta_.type_ == static_cast<uint8_t>(common::ObExtendType)
-           ? accuracy_.get_accuracy()
-           : common::OB_INVALID_INDEX;
-  }
-  OB_INLINE void set_result_flag(uint32_t flag) { res_flags_ |= flag; }
-  OB_INLINE void unset_result_flag(uint32_t flag) { res_flags_ &= (~flag); }
-  OB_INLINE bool has_result_flag(uint32_t flag) const { return res_flags_ & flag; }
-  OB_INLINE uint32_t get_result_flag() const { return res_flags_; }
-
-  OB_INLINE const common::ParamFlag &get_param_flag() const { return flag_; }
-  OB_INLINE void set_need_to_check_type(bool flag) { flag_.need_to_check_type_ = flag; }
-  OB_INLINE bool need_to_check_type() const { return flag_.need_to_check_type_; }
-
-  OB_INLINE void set_need_to_check_bool_value(bool flag) { flag_.need_to_check_bool_value_ = flag; }
-  OB_INLINE bool need_to_check_bool_value() const { return flag_.need_to_check_bool_value_; }
-
-  OB_INLINE void set_expected_bool_value(bool b_value) { flag_.expected_bool_value_ = b_value; }
-  OB_INLINE bool expected_bool_value() const { return flag_.expected_bool_value_; }
-
-  OB_INLINE bool is_nop_value() const { return false; }
-
-  NEED_SERIALIZE_AND_DESERIALIZE;
-
-  static uint32_t accuracy_offset_bits() { return offsetof(ObDatumObjParam, accuracy_) * 8; }
-  static uint32_t res_flags_offset_bits() { return offsetof(ObDatumObjParam, res_flags_) * 8; }
-  static uint32_t flag_offset_bits() { return offsetof(ObDatumObjParam, flag_) * 8; }
-
-private:
-  common::ObAccuracy accuracy_;
-  uint32_t res_flags_;  // BINARY, NUM, NOT_NULL, TIMESTAMP, etc
-                        // reference: src/lib/regex/include/mysql_com.h
-  common::ParamFlag flag_;
-};
-
-typedef common::Ob2DArray<ObDatumObjParam,
+typedef common::Ob2DArray<DatumParameter,
                           common::OB_MALLOC_BIG_BLOCK_SIZE,
                           common::ObWrapperAllocator,
                           false,
-                          common::ObSEArray<ObDatumObjParam *, 1, common::ObWrapperAllocator, false>
+                          common::ObSEArray<DatumParameter *, 1, common::ObWrapperAllocator, false>
                           > DatumParamStore;
 
 // Helper function for print datum which interpreted by expression

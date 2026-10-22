@@ -114,11 +114,11 @@ int ObPhysicalPlanCtx::init_datum_param_store()
   }
   // Through param_store, generate datum_param_store
   for (int64_t i = 0; OB_SUCC(ret) && i < param_store_.count(); i++) {
-    ObDatumObjParam &datum_param = datum_param_store_.at(i);
+    DatumParameter &datum_param = datum_param_store_.at(i);
     if (OB_FAIL(datum_param.alloc_datum_reserved_buff(param_store_.at(i).meta_,
                                                       param_store_.at(i).get_precision(),
                                                       allocator_))) {
-    } else if (OB_FAIL(datum_param.from_objparam(param_store_.at(i), &allocator_))) {
+    } else if (OB_FAIL(import_legacy_parameter(param_store_.at(i), datum_param, &allocator_))) {
     }
   }
   // Allocate param frame memory, and set param datum
@@ -423,12 +423,12 @@ int ObPhysicalPlanCtx::replace_batch_param_datum(const int64_t cur_group_id,
     ret = OB_ERR_UNEXPECTED;
   } else {
     for (int64_t i = start_param; OB_SUCC(ret) && i < start_param + param_cnt; i++) {
-      if (datum_param_store_.at(i).meta_.is_ext_sql_array()) {
+      if (datum_param_store_.at(i).is_ext_sql_array()) {
         //need to expand the real param to param frame
         ObDatum *datum = nullptr;
         ObEvalInfo *eval_info = nullptr;
         get_param_frame_info(i, datum, eval_info);
-        const ObSqlDatumArray *datum_array = datum_param_store_.at(i).get_sql_datum_array();;
+        const ObSqlDatumArray *datum_array = datum_param_store_.at(i).get_array<ObSqlDatumArray>();;
         if (OB_UNLIKELY(cur_group_id < 0) || OB_UNLIKELY(cur_group_id >= datum_array->count_)) {
           ret = OB_ERR_UNEXPECTED;
         } else {
@@ -1151,7 +1151,7 @@ int ObPhysicalPlanCtx::init_param_store_after_deserialize()
   }
   for (int64_t i = 0; OB_SUCC(ret) && i < param_store_.count(); i++) {
     ObObjParam &obj_param = param_store_.at(i);
-    ObDatumObjParam &datum_param = datum_param_store_.at(i);
+    DatumParameter &datum_param = datum_param_store_.at(i);
     if (obj_param.is_ext_sql_array()) {
       ObSqlArrayObj *array_obj = NULL;
       if (OB_FAIL(ObSqlArrayObj::do_real_deserialize(allocator_,
@@ -1166,7 +1166,7 @@ int ObPhysicalPlanCtx::init_param_store_after_deserialize()
       if (OB_FAIL(datum_param.alloc_datum_reserved_buff(obj_param.meta_,
                                                         obj_param.get_precision(),
                                                         allocator_))) {
-      } else if (OB_FAIL(datum_param.from_objparam(obj_param, &allocator_))) {
+      } else if (OB_FAIL(import_legacy_parameter(obj_param, datum_param, &allocator_))) {
       }
     }
   }

@@ -416,7 +416,7 @@ int ObPreCalcExprFrameInfo::assign(const ObPreCalcExprFrameInfo &other,
 }
 
 int ObPreCalcExprFrameInfo::eval(ObExecContext &exec_ctx,
-                                 ObIArray<ObDatumObjParam> &res_datum_params)
+                                 ObIArray<DatumParameter> &res_datum_params)
 {
   int ret = OB_SUCCESS;
   res_datum_params.reuse();
@@ -432,12 +432,12 @@ int ObPreCalcExprFrameInfo::eval(ObExecContext &exec_ctx,
 }
 
 OB_INLINE int ObPreCalcExprFrameInfo::do_normal_eval(ObExecContext &exec_ctx,
-                                                     ObIArray<ObDatumObjParam> &res_datum_params)
+                                                     ObIArray<DatumParameter> &res_datum_params)
 {
   int ret = OB_SUCCESS;
   ObEvalCtx eval_ctx(exec_ctx);
   ObDatum *res_datum = NULL;
-  ObDatumObjParam datum_param;
+  DatumParameter datum_param;
   ObExpr *rt_expr = NULL;
   for (int64_t i = 0; OB_SUCC(ret) && i < pre_calc_rt_exprs_.count(); ++i) {
     if (OB_ISNULL(rt_expr = pre_calc_rt_exprs_.at(i))) {
@@ -445,7 +445,11 @@ OB_INLINE int ObPreCalcExprFrameInfo::do_normal_eval(ObExecContext &exec_ctx,
     } else if (OB_FAIL(rt_expr->eval(eval_ctx, res_datum))) {
     } else {
       datum_param.set_datum(*res_datum);
-      datum_param.set_meta(rt_expr->datum_meta_);
+      datum_param.set_type_meta(rt_expr->obj_meta_);
+      ObAccuracy accuracy;
+      accuracy.set_scale(rt_expr->datum_meta_.scale_);
+      accuracy.set_precision(rt_expr->datum_meta_.precision_);
+      datum_param.set_accuracy(accuracy);
       if (rt_expr->obj_meta_.has_lob_header()) {
         datum_param.set_result_flag(HAS_LOB_HEADER_FLAG);
       }
@@ -457,12 +461,12 @@ OB_INLINE int ObPreCalcExprFrameInfo::do_normal_eval(ObExecContext &exec_ctx,
 }
 
 OB_NOINLINE int ObPreCalcExprFrameInfo::do_batch_stmt_eval(ObExecContext &exec_ctx,
-                                                           ObIArray<ObDatumObjParam> &res_datum_params)
+                                                           ObIArray<DatumParameter> &res_datum_params)
 {
   int ret = OB_SUCCESS;
   ObEvalCtx eval_ctx(exec_ctx);
   ObDatum *res_datum = NULL;
-  ObDatumObjParam datum_param;
+  DatumParameter datum_param;
   int64_t group_cnt = exec_ctx.get_sql_ctx()->get_batch_params_count();
   ObSqlDatumArray *datum_array = nullptr;
   //construct sql array obj
@@ -484,12 +488,14 @@ OB_NOINLINE int ObPreCalcExprFrameInfo::do_batch_stmt_eval(ObExecContext &exec_c
       }
     }
     if (OB_SUCC(ret)) {
-      datum_param.meta_.type_ = ObExtendType;
-      datum_param.meta_.scale_ = T_EXT_SQL_ARRAY;
-      if (OB_FAIL(datum_param.alloc_datum_reserved_buff(datum_param.meta_, // is_ext_sql_array
+      ObObjMeta array_meta;
+      array_meta.set_ext();
+      array_meta.set_extend_type(T_EXT_SQL_ARRAY);
+      datum_param.set_type_meta(array_meta);
+      if (OB_FAIL(datum_param.alloc_datum_reserved_buff(array_meta, // is_ext_sql_array
                                                         PRECISION_UNKNOWN_YET, // precision is unknown
                                                         exec_ctx.get_allocator()))) {
-      } else if (FALSE_IT(datum_param.set_sql_array_datum(datum_array))) {
+      } else if (FALSE_IT(datum_param.set_array_address(datum_array))) {
         //always false, do nothing
       } else if (OB_FAIL(res_datum_params.push_back(datum_param))) {
       }
@@ -505,7 +511,7 @@ OB_NOINLINE int ObPreCalcExprFrameInfo::do_batch_stmt_eval(ObExecContext &exec_c
     clear_datum_evaluted_flags(exec_ctx.get_frames());
     for (int64_t i = 0; OB_SUCC(ret) && i < pre_calc_rt_exprs_.count(); ++i) {
       ObExpr *rt_expr = pre_calc_rt_exprs_.at(i);
-      datum_array = res_datum_params.at(i).get_sql_datum_array();
+      datum_array = res_datum_params.at(i).get_array<ObSqlDatumArray>();
       if (OB_FAIL(rt_expr->eval(eval_ctx, res_datum))) {
       } else if (OB_FAIL(datum_array->data_[group_id].deep_copy(*res_datum,
                                                                 exec_ctx.get_allocator()))) {

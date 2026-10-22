@@ -170,12 +170,12 @@ struct ObPreCalcExprFrameInfo
   }
 
   int assign(const ObPreCalcExprFrameInfo &other, common::ObIAllocator &allocator);
-  int eval(ObExecContext &exec_ctx, common::ObIArray<ObDatumObjParam> &res_datum_params);
+  int eval(ObExecContext &exec_ctx, common::ObIArray<DatumParameter> &res_datum_params);
   int eval_expect_err(ObExecContext &exec_ctx, bool &all_eval_err);
   INHERIT_TO_STRING_KV("frame_info", ObExprFrameInfo, K_(pre_calc_rt_exprs));
 private:
-  int do_normal_eval(ObExecContext &exec_ctx, common::ObIArray<ObDatumObjParam> &res_datum_params);
-  int do_batch_stmt_eval(ObExecContext &exec_ctx, common::ObIArray<ObDatumObjParam> &res_datum_params);
+  int do_normal_eval(ObExecContext &exec_ctx, common::ObIArray<DatumParameter> &res_datum_params);
+  int do_batch_stmt_eval(ObExecContext &exec_ctx, common::ObIArray<DatumParameter> &res_datum_params);
   void clear_datum_evaluted_flags(char **frames);
 public:
   common::ObFixedArray<ObExpr *, common::ObIAllocator> pre_calc_rt_exprs_;
