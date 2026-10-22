@@ -478,7 +478,7 @@ OB_DEF_SERIALIZE(ObPhysicalPlanCtx)
   const ObRowIdListArray *row_id_list_array = NULL;
   int64_t cursor_count = implicit_cursor_infos_.count();
   // used for function sys_view_bigint_param(idx), @note unused anymore
-  ObSEArray<common::ObObj, 1> sys_view_bigint_params_;
+  int64_t obsolete_sys_view_param_count = 0;
   char message_[1] = {'\0'}; //error msg buffer, unused anymore
   if (exec_ctx_ != NULL) {
     row_id_list_array = &exec_ctx_->get_row_id_list_array();
@@ -495,7 +495,7 @@ OB_DEF_SERIALIZE(ObPhysicalPlanCtx)
   OB_UNIS_ENCODE(ts_timeout_us_);
   OB_UNIS_ENCODE(consistency_level_);
   OB_UNIS_ENCODE(*param_store);
-  OB_UNIS_ENCODE(sys_view_bigint_params_);
+  OB_UNIS_ENCODE(obsolete_sys_view_param_count);
   OB_UNIS_ENCODE(sql_mode_);
   OB_UNIS_ENCODE(autoinc_params_);
   OB_UNIS_ENCODE(tablet_autoinc_param_);
@@ -600,7 +600,7 @@ OB_DEF_SERIALIZE_SIZE(ObPhysicalPlanCtx)
   const ObRowIdListArray *row_id_list_array = NULL;
   int64_t cursor_count = implicit_cursor_infos_.count();
   // used for function sys_view_bigint_param(idx), @note unused anymore
-  ObSEArray<common::ObObj, 1> sys_view_bigint_params_;
+  int64_t obsolete_sys_view_param_count = 0;
   char message_[1] = {'\0'}; //error msg buffer, unused anymore
   if (exec_ctx_ != NULL) {
     row_id_list_array = &exec_ctx_->get_row_id_list_array();
@@ -617,7 +617,7 @@ OB_DEF_SERIALIZE_SIZE(ObPhysicalPlanCtx)
   OB_UNIS_ADD_LEN(ts_timeout_us_);
   OB_UNIS_ADD_LEN(consistency_level_);
   OB_UNIS_ADD_LEN(*param_store);
-  OB_UNIS_ADD_LEN(sys_view_bigint_params_);
+  OB_UNIS_ADD_LEN(obsolete_sys_view_param_count);
   OB_UNIS_ADD_LEN(sql_mode_);
   OB_UNIS_ADD_LEN(autoinc_params_);
   OB_UNIS_ADD_LEN(tablet_autoinc_param_);
@@ -696,7 +696,7 @@ OB_DEF_DESERIALIZE(ObPhysicalPlanCtx)
   int64_t cursor_count = 0;
   int64_t local_var_array_cnt = 0;
   // used for function sys_view_bigint_param(idx), @note unused anymore
-  ObSEArray<common::ObObj, 1> sys_view_bigint_params_;
+  int64_t obsolete_sys_view_param_count = 0;
   char message_[1] = {'\0'}; //error msg buffer, unused anymore
   // Follow the old sequence method
   OB_UNIS_DECODE(tsc_snapshot_timestamp_);
@@ -704,7 +704,16 @@ OB_DEF_DESERIALIZE(ObPhysicalPlanCtx)
   OB_UNIS_DECODE(ts_timeout_us_);
   OB_UNIS_DECODE(consistency_level_);
   OB_UNIS_DECODE(param_store_);
-  OB_UNIS_DECODE(sys_view_bigint_params_);
+  OB_UNIS_DECODE(obsolete_sys_view_param_count);
+  if (OB_SUCC(ret) && (obsolete_sys_view_param_count < 0 ||
+      obsolete_sys_view_param_count > (data_len - pos) / sizeof(ObObjMeta))) {
+    ret = OB_DESERIALIZE_ERROR;
+  }
+  for (int64_t i = 0; OB_SUCC(ret) && i < obsolete_sys_view_param_count; ++i) {
+    ObDatum discarded;
+    ObObjMeta discarded_meta;
+    ret = DatumParameterCodec::decode_value(buf, data_len, pos, allocator_, discarded, discarded_meta);
+  }
   OB_UNIS_DECODE(sql_mode_);
   OB_UNIS_DECODE(autoinc_params_);
   OB_UNIS_DECODE(tablet_autoinc_param_);

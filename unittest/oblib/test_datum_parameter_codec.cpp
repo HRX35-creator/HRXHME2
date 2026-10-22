@@ -326,4 +326,27 @@ TEST(DatumCodec, failed_store_decode_clears_partial_output_and_keeps_position) {
   int64_t size = 0; ASSERT_EQ(OB_SUCCESS, DatumParameterCodec::store_size(store, size)); EXPECT_EQ(1, size);
 }
 
+TEST(DatumCodec, native_store_generic_serializer_uses_owned_native_values) {
+  ObArenaAllocator arena; DatumParamStore source{ObWrapperAllocator(arena)};
+  ASSERT_EQ(OB_SUCCESS, source.push_back(integer(arena, INT64_MIN)));
+  DatumParameter values = make_array(arena, 1); values.get_array<DatumParameterArray>()->data_[0] = integer(arena, 42);
+  ASSERT_EQ(OB_SUCCESS, source.push_back(values));
+  const int64_t size = serialization::encoded_length(source); ASSERT_GT(size, 0);
+  std::string bytes(size, '\0'); int64_t pos = 0;
+  ASSERT_EQ(OB_SUCCESS, serialization::encode(&bytes[0], bytes.size(), pos, source)); ASSERT_EQ(size, pos);
+  ObArenaAllocator output_arena; DatumParamStore output{ObWrapperAllocator(output_arena)}; pos = 0;
+  ASSERT_EQ(OB_SUCCESS, serialization::decode(bytes.data(), bytes.size(), pos, output)); EXPECT_EQ(size, pos);
+  memset(&bytes[0], 0xa5, bytes.size()); ASSERT_EQ(2, output.count()); EXPECT_EQ(INT64_MIN, output.at(0).datum_.get_int());
+  const auto *array = output.at(1).get_array<DatumParameterArray>(); ASSERT_NE(nullptr, array); ASSERT_EQ(1, array->count_); EXPECT_EQ(42, array->data_[0].datum_.get_int());
+}
+TEST(DatumCodec, native_store_generic_decoder_failure_and_missing_allocator) {
+  ObArenaAllocator arena; DatumParamStore source{ObWrapperAllocator(arena)}; ASSERT_EQ(OB_SUCCESS, source.push_back(integer(arena, 42)));
+  std::string bytes(source.get_serialize_size(), '\0'); int64_t end = 0;
+  ASSERT_EQ(OB_SUCCESS, source.serialize(&bytes[0], bytes.size(), end));
+  DatumParamStore missing_allocator; int64_t pos = 0;
+  EXPECT_EQ(OB_ALLOCATE_MEMORY_FAILED, missing_allocator.deserialize(bytes.data(), bytes.size(), pos)); EXPECT_EQ(0, pos); EXPECT_TRUE(missing_allocator.empty());
+  DatumParamStore destination{ObWrapperAllocator(arena)}; ASSERT_EQ(OB_SUCCESS, destination.push_back(integer(arena, 99))); pos = 0;
+  EXPECT_NE(OB_SUCCESS, destination.deserialize(bytes.data(), bytes.size() - 1, pos)); EXPECT_EQ(0, pos); EXPECT_TRUE(destination.empty());
+}
+
 int main(int argc, char **argv) { ::testing::InitGoogleTest(&argc, argv); return RUN_ALL_TESTS(); }

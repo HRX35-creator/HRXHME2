@@ -19,6 +19,7 @@
 #include "share/ob_autoincrement_param.h"
 #include "share/ob_tablet_autoincrement_param.h"
 #include "common/sql_mode/ob_sql_mode.h"
+#include "query/engine/statement_time.h"
 #include "common/ob_field.h"
 #include "lib/time/ob_clock_generator.h"
 #include "data_plane/transaction/ob_tx_options.h"
@@ -191,10 +192,10 @@ public:
     cur_time_.set_timestamp(session_val);
   }
   void set_cur_time(const int64_t &session_val, const ObSQLSessionInfo &session);
-  const common::ObObj &get_cur_time() const { return cur_time_; }
-  common::ObObj &get_cur_time() { return cur_time_; }
+  const StatementTime &get_cur_time() const { return cur_time_; }
+  StatementTime &get_cur_time() { return cur_time_; }
   int64_t get_cur_time_tardy_value() const { return cur_time_.get_datetime() + DELTA_TARDY_TIME_US; }
-  bool has_cur_time() const { return common::ObTimestampType == cur_time_.get_type(); }
+  bool has_cur_time() const { return cur_time_.has_value(); }
   int64_t get_warning_count() const
   {
     return warning_count_;
@@ -517,7 +518,7 @@ private:
   // used for TRANSACTION SET CONSISTENCY check
   int64_t tsc_snapshot_timestamp_;
   // only used when the sql contains fun like current_time
-  common::ObObj cur_time_;//used for session
+  StatementTime cur_time_; // fixed statement clock
   // execution timeout for this round of execution
   int64_t ts_timeout_us_;
   common::ObConsistencyLevel consistency_level_;

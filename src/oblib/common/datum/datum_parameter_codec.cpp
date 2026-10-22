@@ -407,6 +407,30 @@ bool valid_buffer(const void *buf, int64_t length, int64_t pos)
 
 } // anonymous namespace
 
+template <>
+int DatumParamStore::serialize(char *buf, int64_t length, int64_t &pos) const
+{
+  return DatumParameterCodec::encode_store(*this, buf, length, pos);
+}
+
+template <>
+int DatumParamStore::deserialize(const char *buf, int64_t length, int64_t &pos)
+{
+  ObWrapperAllocator allocator(get_block_allocator());
+  return DatumParameterCodec::decode_store(buf, length, pos, allocator, *this);
+}
+
+template <>
+int64_t DatumParamStore::get_serialize_size() const
+{
+  int64_t size = 0;
+  const int ret = DatumParameterCodec::store_size(*this, size);
+  if (ret != OB_SUCCESS) {
+    COMMON_LOG(WARN, "native parameter store has no supported wire size", K(ret));
+  }
+  return size;
+}
+
 int DatumParameterCodec::store_size(const DatumParamStore &store, int64_t &size)
 {
   SizeArchive archive;

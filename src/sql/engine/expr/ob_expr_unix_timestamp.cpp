@@ -157,7 +157,7 @@ int ObExprUnixTimestamp::eval_unix_timestamp(const ObExpr &expr, ObEvalCtx &ctx,
   if (0 == expr.arg_cnt_) {
     CK(OB_NOT_NULL(ctx.exec_ctx_.get_physical_plan_ctx()));
     if (OB_SUCC(ret)) {
-      const ObObj &date = ctx.exec_ctx_.get_physical_plan_ctx()->get_cur_time();
+      const StatementTime &date = ctx.exec_ctx_.get_physical_plan_ctx()->get_cur_time();
       utz_value = date.get_timestamp();
     }
   } else if (1 == expr.arg_cnt_) {

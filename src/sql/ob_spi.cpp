@@ -5107,7 +5107,7 @@ int ObSPIService::convert_obj(ObPLExecCtx *ctx,
           }
         }
       }
-      ObObj &cur_time = ctx->exec_ctx_->get_physical_plan_ctx()->get_cur_time();
+      const StatementTime &cur_time = ctx->exec_ctx_->get_physical_plan_ctx()->get_cur_time();
       cast_ctx.cur_time_ = cur_time.get_timestamp();
       ObExprResType result_type;
       OX (result_type.set_meta(result_types[i].get_meta_type()));

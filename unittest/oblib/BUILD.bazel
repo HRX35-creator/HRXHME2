@@ -73,7 +73,7 @@ cc_test(
 
 cc_library(
     name = "datum_parameter_codec_cases",
-    srcs = ["test_datum_parameter_codec.cpp"],
+    srcs = ["test_datum_parameter_codec.cpp", "test_native_store_include_order.cpp"],
     alwayslink = True,
     deps = [
         "//src/oblib:oblib_unit_test_internal_headers",
