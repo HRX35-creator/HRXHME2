@@ -292,39 +292,72 @@ int ObValuesTableAccessOp::calc_datum_from_expr(const int64_t col_idx,
   return ret;
 }
 
+namespace {
+// Keep the expression adapter used by DECIMAL -> NUMBER off the ordinary
+// borrowed-value path. DECIMAL width/scale changes use the numeric kernel
+// directly below and never construct an input expression.
+OB_NOINLINE int cast_values_decimal_to_number(const ObDatum &source, const ObObjMeta &meta,
+                                               ObExpr &output, ObEvalCtx &ctx,
+                                               ObDatumCaster &caster, ObCastMode mode)
+{
+  ObDatum &dst = output.locate_expr_datum(ctx);
+  dst = source;
+  ObExpr input;
+  input.frame_idx_ = output.frame_idx_;
+  input.datum_off_ = reinterpret_cast<char *>(&dst) - ctx.frames_[input.frame_idx_];
+  input.eval_info_off_ = output.eval_info_off_;
+  input.obj_meta_ = meta;
+  input.datum_meta_.type_ = meta.get_type();
+  input.datum_meta_.cs_type_ = meta.get_collation_type();
+  input.datum_meta_.scale_ = meta.get_scale();
+  input.datum_meta_.precision_ = wide::ObDecimalIntConstValue::get_max_precision_by_int_bytes(
+      source.get_int_bytes());
+  input.obj_datum_map_ = ObDatum::get_obj_datum_map_type(meta.get_type());
+  ObDatum *converted = nullptr;
+  int ret = caster.to_type(output.datum_meta_, input, mode, converted);
+  if (OB_SUCC(ret)) {
+    ObDatum &owned = output.locate_datum_for_write(ctx);
+    ObDataBuffer allocator(const_cast<char *>(owned.ptr_), output.res_buf_len_);
+    ret = owned.deep_copy(*converted, allocator);
+  }
+  return ret;
+}
+
+OB_NOINLINE int scale_values_decimal(const ObDatum &source, const ObObjMeta &meta,
+                                      ObExpr &output, ObEvalCtx &ctx, ObCastMode mode)
+{
+  int ret = OB_SUCCESS;
+  ObDecimalIntBuilder converted;
+  if (OB_FAIL(ObDatumCast::common_scale_decimalint(source.get_decimal_int(), source.get_int_bytes(),
+              meta.get_scale(), output.datum_meta_.scale_, output.datum_meta_.precision_,
+              mode, converted, ctx.exec_ctx_.get_user_logging_ctx()))) {
+  } else {
+    ObDatum view;
+    view.set_decimal_int_shallow(converted.get_decimal_int(), converted.get_int_bytes());
+    ObDatum &owned = output.locate_datum_for_write(ctx);
+    ObDataBuffer allocator(const_cast<char *>(owned.ptr_), output.res_buf_len_);
+    ret = owned.deep_copy(view, allocator);
+  }
+  return ret;
+}
+} // namespace
+
 int ObValuesTableAccessOp::calc_datum_from_param(const ObDatum &source, const ObObjMeta &meta, ObExpr *dst_expr)
 {
   int ret = OB_SUCCESS;
-  ObDatum &dst = dst_expr->locate_datum_for_write(eval_ctx_);
   const ObObjType dst_type = dst_expr->datum_meta_.type_;
-  const bool decimal = !source.is_null() && ob_is_decimal_int_tc(meta.get_type());
-  const bool adjust_decimal = decimal && ob_is_decimal_int_tc(dst_type) &&
+  const bool decimal = !source.is_null() && meta.is_decimal_int();
+  if (decimal && dst_type == ObDecimalIntType &&
       ObDatumCast::need_scale_decimalint(meta.get_scale(), source.get_int_bytes(),
           dst_expr->datum_meta_.scale_,
-          wide::ObDecimalIntConstValue::get_int_bytes_by_precision(dst_expr->datum_meta_.precision_));
-  dst = source;
-  if (decimal && (ob_is_number_tc(dst_type) || adjust_decimal)) {
-    // The output slot temporarily exposes a native input to the existing Datum
-    // caster. Its private cast frame holds the result before we own that result
-    // in the output frame; no legacy value or scalar payload copy is needed.
-    ObExpr input;
-    input.frame_idx_ = dst_expr->frame_idx_;
-    input.datum_off_ = reinterpret_cast<char *>(&dst) - eval_ctx_.frames_[input.frame_idx_];
-    input.eval_info_off_ = dst_expr->eval_info_off_;
-    input.obj_meta_ = meta;
-    input.datum_meta_.type_ = meta.get_type();
-    input.datum_meta_.cs_type_ = meta.get_collation_type();
-    input.datum_meta_.scale_ = meta.get_scale();
-    input.datum_meta_.precision_ = wide::ObDecimalIntConstValue::get_max_precision_by_int_bytes(
-        source.get_int_bytes());
-    input.obj_datum_map_ = ObDatum::get_obj_datum_map_type(meta.get_type());
-    ObDatum *converted = nullptr;
-    if (OB_FAIL(datum_caster_.to_type(dst_expr->datum_meta_, input, cm_, converted))) {
-    } else {
-      ObDatum &owned = dst_expr->locate_datum_for_write(eval_ctx_);
-      ObDataBuffer allocator(const_cast<char *>(owned.ptr_), dst_expr->res_buf_len_);
-      ret = owned.deep_copy(*converted, allocator);
-    }
+          wide::ObDecimalIntConstValue::get_int_bytes_by_precision(dst_expr->datum_meta_.precision_))) {
+    ret = scale_values_decimal(source, meta, *dst_expr, eval_ctx_, cm_);
+  } else if (decimal && ob_is_number_tc(dst_type)) {
+    ret = cast_values_decimal_to_number(source, meta, *dst_expr, eval_ctx_, datum_caster_, cm_);
+  } else {
+    // A borrowed native view does not need the reserved result-buffer pointer
+    // reset that locate_datum_for_write() performs before scalar construction.
+    dst_expr->locate_expr_datum(eval_ctx_) = source;
   }
   if (OB_SUCC(ret)) {
     dst_expr->set_evaluated_projected(eval_ctx_);
