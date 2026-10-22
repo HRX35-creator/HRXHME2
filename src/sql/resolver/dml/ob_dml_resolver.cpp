@@ -11637,10 +11637,15 @@ int ObDMLResolver::estimate_values_table_stats(ObValuesTableDef &table_def)
           } else if (OB_FAIL(add_obj_to_llc_bitmap(param_store->at(param_idx), llc_bitmap, num_null))) {
           }
         }
-      } else if (ObValuesTableDef::ACCESS_OBJ == table_def.access_type_) {
+      } else if (ObValuesTableDef::ACCESS_VALUE == table_def.access_type_) {
         for (int64_t i = 0; OB_SUCC(ret) && i < table_def.row_cnt_ && i < compute_ndv_thredhold; i++) {
           int64_t param_idx = i * table_def.column_cnt_ + col_idx;
-          if (OB_FAIL(add_obj_to_llc_bitmap(table_def.access_objs_.at(param_idx), llc_bitmap, num_null))) {
+          // The NDV hash API still consumes legacy values. Keep that view at
+          // the hash boundary; constants and their copies remain native.
+          ObObj view;
+          const DatumParameter &value = table_def.access_values_.at(param_idx);
+          if (OB_FAIL(materialize_legacy_value(value.datum_, value.get_type_meta(), view))) {
+          } else if (OB_FAIL(add_obj_to_llc_bitmap(view, llc_bitmap, num_null))) {
           }
         }
       }

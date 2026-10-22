@@ -1699,7 +1699,7 @@ int ObStaticEngineCG::generate_spec(ObLogValuesTableAccess &op,
     ObIAllocator &allocator = phy_plan_->get_allocator();
     if (OB_FAIL(spec.column_exprs_.prepare_allocate(op.get_column_exprs().count()))) {
     } else if (OB_FAIL(spec.value_exprs_.prepare_allocate(table_def->access_exprs_.count()))) {
-    } else if (OB_FAIL(spec.obj_params_.prepare_allocate(table_def->access_objs_.count()))) {
+    } else if (OB_FAIL(spec.datum_values_.prepare_allocate(table_def->access_values_.count()))) {
     } else {
       for (int64_t i = 0; OB_SUCC(ret) && i < op.get_column_exprs().count(); i++) {
         ObColumnRefRawExpr *col_expr = op.get_column_exprs().at(i);
@@ -1727,10 +1727,12 @@ int ObStaticEngineCG::generate_spec(ObLogValuesTableAccess &op,
           spec.value_exprs_.at(i) = expr;
         }
       }
-      for (int64_t i = 0; OB_SUCC(ret) && i < table_def->access_objs_.count(); i++) {
-        if (OB_FAIL(ob_write_obj(allocator,
-                                 table_def->access_objs_.at(i),
-                                 spec.obj_params_.at(i)))) {
+      for (int64_t i = 0; OB_SUCC(ret) && i < table_def->access_values_.count(); i++) {
+        const DatumParameter &source = table_def->access_values_.at(i);
+        DatumValue &value = spec.datum_values_.at(i);
+        if (OB_FAIL(clone_datum_value(source.datum_, source.get_type_meta(), value.datum_, allocator))) {
+        } else {
+          value.meta_ = source.get_type_meta();
         }
       }
       if (OB_FAIL(ret)) {

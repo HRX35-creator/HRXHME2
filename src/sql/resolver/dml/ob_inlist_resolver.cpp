@@ -108,7 +108,7 @@ int ObInListResolver::resolve_values_table_from_inlist(const ParseNode *in_list,
   // we treat question marks in prepare stmt as objs instead of params
   ObValuesTableDef::TableAccessType access_type = is_question_mark && !is_prepare_stage
                                                   ? ObValuesTableDef::ACCESS_PARAM 
-                                                  : ObValuesTableDef::ACCESS_OBJ;
+                                                  : ObValuesTableDef::ACCESS_VALUE;
   if (OB_ISNULL(allocator) || OB_ISNULL(session_info) || OB_ISNULL(in_list)) {
     ret = OB_ERR_UNEXPECTED;
   } else if (OB_UNLIKELY(in_list->num_child_ != row_cnt)) {
@@ -126,7 +126,7 @@ int ObInListResolver::resolve_values_table_from_inlist(const ParseNode *in_list,
   } else if (ObValuesTableDef::ACCESS_PARAM == access_type &&
              OB_FAIL(resolve_access_param_values_table(*in_list, column_cnt, row_cnt, param_store,
                                                  session_info, allocator, is_called_in_sql, *table_def))) {
-  } else if (ObValuesTableDef::ACCESS_OBJ == access_type &&
+  } else if (ObValuesTableDef::ACCESS_VALUE == access_type &&
              OB_FAIL(resolve_access_obj_values_table(*in_list, column_cnt, row_cnt, session_info,
                                                      allocator, is_prepare_stage, is_called_in_sql, *table_def))) {
   } else if (OB_FAIL(cur_resolver_->estimate_values_table_stats(*table_def))) {
@@ -460,6 +460,7 @@ int ObInListResolver::resolve_access_obj_values_table(const ParseNode &in_list,
     for (int64_t j = 0; OB_SUCC(ret) && j < column_cnt; j++) {
       const ParseNode *element = column_cnt == 1 ? row_node : row_node->children_[j];
       ObObjParam obj_param;
+      DatumParameter value;
       ObRawExprResType res_type;
       if (OB_FAIL(ObResolverUtils::resolve_const(element, stmt_type, *allocator, coll_type,
                                                  nchar_collation, timezone_info, obj_param, is_parameterize,
@@ -472,7 +473,8 @@ int ObInListResolver::resolve_access_obj_values_table(const ParseNode &in_list,
                                                  enable_mysql_compatible_dates,
                                                  session_info->get_min_const_integer_precision(),
                                                  is_from_pl))) {
-      } else if (OB_FAIL(table_def.access_objs_.push_back(obj_param))) {
+      } else if (OB_FAIL(copy_legacy_parameter(obj_param, value, *allocator))) {
+      } else if (OB_FAIL(table_def.access_values_.push_back(value))) {
       } else {
         res_type.set_meta(obj_param.get_param_meta());
         res_type.set_accuracy(obj_param.get_accuracy());

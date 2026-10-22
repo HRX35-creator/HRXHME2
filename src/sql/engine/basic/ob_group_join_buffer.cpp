@@ -400,7 +400,7 @@ int ObGroupJoinBufffer::rescan_left()
       ObPhysicalPlanCtx *plan_ctx = GET_PHY_PLAN_CTX(*ctx_);
       for (int64_t i = 0; !need_rescan && i < left_rescan_params_->count(); i++) {
         int64_t param_idx = left_rescan_params_->at(i).param_idx_;
-        if (plan_ctx->get_param_store().at(param_idx).is_ext_sql_array()) {
+        if (plan_ctx->get_datum_param_store().at(param_idx).is_ext_sql_array()) {
           need_rescan = true;
         }
       }

@@ -4484,11 +4484,10 @@ int ObValuesTableDef::deep_copy(const ObValuesTableDef &other,
     column_cnt_ = other.column_cnt_;
     row_cnt_ = other.row_cnt_;
     is_const_ = other.is_const_;
-    for (int64_t i = 0; OB_SUCC(ret) && i < other.access_objs_.count(); ++i) {
-      const ObObjParam &obj = other.access_objs_.at(i);
-      ObObjParam tmp_obj = obj;
-      if (OB_FAIL(ob_write_obj(*allocator, obj, tmp_obj))) {
-      } else if (OB_FAIL(access_objs_.push_back(tmp_obj))) {
+    for (int64_t i = 0; OB_SUCC(ret) && i < other.access_values_.count(); ++i) {
+      DatumParameter value;
+      if (OB_FAIL(DatumParameterArray::clone_parameter(other.access_values_.at(i), value, *allocator))) {
+      } else if (OB_FAIL(access_values_.push_back(value))) {
       }
     }
     for (int64_t i = 0; OB_SUCC(ret) && i < other.column_types_.count(); ++i) {

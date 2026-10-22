@@ -75,14 +75,14 @@ cc_test(
 
 cc_library(
     name = "range_map_datum_cases",
-    srcs = ["test_range_map_datum.cpp"],
+    srcs = ["test_range_map_datum.cpp", "test_values_datum.cpp"],
     alwayslink = True,
     deps = ["//src/sql:sql_runtime_interface", "//src/sql:sql_runtime_internal_headers", "//bazel/third_party:gtest"],
 )
 cc_test(
     name = "test_range_map_datum",
     linkstatic = True,
-    data = ["data/range_map.golden", "//src/observer:liboceanbase_test_runtime"],
+    data = ["data/range_map.golden", "data/values_table_access.golden", "//src/observer:liboceanbase_test_runtime"],
     env = {"LD_LIBRARY_PATH": "src/observer"},
     deps = [":range_map_datum_cases", "//src/observer:liboceanbase"],
 )
