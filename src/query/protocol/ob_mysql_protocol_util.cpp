@@ -367,6 +367,182 @@ int build_mysql_datetime_cell_value(ObMySQLDateTime value, ObScale scale, MYSQL_
   return ret;
 }
 
+int build_float_cell_value(float value, ObScale scale, bool zerofill, int32_t zflength,
+                           MYSQL_PROTOCOL_TYPE type, ObIAllocator &scratch_allocator,
+                           ObMySQLCellValue &out)
+{
+  int ret = OB_SUCCESS;
+  if (BINARY == type) {
+    uint32_t bits = 0;
+    MEMCPY(&bits, &value, sizeof(bits));
+    out.kind_ = ObMySQLCellValueKind::F32;
+    out.value_ = bits;
+  } else {
+    char tmp[FLOAT_TO_STRING_CONVERSION_BUFFER_SIZE];
+    int64_t length = 0;
+    if (scale >= 0) {
+      length = ob_fcvt(value, scale, sizeof(tmp) - 1, tmp, NULL);
+    } else {
+      length = ob_gcvt_opt(value, OB_GCVT_ARG_FLOAT, sizeof(tmp) - 1, tmp,
+                           NULL, TRUE);
+    }
+    if (OB_UNLIKELY(length >= 251)) {
+      ret = OB_INVALID_ARGUMENT;
+    } else {
+      ret = set_zerofill_bytes(scratch_allocator, tmp, length, zerofill,
+                               zflength, out);
+    }
+  }
+  return ret;
+}
+
+int build_double_cell_value(double value, ObScale scale, bool zerofill, int32_t zflength,
+                            MYSQL_PROTOCOL_TYPE type, ObIAllocator &scratch_allocator,
+                            ObMySQLCellValue &out)
+{
+  int ret = OB_SUCCESS;
+  if (BINARY == type) {
+    uint64_t bits = 0;
+    MEMCPY(&bits, &value, sizeof(bits));
+    out.kind_ = ObMySQLCellValueKind::F64;
+    out.value_ = bits;
+  } else {
+    char tmp[DOUBLE_TO_STRING_CONVERSION_BUFFER_SIZE];
+    int64_t length = 0;
+    if (scale >= 0) {
+      length = ob_fcvt(value, scale, sizeof(tmp) - 1, tmp, NULL);
+    } else {
+      length = ob_gcvt_opt(value, OB_GCVT_ARG_DOUBLE, sizeof(tmp) - 1, tmp,
+                           NULL, TRUE);
+    }
+    if (OB_UNLIKELY(length > static_cast<int64_t>(sizeof(tmp)))) {
+      ret = OB_INVALID_ARGUMENT;
+    } else {
+      ret = set_zerofill_bytes(scratch_allocator, tmp, length, zerofill,
+                               zflength, out);
+    }
+  }
+  return ret;
+}
+
+int build_date_cell_value(int32_t value, MYSQL_PROTOCOL_TYPE type, ObMySQLCellValue &out)
+{
+  int ret = OB_SUCCESS;
+  if (BINARY == type) {
+    ObTime ob_time(DT_TYPE_DATE);
+    if (OB_FAIL(
+            ObTimeConverter::date_to_ob_time(value, ob_time))) {
+    } else if (OB_UNLIKELY(!HAS_TYPE_DATE(ob_time.mode_))) {
+      ret = OB_ERR_UNEXPECTED;
+    } else {
+      set_date_time_parts(ob_time, ObMySQLCellValueKind::DATE, out);
+    }
+  } else {
+    int64_t pos = 0;
+    ret = ObTimeConverter::date_to_str(
+        value, out.get_local_buffer(),
+        ObMySQLCellValue::LOCAL_BUFFER_SIZE, pos);
+    ret = finish_local_text(ret, pos, out);
+  }
+  return ret;
+}
+
+int build_time_cell_value(int64_t value, ObScale scale, MYSQL_PROTOCOL_TYPE type, ObMySQLCellValue &out)
+{
+  int ret = OB_SUCCESS;
+  if (BINARY == type) {
+    ObTime ob_time(DT_TYPE_TIME);
+    if (OB_FAIL(
+            ObTimeConverter::time_to_ob_time(value, ob_time))) {
+    } else {
+      out.kind_ = ObMySQLCellValueKind::TIME;
+      out.days_ = static_cast<uint32_t>(ob_time.parts_[DT_DATE] +
+                                        ob_time.parts_[DT_HOUR] / 24);
+      out.hour_ = static_cast<uint8_t>(ob_time.parts_[DT_HOUR] % 24);
+      out.minute_ = static_cast<uint8_t>(ob_time.parts_[DT_MIN]);
+      out.second_ = static_cast<uint8_t>(ob_time.parts_[DT_SEC]);
+      out.microseconds_ = static_cast<uint32_t>(ob_time.parts_[DT_USEC]);
+      out.is_negative_ = (DT_MODE_NEG & ob_time.mode_) ? 1 : 0;
+    }
+  } else {
+    int64_t pos = 0;
+    ret = ObTimeConverter::time_to_str(
+        value, scale, out.get_local_buffer(),
+        ObMySQLCellValue::LOCAL_BUFFER_SIZE, pos);
+    ret = finish_local_text(ret, pos, out);
+  }
+  return ret;
+}
+
+int build_year_cell_value(uint8_t value, MYSQL_PROTOCOL_TYPE type, ObMySQLCellValue &out)
+{
+  int ret = OB_SUCCESS;
+  if (BINARY == type) {
+    int64_t year = 0;
+    if (OB_FAIL(ObTimeConverter::year_to_int(value, year))) {
+    } else {
+      out.kind_ = ObMySQLCellValueKind::YEAR;
+      out.year_ = static_cast<uint16_t>(year);
+    }
+  } else {
+    int64_t pos = 0;
+    ret = ObTimeConverter::year_to_str(
+        value, out.get_local_buffer(),
+        ObMySQLCellValue::LOCAL_BUFFER_SIZE, pos);
+    ret = finish_local_text(ret, pos, out);
+  }
+  return ret;
+}
+
+int build_bit_cell_value(uint64_t value, ObPrecision precision, MYSQL_PROTOCOL_TYPE type,
+                         ObMySQLCellValue &out)
+{
+  int ret = OB_SUCCESS;
+  int32_t bit_len = 0;
+  if (OB_LIKELY(precision > 0)) {
+    bit_len = precision;
+  } else {
+    bit_len = ObAccuracy::MAX_ACCURACY[ObBitType].precision_;
+    _OB_LOG(WARN, "max precision is used. origin precision is %d",
+            precision);
+  }
+  if (OB_UNLIKELY(bit_len <= 0 || bit_len > OB_MAX_BIT_LENGTH)) {
+    ret = OB_ERR_UNEXPECTED;
+  } else if (BINARY == type) {
+    out.kind_ = ObMySQLCellValueKind::BIT;
+    out.value_ = value;
+    out.bit_len_ = bit_len;
+  } else {
+    int64_t pos = 0;
+    ret = bit_to_char_array(value, bit_len, out.get_local_buffer(),
+                            ObMySQLCellValue::LOCAL_BUFFER_SIZE, pos);
+    ret = finish_local_text(ret, pos, out);
+  }
+  return ret;
+}
+
+int build_mysql_date_cell_value(ObMySQLDate value, MYSQL_PROTOCOL_TYPE type, ObMySQLCellValue &out)
+{
+  int ret = OB_SUCCESS;
+  if (BINARY == type) {
+    ObTime ob_time(DT_TYPE_MYSQL_DATE);
+    if (OB_FAIL(ObTimeConverter::mdate_to_ob_time(value,
+                                                  ob_time))) {
+    } else if (OB_UNLIKELY(!HAS_TYPE_DATE(ob_time.mode_))) {
+      ret = OB_ERR_UNEXPECTED;
+    } else {
+      set_date_time_parts(ob_time, ObMySQLCellValueKind::DATE, out);
+    }
+  } else {
+    int64_t pos = 0;
+    ret = ObTimeConverter::mdate_to_str(
+        value, out.get_local_buffer(),
+        ObMySQLCellValue::LOCAL_BUFFER_SIZE, pos);
+    ret = finish_local_text(ret, pos, out);
+  }
+  return ret;
+}
+
 } // namespace
 
 int ObSMUtils::build_datum_cell_value(const ObDatum &datum, const ObObjMeta &meta,
@@ -377,39 +553,76 @@ int ObSMUtils::build_datum_cell_value(const ObDatum &datum, const ObObjMeta &met
 {
   int ret = OB_SUCCESS;
   out.reset();
+  // Resolve scale only in formatting branches; integer and byte-string output
+  // should not read result accuracy or build a legacy value.
+  const auto output_scale = [&]() {
+    return field ? field->accuracy_.get_scale()
+                 : ObAccuracy::DML_DEFAULT_ACCURACY[meta.get_type()].get_scale();
+  };
   if (datum.is_null()) {
     out.kind_ = ObMySQLCellValueKind::NULL_VALUE;
-  } else if (meta.is_integer_type()) {
-    ret = build_integer_cell_value(meta.get_type(), datum.get_int(), type,
-                                   scratch_allocator,
-                                   field && (field->flags_ & ZEROFILL_FLAG),
-                                   field ? field->length_ : 0, out);
-  } else if (meta.get_type_class() == ObNumberTC) {
-    ret = build_number_cell_value(number::ObNumber(datum.get_number()),
-                                  field ? field->accuracy_.get_scale()
-                                        : ObAccuracy::DML_DEFAULT_ACCURACY[meta.get_type()].get_scale(),
-                                  field && (field->flags_ & ZEROFILL_FLAG),
-                                  field ? field->length_ : 0, scratch_allocator, out);
-  } else if (meta.is_decimal_int()) {
-    ret = build_decimal_int_cell_value(datum.get_decimal_int(), datum.get_int_bytes(),
-                                       meta.get_scale(),
-                                       field && (field->flags_ & ZEROFILL_FLAG),
-                                       field ? field->length_ : 0, scratch_allocator, out);
-  } else if (meta.get_type_class() == ObDateTimeTC) {
-    ret = build_datetime_cell_value(datum.get_datetime(),
-                                    meta.is_timestamp() ? dtc_params.tz_info_ : NULL,
-                                    field ? field->accuracy_.get_scale()
-                                          : ObAccuracy::DML_DEFAULT_ACCURACY[meta.get_type()].get_scale(),
-                                    type, out);
-  } else if (meta.get_type() == ObMySQLDateTimeType) {
-    ret = build_mysql_datetime_cell_value(datum.get_mysql_datetime(),
-                                          field ? field->accuracy_.get_scale()
-                                                : ObAccuracy::DML_DEFAULT_ACCURACY[meta.get_type()].get_scale(),
-                                          type, out);
-  } else if (meta.get_type() == ObVarcharType || meta.get_type() == ObCharType) {
-    ret = set_borrowed_lenenc_bytes(datum.get_string(), out);
   } else {
-    ret = OB_NOT_SUPPORTED;
+    switch (meta.get_type_class()) {
+    case ObIntTC:
+    case ObUIntTC:
+      ret = build_integer_cell_value(meta.get_type(), datum.get_int(), type,
+                                      scratch_allocator,
+                                      field && (field->flags_ & ZEROFILL_FLAG),
+                                      field ? field->length_ : 0, out);
+      break;
+    case ObFloatTC:
+      ret = build_float_cell_value(datum.get_float(), output_scale(),
+                                    field && (field->flags_ & ZEROFILL_FLAG),
+                                    field ? field->length_ : 0, type, scratch_allocator, out);
+      break;
+    case ObDoubleTC:
+      ret = build_double_cell_value(datum.get_double(), output_scale(),
+                                     field && (field->flags_ & ZEROFILL_FLAG),
+                                     field ? field->length_ : 0, type, scratch_allocator, out);
+      break;
+    case ObNumberTC:
+      ret = build_number_cell_value(number::ObNumber(datum.get_number()), output_scale(),
+                                     field && (field->flags_ & ZEROFILL_FLAG),
+                                     field ? field->length_ : 0, scratch_allocator, out);
+      break;
+    case ObDecimalIntTC:
+      ret = build_decimal_int_cell_value(datum.get_decimal_int(), datum.get_int_bytes(),
+                                          meta.get_scale(),
+                                          field && (field->flags_ & ZEROFILL_FLAG),
+                                          field ? field->length_ : 0, scratch_allocator, out);
+      break;
+    case ObDateTimeTC:
+      ret = build_datetime_cell_value(datum.get_datetime(),
+                                       meta.is_timestamp() ? dtc_params.tz_info_ : NULL,
+                                       output_scale(), type, out);
+      break;
+    case ObDateTC:
+      ret = build_date_cell_value(datum.get_date(), type, out);
+      break;
+    case ObMySQLDateTC:
+      ret = build_mysql_date_cell_value(datum.get_mysql_date(), type, out);
+      break;
+    case ObTimeTC:
+      ret = build_time_cell_value(datum.get_time(), output_scale(), type, out);
+      break;
+    case ObYearTC:
+      ret = build_year_cell_value(datum.get_year(), type, out);
+      break;
+    case ObMySQLDateTimeTC:
+      ret = build_mysql_datetime_cell_value(datum.get_mysql_datetime(), output_scale(), type, out);
+      break;
+    case ObBitTC:
+      ret = build_bit_cell_value(datum.get_bit(),
+                                  field ? field->accuracy_.get_precision() : 0, type, out);
+      break;
+    case ObStringTC:
+    case ObRawTC:
+      ret = set_borrowed_lenenc_bytes(datum.get_string(), out);
+      break;
+    default:
+      ret = OB_NOT_SUPPORTED;
+      break;
+    }
   }
   return ret;
 }
@@ -456,53 +669,13 @@ int ObSMUtils::build_cell_value(const ObObj &obj, MYSQL_PROTOCOL_TYPE type,
       break;
     }
     case ObFloatTC: {
-      const float value = obj.get_float();
-      if (BINARY == type) {
-        uint32_t bits = 0;
-        MEMCPY(&bits, &value, sizeof(bits));
-        out.kind_ = ObMySQLCellValueKind::F32;
-        out.value_ = bits;
-      } else {
-        char tmp[FLOAT_TO_STRING_CONVERSION_BUFFER_SIZE];
-        int64_t length = 0;
-        if (scale >= 0) {
-          length = ob_fcvt(value, scale, sizeof(tmp) - 1, tmp, NULL);
-        } else {
-          length = ob_gcvt_opt(value, OB_GCVT_ARG_FLOAT, sizeof(tmp) - 1, tmp,
-                               NULL, TRUE);
-        }
-        if (OB_UNLIKELY(length >= 251)) {
-          ret = OB_INVALID_ARGUMENT;
-        } else {
-          ret = set_zerofill_bytes(scratch_allocator, tmp, length, zerofill,
-                                   zflength, out);
-        }
-      }
+      ret = build_float_cell_value(obj.get_float(), scale, zerofill, zflength,
+                                    type, scratch_allocator, out);
       break;
     }
     case ObDoubleTC: {
-      const double value = obj.get_double();
-      if (BINARY == type) {
-        uint64_t bits = 0;
-        MEMCPY(&bits, &value, sizeof(bits));
-        out.kind_ = ObMySQLCellValueKind::F64;
-        out.value_ = bits;
-      } else {
-        char tmp[DOUBLE_TO_STRING_CONVERSION_BUFFER_SIZE];
-        int64_t length = 0;
-        if (scale >= 0) {
-          length = ob_fcvt(value, scale, sizeof(tmp) - 1, tmp, NULL);
-        } else {
-          length = ob_gcvt_opt(value, OB_GCVT_ARG_DOUBLE, sizeof(tmp) - 1, tmp,
-                               NULL, TRUE);
-        }
-        if (OB_UNLIKELY(length > static_cast<int64_t>(sizeof(tmp)))) {
-          ret = OB_INVALID_ARGUMENT;
-        } else {
-          ret = set_zerofill_bytes(scratch_allocator, tmp, length, zerofill,
-                                   zflength, out);
-        }
-      }
+      ret = build_double_cell_value(obj.get_double(), scale, zerofill, zflength,
+                                     type, scratch_allocator, out);
       break;
     }
     case ObNumberTC: {
@@ -517,63 +690,15 @@ int ObSMUtils::build_cell_value(const ObObj &obj, MYSQL_PROTOCOL_TYPE type,
       break;
     }
     case ObDateTC: {
-      if (BINARY == type) {
-        ObTime ob_time(DT_TYPE_DATE);
-        if (OB_FAIL(
-                ObTimeConverter::date_to_ob_time(obj.get_date(), ob_time))) {
-        } else if (OB_UNLIKELY(!HAS_TYPE_DATE(ob_time.mode_))) {
-          ret = OB_ERR_UNEXPECTED;
-        } else {
-          set_date_time_parts(ob_time, ObMySQLCellValueKind::DATE, out);
-        }
-      } else {
-        int64_t pos = 0;
-        ret = ObTimeConverter::date_to_str(
-            obj.get_date(), out.get_local_buffer(),
-            ObMySQLCellValue::LOCAL_BUFFER_SIZE, pos);
-        ret = finish_local_text(ret, pos, out);
-      }
+      ret = build_date_cell_value(obj.get_date(), type, out);
       break;
     }
     case ObTimeTC: {
-      if (BINARY == type) {
-        ObTime ob_time(DT_TYPE_TIME);
-        if (OB_FAIL(
-                ObTimeConverter::time_to_ob_time(obj.get_time(), ob_time))) {
-        } else {
-          out.kind_ = ObMySQLCellValueKind::TIME;
-          out.days_ = static_cast<uint32_t>(ob_time.parts_[DT_DATE] +
-                                            ob_time.parts_[DT_HOUR] / 24);
-          out.hour_ = static_cast<uint8_t>(ob_time.parts_[DT_HOUR] % 24);
-          out.minute_ = static_cast<uint8_t>(ob_time.parts_[DT_MIN]);
-          out.second_ = static_cast<uint8_t>(ob_time.parts_[DT_SEC]);
-          out.microseconds_ = static_cast<uint32_t>(ob_time.parts_[DT_USEC]);
-          out.is_negative_ = (DT_MODE_NEG & ob_time.mode_) ? 1 : 0;
-        }
-      } else {
-        int64_t pos = 0;
-        ret = ObTimeConverter::time_to_str(
-            obj.get_time(), scale, out.get_local_buffer(),
-            ObMySQLCellValue::LOCAL_BUFFER_SIZE, pos);
-        ret = finish_local_text(ret, pos, out);
-      }
+      ret = build_time_cell_value(obj.get_time(), scale, type, out);
       break;
     }
     case ObYearTC: {
-      if (BINARY == type) {
-        int64_t year = 0;
-        if (OB_FAIL(ObTimeConverter::year_to_int(obj.get_year(), year))) {
-        } else {
-          out.kind_ = ObMySQLCellValueKind::YEAR;
-          out.year_ = static_cast<uint16_t>(year);
-        }
-      } else {
-        int64_t pos = 0;
-        ret = ObTimeConverter::year_to_str(
-            obj.get_year(), out.get_local_buffer(),
-            ObMySQLCellValue::LOCAL_BUFFER_SIZE, pos);
-        ret = finish_local_text(ret, pos, out);
-      }
+      ret = build_year_cell_value(obj.get_year(), type, out);
       break;
     }
     case ObOTimestampTC: {
@@ -657,26 +782,7 @@ int ObSMUtils::build_cell_value(const ObObj &obj, MYSQL_PROTOCOL_TYPE type,
       break;
     }
     case ObBitTC: {
-      int32_t bit_len = 0;
-      if (OB_LIKELY(precision > 0)) {
-        bit_len = precision;
-      } else {
-        bit_len = ObAccuracy::MAX_ACCURACY[obj.get_type()].precision_;
-        _OB_LOG(WARN, "max precision is used. origin precision is %d",
-                precision);
-      }
-      if (OB_UNLIKELY(bit_len <= 0 || bit_len > OB_MAX_BIT_LENGTH)) {
-        ret = OB_ERR_UNEXPECTED;
-      } else if (BINARY == type) {
-        out.kind_ = ObMySQLCellValueKind::BIT;
-        out.value_ = obj.get_bit();
-        out.bit_len_ = bit_len;
-      } else {
-        int64_t pos = 0;
-        ret = bit_to_char_array(obj.get_bit(), bit_len, out.get_local_buffer(),
-                                ObMySQLCellValue::LOCAL_BUFFER_SIZE, pos);
-        ret = finish_local_text(ret, pos, out);
-      }
+      ret = build_bit_cell_value(obj.get_bit(), precision, type, out);
       break;
     }
     case ObUserDefinedSQLTC: {
@@ -706,22 +812,7 @@ int ObSMUtils::build_cell_value(const ObObj &obj, MYSQL_PROTOCOL_TYPE type,
       break;
     }
     case ObMySQLDateTC: {
-      if (BINARY == type) {
-        ObTime ob_time(DT_TYPE_MYSQL_DATE);
-        if (OB_FAIL(ObTimeConverter::mdate_to_ob_time(obj.get_mysql_date(),
-                                                      ob_time))) {
-        } else if (OB_UNLIKELY(!HAS_TYPE_DATE(ob_time.mode_))) {
-          ret = OB_ERR_UNEXPECTED;
-        } else {
-          set_date_time_parts(ob_time, ObMySQLCellValueKind::DATE, out);
-        }
-      } else {
-        int64_t pos = 0;
-        ret = ObTimeConverter::mdate_to_str(
-            obj.get_mysql_date(), out.get_local_buffer(),
-            ObMySQLCellValue::LOCAL_BUFFER_SIZE, pos);
-        ret = finish_local_text(ret, pos, out);
-      }
+      ret = build_mysql_date_cell_value(obj.get_mysql_date(), type, out);
       break;
     }
     case ObMySQLDateTimeTC: {

@@ -28,7 +28,16 @@ bool DatumMysqlRow::can_encode(const oceanbase::sql::ObExpr &expr, const ObField
 {
   const ObObjMeta &meta = expr.obj_meta_;
   bool direct = !need_ps_cast || meta.get_type() == field.type_.get_type();
-  if (direct && meta.is_integer_type()) {
+  if (direct && meta.is_null()) {
+    direct = expr.obj_datum_map_ == OBJ_DATUM_NULL;
+  } else if (direct && (meta.get_type_class() == ObFloatTC || meta.is_date()
+                        || meta.get_type() == ObMySQLDateType)) {
+    direct = expr.obj_datum_map_ == OBJ_DATUM_4BYTE_DATA;
+  } else if (direct && meta.is_year()) {
+    direct = expr.obj_datum_map_ == OBJ_DATUM_1BYTE_DATA;
+  } else if (direct && (meta.get_type_class() == ObDoubleTC || meta.is_time() || meta.is_bit())) {
+    direct = expr.obj_datum_map_ == OBJ_DATUM_8BYTE_DATA;
+  } else if (direct && meta.is_integer_type()) {
     direct = expr.obj_datum_map_ == OBJ_DATUM_8BYTE_DATA;
   } else if (direct && meta.get_type_class() == ObNumberTC) {
     direct = expr.obj_datum_map_ == OBJ_DATUM_NUMBER;
@@ -37,7 +46,8 @@ bool DatumMysqlRow::can_encode(const oceanbase::sql::ObExpr &expr, const ObField
   } else if (direct && (meta.get_type_class() == ObDateTimeTC
                         || meta.get_type() == ObMySQLDateTimeType)) {
     direct = expr.obj_datum_map_ == OBJ_DATUM_8BYTE_DATA;
-  } else if (direct && (meta.get_type() == ObVarcharType || meta.get_type() == ObCharType)) {
+  } else if (direct && (meta.get_type() == ObVarcharType || meta.get_type() == ObCharType
+                        || meta.get_type() == ObHexStringType)) {
     // Match both no-conversion cases in ObObj::convert_string_value_charset:
     // different collations in the same charset, and binary/no result charset.
     const ObCollationType from = meta.get_collation_type();
