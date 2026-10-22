@@ -282,9 +282,6 @@ private:
   ObBatchRescanParams rescan_batch_params_;
   int64_t left_row_idx_;
   ObBatchRescanCtl batch_rescan_ctl_;
-  sql::ObTMArray<common::ObObjParam> cur_params_;
-  common::ObSArray<int64_t> cur_param_idxs_;
-  common::ObSArray<int64_t> cur_param_expr_idxs_;
   common::ObSEArray<Iterator*, 8> subplan_iters_to_check_;
   lib::MemoryContext last_store_row_mem_;
   ObBatchResultHolder brs_holder_;

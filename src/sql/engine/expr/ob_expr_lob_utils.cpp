@@ -125,34 +125,50 @@ int ObTextStringHelper::build_text_iter(
 }
 
 int ob_adjust_lob_datum(ObExecContext &exec_ctx,
+                        const ObDatum &origin_datum,
+                        const common::ObObjMeta &origin_meta,
+                        const common::ObObjMeta &result_meta,
+                        ObIAllocator &allocator,
+                        ObDatum &out_datum)
+{
+  int ret = OB_SUCCESS;
+  if (origin_datum.is_null() || origin_datum.is_nop() || !is_lob_storage(origin_meta.get_type())) {
+  } else if (origin_meta.has_lob_header() != result_meta.has_lob_header()) {
+    if (!origin_meta.has_lob_header()) {
+      ret = OB_ERR_UNEXPECTED;
+    } else {
+      ObString full_data = origin_datum.get_string();
+      ObLobLocatorV2 locator(full_data, true);
+      OB_ASSERT(!locator.is_persist_lob());
+      const ObLobCommon *lob_common = reinterpret_cast<const ObLobCommon *>(full_data.ptr());
+      if (full_data.length() >= sizeof(ObLobCommon) && !lob_common->is_mem_loc_ && lob_common->in_row_) {
+        // Preserve the mapped-cell fast path: ordinary in-row locators need
+        // no request LOB service or allocator just to remove their header.
+        full_data.assign_ptr(lob_common->get_inrow_data_ptr(),
+            static_cast<int32_t>(lob_common->get_byte_size(full_data.length())));
+      } else {
+        ret = ObTextStringHelper::read_real_string_data(exec_ctx, &allocator,
+            origin_meta.get_type(), origin_meta.get_collation_type(), true, full_data);
+      }
+      if (OB_SUCC(ret)) { out_datum.set_string(full_data); }
+    }
+  }
+  return ret;
+}
+
+int ob_adjust_lob_datum(ObExecContext &exec_ctx,
                         const ObObj &origin_obj,
                         const common::ObObjMeta &obj_meta,
                         const ObObjDatumMapType &obj_datum_map_,
                         ObIAllocator &allocator,
                         ObDatum &out_datum)
 {
+  UNUSED(obj_datum_map_);
   int ret = OB_SUCCESS;
-  if (!is_lob_storage(origin_obj.get_type())) { // null & nop is not lob
-  } else if (origin_obj.has_lob_header() != obj_meta.has_lob_header()) {
-    if (origin_obj.has_lob_header()) { // obj_meta does not have lob header, get data only
-      // can avoid allocator if no persist lobs call this function,
-      OB_ASSERT(origin_obj.is_persist_lob() == false);
-
-      ObString full_data;
-      if (OB_FAIL(ObTextStringHelper::read_real_string_data(
-              exec_ctx, &allocator, origin_obj, full_data))) {
-      } else {
-        out_datum.set_string(full_data);
-      }
-    } else { // origin obj does not have lob header, but meta has, build temp lob header
-      ret = OB_ERR_UNEXPECTED;
-      // ObObj out_obj(origin_obj);
-      // if (OB_FAIL(ObTextStringResult::ob_convert_obj_temporay_lob(out_obj, allocator))) {
-      //   LOG_WARN("Lob: failed to convert plain lob data to temp lob", K(ret));
-      // } else if (OB_FAIL(out_datum.from_obj(out_obj, obj_datum_map_))) {
-      //   LOG_WARN("convert lob obj to datum failed", K(ret), K(out_obj));
-      // }
-    }
+  if (is_lob_storage(origin_obj.get_type())) {
+    ObDatum borrowed;
+    borrowed.set_string(origin_obj.get_string());
+    ret = ob_adjust_lob_datum(exec_ctx, borrowed, origin_obj.get_meta(), obj_meta, allocator, out_datum);
   }
   return ret;
 }

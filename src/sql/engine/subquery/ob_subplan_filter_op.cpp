@@ -435,9 +435,6 @@ ObSubPlanFilterOp::ObSubPlanFilterOp(
     is_left_end_(false),
     left_row_idx_(0),
     batch_rescan_ctl_(),
-    cur_params_(),
-    cur_param_idxs_(),
-    cur_param_expr_idxs_(),
     last_store_row_mem_(NULL),
     group_rescan_cnt_(0),
     rescan_params_info_()
@@ -468,9 +465,6 @@ void ObSubPlanFilterOp::destroy_px_batch_rescan_status()
   last_store_row_.reset();
   left_rows_.reset();
   batch_rescan_ctl_.reset();
-  cur_params_.reset();
-  cur_param_expr_idxs_.reset();
-  cur_param_idxs_.reset();
 }
 
 void ObSubPlanFilterOp::destroy()
@@ -512,9 +506,6 @@ int ObSubPlanFilterOp::rescan()
 
   if (OB_SUCC(ret) && enable_left_px_batch_) {
     batch_rescan_ctl_.reuse();
-    cur_params_.reset();
-    cur_param_idxs_.reset();
-    cur_param_expr_idxs_.reset();
     brs_holder_.reset();
   }
 
@@ -569,17 +560,19 @@ int ObSubPlanFilterOp::fill_cur_row_rescan_param()
   } else if (batch_rescan_ctl_.cur_idx_ >= batch_rescan_ctl_.params_.get_count()) {
     ret = OB_ERR_UNEXPECTED;
   } else {
-    common::ObIArray<common::ObObjParam>& params =
+    common::ObIArray<DatumParameter>& params =
         batch_rescan_ctl_.params_.get_one_batch_params(batch_rescan_ctl_.cur_idx_);
     int64_t param_cnt = params.count();
     int64_t idx = OB_INVALID_ID;
     for (int64_t i = 0; OB_SUCC(ret) && i < param_cnt; ++i) {
       idx = batch_rescan_ctl_.params_.get_param_idx(i);
-      plan_ctx->get_param_store_for_update().at(idx) = params.at(i);
+      if (OB_UNLIKELY(i >= MY_SPEC.rescan_params_.count() || MY_SPEC.rescan_params_.at(i).param_idx_ != idx)) {
+        ret = OB_ERR_UNEXPECTED;
+      } else {
+        ret = MY_SPEC.rescan_params_.at(i).restore_dynamic_param(eval_ctx_, params.at(i));
+      }
     }
   }
-  int64_t params_size = 0;
-  OZ(prepare_rescan_params(false, params_size));
   return ret;
 }
 
@@ -1173,33 +1166,31 @@ int ObSubPlanFilterOp::inner_get_next_batch(const int64_t max_row_cnt)
 int ObSubPlanFilterOp::prepare_rescan_params(bool need_save, int64_t& params_size)
 {
   int ret = OB_SUCCESS;
-  ObObjParam *param = NULL;
   ObPhysicalPlanCtx *plan_ctx = GET_PHY_PLAN_CTX(ctx_);
   CK(OB_NOT_NULL(plan_ctx));
-  cur_params_.reset();
-  cur_param_idxs_.reset();
-  cur_param_expr_idxs_.reset();
-  for (int64_t i = 0; OB_SUCC(ret) && i < MY_SPEC.rescan_params_.count(); ++i) {
-    if (OB_FAIL(MY_SPEC.rescan_params_.at(i).set_dynamic_param(eval_ctx_, param))) {
-    } else if (OB_ISNULL(param)) {
-      ret = OB_ERR_UNEXPECTED;
-    } else if (need_save) {
-      ObObjParam copy_result;
-      int64_t expr_idx = 0;
-      OZ(batch_rescan_ctl_.params_.deep_copy_param(*param, copy_result));
-      params_size += copy_result.get_deep_copy_size();
-      OZ(cur_params_.push_back(copy_result));
-      OZ(cur_param_idxs_.push_back(MY_SPEC.rescan_params_.at(i).param_idx_));
-      CK(OB_NOT_NULL(plan_ctx->get_phy_plan()));
-      OZ(plan_ctx->get_phy_plan()->get_expr_frame_info().get_expr_idx_in_frame(
-          MY_SPEC.rescan_params_.at(i).dst_, expr_idx));
-      OZ(cur_param_expr_idxs_.push_back(expr_idx));
+  if (!need_save) {
+    for (int64_t i = 0; OB_SUCC(ret) && i < MY_SPEC.rescan_params_.count(); ++i) {
+      ret = MY_SPEC.rescan_params_.at(i).set_dynamic_param(eval_ctx_);
     }
-  }
-  if (OB_SUCC(ret) && need_save) {
-    batch_rescan_ctl_.param_version_ += 1;
-    OZ(batch_rescan_ctl_.params_.append_batch_rescan_param(
-            cur_param_idxs_, cur_params_, cur_param_expr_idxs_));
+  } else {
+    ObBatchRescanParams::RowBuilder builder(batch_rescan_ctl_.params_);
+    common::ObSEArray<int64_t, 8> param_idxs, param_expr_idxs;
+    for (int64_t i = 0; OB_SUCC(ret) && i < MY_SPEC.rescan_params_.count(); ++i) {
+      const ObDynamicParamSetter &setter = MY_SPEC.rescan_params_.at(i);
+      DatumParameter value;
+      int64_t expr_idx = 0;
+      OZ(setter.set_dynamic_param(eval_ctx_, value));
+      OZ(builder.append(value));
+      if (OB_SUCC(ret)) { params_size += value.datum_.get_deep_copy_size(); }
+      OZ(param_idxs.push_back(setter.param_idx_));
+      CK(OB_NOT_NULL(plan_ctx->get_phy_plan()));
+      OZ(plan_ctx->get_phy_plan()->get_expr_frame_info().get_expr_idx_in_frame(setter.dst_, expr_idx));
+      OZ(param_expr_idxs.push_back(expr_idx));
+    }
+    if (OB_SUCC(ret)) {
+      batch_rescan_ctl_.param_version_ += 1;
+      ret = builder.finish(param_idxs, param_expr_idxs);
+    }
   }
   return ret;
 }
@@ -1375,7 +1366,7 @@ int ObSubPlanFilterOp::init_das_batch_params()
 int ObSubPlanFilterOp::deep_copy_dynamic_obj()
 {
   int ret = OB_SUCCESS;
-  ObObjParam *param = NULL;
+  DatumParameter param;
   int64_t param_cnt = MY_SPEC.rescan_params_.count();
   if (OB_ISNULL(last_store_row_mem_)) {
     ret = OB_INVALID_ARGUMENT;
@@ -1383,9 +1374,7 @@ int ObSubPlanFilterOp::deep_copy_dynamic_obj()
   for (int64_t i = 0; OB_SUCC(ret) && i < param_cnt; ++i) {
     const ObDynamicParamSetter &rescan_param = MY_SPEC.rescan_params_.at(i);
     if (OB_FAIL(rescan_param.set_dynamic_param(eval_ctx_, param))) {
-    } else if (OB_ISNULL(param)) {
-      ret = OB_ERR_UNEXPECTED;
-    } else if (OB_FAIL(copy_legacy_parameter(*param,
+    } else if (OB_FAIL(DatumParameterArray::clone_parameter(param,
                                     das_batch_params_.at(i).data_[das_batch_params_.at(i).count_],
                                     last_store_row_mem_->get_arena_allocator()))) {
     } else {

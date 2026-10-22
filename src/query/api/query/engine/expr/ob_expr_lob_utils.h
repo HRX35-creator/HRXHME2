@@ -643,6 +643,13 @@ public:
 };
 
 int ob_adjust_lob_datum(ObExecContext &exec_ctx,
+                        const ObDatum &origin_datum,
+                        const common::ObObjMeta &origin_meta,
+                        const common::ObObjMeta &result_meta,
+                        ObIAllocator &allocator,
+                        ObDatum &out_datum);
+
+int ob_adjust_lob_datum(ObExecContext &exec_ctx,
                         const ObObj &origin_obj,
                         const common::ObObjMeta &obj_meta,
                         const ObObjDatumMapType &obj_datum_map_,

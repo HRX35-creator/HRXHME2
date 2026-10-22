@@ -33,6 +33,7 @@ QUERY_API_INTERFACE_HEADERS = [
     "api/query/engine/expr/ob_expr_util.h",
     "api/query/engine/expr/ob_i_expr_extra_info.h",
     "api/query/engine/ob_batch_rows.h",
+    "api/query/engine/batch_rescan_params.h",
     "api/query/engine/ob_exec_context_access.h",
     "api/query/engine/ob_io_event_observer.h",
     "api/query/engine/ob_operator.h",

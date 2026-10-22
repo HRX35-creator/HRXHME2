@@ -794,15 +794,14 @@ int ObGroupJoinBufffer::init_group_params()
 int ObGroupJoinBufffer::deep_copy_dynamic_obj()
 {
   int ret = OB_SUCCESS;
-  ObPhysicalPlanCtx *plan_ctx = GET_PHY_PLAN_CTX(*ctx_);
-  ParamStore &param_store = plan_ctx->get_param_store_for_update();
   if (OB_ISNULL(mem_context_)) {
     ret = OB_INVALID_ARGUMENT;
   }
   for (int64_t i = 0; OB_SUCC(ret) && i < rescan_params_->count(); ++i) {
     const ObDynamicParamSetter &rescan_param = rescan_params_->at(i);
-    int64_t param_idx = rescan_param.param_idx_;
-    if (OB_FAIL(copy_legacy_parameter(param_store.at(param_idx),
+    DatumParameter value;
+    if (OB_FAIL(rescan_param.capture_dynamic_param(*eval_ctx_, value))) {
+    } else if (OB_FAIL(DatumParameterArray::clone_parameter(value,
                              group_params_.at(i).data_[group_params_.at(i).count_],
                              mem_context_->get_arena_allocator()))) {
     } else {

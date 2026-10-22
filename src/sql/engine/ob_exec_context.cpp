@@ -19,6 +19,7 @@
 #include "query/engine/ob_exec_context_access.h"
 #include "query/session/ob_session_access.h"
 #include "ob_exec_context.h"
+#include "sql/engine/native_param_utils.h"
 #include "share/datum/ob_datum_funcs.h"
 #include "share/ob_lob_access_utils.h"
 #include "share/ob_server_struct.h"
@@ -998,22 +999,24 @@ int ObExecContext::fill_px_batch_info(ObBatchRescanParams &params,
   int ret = OB_SUCCESS;
   if (OB_ISNULL(phy_plan_ctx_)) {
     ret = OB_ERR_UNEXPECTED;
-  } else if (batch_id >= params.get_count()) {
+  } else if (batch_id < 0 || batch_id >= params.get_count()) {
     ret = OB_ERR_UNEXPECTED;
   } else {
-    common::ObIArray<common::ObObjParam> &one_params =
+    common::ObIArray<DatumParameter> &one_params =
         params.get_one_batch_params(batch_id);
     ObEvalCtx eval_ctx(*this);
     for (int i = 0; OB_SUCC(ret) && i < one_params.count(); ++i) {
-      if (i > params.param_idxs_.count()) {
+      if (i >= params.param_idxs_.count() || params.get_param_idx(i) < 0 ||
+          params.get_param_idx(i) >= phy_plan_ctx_->get_param_store().count()) {
         ret = OB_ERR_UNEXPECTED;
       } else {
-        phy_plan_ctx_->get_param_store_for_update().at(params.get_param_idx(i)) = one_params.at(i);
+        ret = materialize_legacy_parameter(one_params.at(i),
+            phy_plan_ctx_->get_param_store_for_update().at(params.get_param_idx(i)));
         if (params.param_expr_idxs_.count() == one_params.count()) {
           const sql::ObExpr *expr = NULL;
           int64_t idx = params.param_expr_idxs_.at(i);
           if (OB_FAIL(ret)) {
-          } else if (OB_UNLIKELY(idx > array.count())) {
+          } else if (OB_UNLIKELY(idx <= 0 || idx > array.count())) {
             // do nothing.
             LOG_TRACE("param idx out of array count", K(idx), K(array.count()));
           } else if (FALSE_IT(expr = &array.at(idx - 1))) {
@@ -1023,10 +1026,11 @@ int ObExecContext::fill_px_batch_info(ObBatchRescanParams &params,
             expr->get_eval_info(eval_ctx).clear_evaluated_flag();
             ObDynamicParamSetter::clear_parent_evaluated_flag(eval_ctx, *expr);
             ObDatum &param_datum = expr->locate_datum_for_write(eval_ctx);
-            if (OB_FAIL(param_datum.from_obj(one_params.at(i), expr->obj_datum_map_))) {
+            ret = assign_parameter_to_expr(eval_ctx, *expr, one_params.at(i).datum_, one_params.at(i).get_type_meta());
+            if (OB_FAIL(ret)) {
             } else if (is_lob_storage(one_params.at(i).get_type()) &&
-                       OB_FAIL(ob_adjust_lob_datum(*this, one_params.at(i), expr->obj_meta_,
-                                                   expr->obj_datum_map_, get_allocator(), param_datum))) {
+                       OB_FAIL(ob_adjust_lob_datum(*this, one_params.at(i).datum_,
+                           one_params.at(i).get_type_meta(), expr->obj_meta_, get_allocator(), param_datum))) {
             } else {
               expr->get_eval_info(eval_ctx).evaluated_ = true;
             }
