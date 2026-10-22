@@ -913,39 +913,6 @@ const char *ObObj::MAX_OBJECT_VALUE_STR       = "__OB__MAX__";
 const char *ObObj::NOP_VALUE_STR = "__OB__NOP__";
 const char OB_JSON_NULL[2] = {'\0', '\0'}; // binary json null
 
-OB_SERIALIZE_MEMBER(ObDataType, meta_, accuracy_, is_zero_fill_);
-OB_SERIALIZE_MEMBER(ObEnumSetInnerValue, numberic_value_, string_value_);
-
-DEFINE_SERIALIZE(ObObjMeta)
-{
-  int ret = OB_SUCCESS;
-  OB_UNIS_ENCODE(type_);
-  OB_UNIS_ENCODE(cs_level_);
-  OB_UNIS_ENCODE(cs_type_);
-  OB_UNIS_ENCODE(scale_);
-  return ret;
-}
-
-DEFINE_DESERIALIZE(ObObjMeta)
-{
-  int ret = OB_SUCCESS;
-  OB_UNIS_DECODE(type_);
-  OB_UNIS_DECODE(cs_level_);
-  OB_UNIS_DECODE(cs_type_);
-  OB_UNIS_DECODE(scale_);
-  return ret;
-}
-
-DEFINE_GET_SERIALIZE_SIZE(ObObjMeta)
-{
-  int64_t len = 0;
-  OB_UNIS_ADD_LEN(type_);
-  OB_UNIS_ADD_LEN(cs_level_);
-  OB_UNIS_ADD_LEN(cs_type_);
-  OB_UNIS_ADD_LEN(scale_);
-  return len;
-}
-
 ////////////////////////////////////////////////////////////////
 
 bool ObObj::is_zero() const
@@ -2008,7 +1975,7 @@ DEFINE_GET_SERIALIZE_SIZE(ObObjParam)
   return len;
 }
 
-OB_SERIALIZE_MEMBER(ParamFlag, flag_);
+
 
 void ObObjParam::reset()
 {
@@ -2019,18 +1986,6 @@ void ObObjParam::reset()
   param_meta_.reset();
 }
 
-void ParamFlag::reset()
-{
-  need_to_check_type_ = true;
-  need_to_check_bool_value_ = false;
-  expected_bool_value_ = false;
-  need_to_check_extend_type_ = true;
-  reserved_legacy_bit_ = false;
-  is_pl_mock_default_param_ = false;
-  is_boolean_ = false;
-  is_batch_parameter_ = false;
-  ignore_scale_check_ = false;
-}
 
 
 DEF_TO_STRING(ObHexEscapeSqlStr)

@@ -59,6 +59,7 @@ OBLIB_UNITY_GROUPS = {
             language = "c++",
             srcs = [
                 "src/oblib/common/datum/ob_datum.cpp",
+                "src/oblib/common/datum/datum_metadata.cpp",
             ],
         ),
         struct(

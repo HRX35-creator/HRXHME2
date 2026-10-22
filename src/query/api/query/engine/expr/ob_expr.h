@@ -22,6 +22,7 @@
 #include "lib/oblog/ob_log.h"
 #include "common/datum/ob_datum.h"
 #include "common/datum/datum_parameter.h"
+#include "common/datum/datum_param_store.h"
 #include "share/datum/ob_datum_funcs.h"
 #include "query/engine/ob_serializable_function.h"
 #include "query/parser/ob_item_type.h"
@@ -760,12 +761,7 @@ int import_legacy_parameter(const common::ObObjParam &source,
                             DatumParameter &destination,
                             common::ObIAllocator *allocator);
 
-typedef common::Ob2DArray<DatumParameter,
-                          common::OB_MALLOC_BIG_BLOCK_SIZE,
-                          common::ObWrapperAllocator,
-                          false,
-                          common::ObSEArray<DatumParameter *, 1, common::ObWrapperAllocator, false>
-                          > DatumParamStore;
+using common::DatumParamStore;
 
 // Helper function for print datum which interpreted by expression
 // Can only be used in log message like this:

@@ -16,7 +16,8 @@
 
 #pragma once
 
-#include "common/datum/ob_datum.h"
+#include "common/datum/datum_core.h"
+#include "common/datum/parameter_flags.h"
 
 namespace oceanbase
 {
@@ -25,7 +26,7 @@ namespace common
 
 // A parameter value is a Datum plus independent metadata. There is no embedded
 // general-purpose value object. Payloads are views: copying this descriptor
-// preserves the arena lifetime; deep_copy() explicitly creates owned bytes in
+// does not extend the source arena lifetime; deep_copy() creates bytes in
 // the destination arena. No payload ever points into this object's own storage.
 class DatumParameter
 {
@@ -76,7 +77,7 @@ public:
   bool need_to_check_bool_value() const { return flag_.need_to_check_bool_value_; }
   void set_expected_bool_value(bool value) { flag_.expected_bool_value_ = value; }
   bool expected_bool_value() const { return flag_.expected_bool_value_; }
-  bool is_nop_value() const { return false; } // SQL parameters are not sparse storage cells.
+  bool is_nop_value() const { return datum_.is_nop(); }
 
   void set_raw_text_info(int32_t pos, int32_t len)
   { raw_text_pos_ = pos; raw_text_len_ = len; }

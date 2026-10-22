@@ -312,6 +312,13 @@ cc_library(
     hdrs = [
         "common/cell/ob_cell_writer.h",
         "common/datum/ob_datum.h",
+        "common/datum/datum_core.h",
+        "common/datum/datum_param_store.h",
+        "common/datum/datum_obj_bridge.h",
+        "common/datum/parameter_flags.h",
+        "common/object/ob_type_metadata.h",
+        "common/enumset/enumset_value.h",
+        "common/lob/lob_types.h",
         "common/datum/datum_parameter.h",
         "common/enumset/ob_enum_set_meta.h",
         "common/json_type/ob_json_base.h",

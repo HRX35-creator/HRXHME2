@@ -171,22 +171,31 @@ TEST(DatumExtend, legacy_null_is_not_a_payload_address)
 TEST(DatumExtend, compatibility_bridge_preserves_metadata)
 {
   for (int32_t size : {int32_t(0), int32_t(64), INT32_MAX}) {
-    ObObj original;
-    original.set_extend(0x0123456789abcdefLL, 7, size);
-    original.set_collation_level(CS_LEVEL_COERCIBLE);
-    original.set_collation_type(CS_TYPE_UTF8MB4_BIN);
-    char buf[DATUM_LEGACY_EXTEND_SIZE];
-    ObDatum native;
-    native.ptr_ = buf;
-    ASSERT_EQ(OB_SUCCESS, native.from_obj(original));
-    ASSERT_EQ(15U, native.len_);
-    ObObj output;
-    ASSERT_EQ(OB_SUCCESS, native.to_obj(output, original.get_meta()));
-    ASSERT_EQ(0, memcmp(&original, &output, sizeof(original)));
-    ObDatum old(reinterpret_cast<const char *>(&original), sizeof(original), false);
-    old.set_flag(ObDatumDesc::EXT);
-    ASSERT_TRUE(ObDatum::binary_equal(old, native));
-    ASSERT_EQ(old.checksum(0), native.checksum(0));
+    for (int collation = 0; collation < 4096; ++collation) {
+      ObObj original;
+      original.set_extend(0x0123456789abcdefLL, 7, size);
+      // Cover the complete 12-bit transport space without casting undefined
+      // IDs to an enum or consulting unsupported charset implementations.
+      ObObjMeta metadata = original.get_meta();
+      metadata.set_cs_level(static_cast<uint8_t>((collation >> 8) << 4) | CS_LEVEL_COERCIBLE);
+      metadata.set_cs_type(static_cast<uint8_t>(collation));
+      original.set_meta_type(metadata);
+      char buf[DATUM_LEGACY_EXTEND_SIZE];
+      ObDatum native;
+      native.ptr_ = buf;
+      ASSERT_EQ(OB_SUCCESS, native.from_obj(original));
+      ASSERT_EQ(15U, native.len_);
+      ObObj output;
+      ASSERT_EQ(OB_SUCCESS, native.to_obj(output, original.get_meta()));
+      if (collation < CS_TYPE_MAX) {
+        ASSERT_EQ(original.get_collation_type(), output.get_collation_type()) << collation;
+      }
+      ASSERT_EQ(0, memcmp(&original, &output, sizeof(original))) << collation;
+      ObDatum old(reinterpret_cast<const char *>(&original), sizeof(original), false);
+      old.set_flag(ObDatumDesc::EXT);
+      ASSERT_TRUE(ObDatum::binary_equal(old, native)) << collation;
+      ASSERT_EQ(old.checksum(0), native.checksum(0)) << collation;
+    }
   }
 }
 
