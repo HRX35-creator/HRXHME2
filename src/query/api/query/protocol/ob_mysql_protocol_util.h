@@ -54,11 +54,13 @@ class ObIAllocator;
 struct ObDatum;
 class ObSMUtils {
 public:
-  // Normalized integer and plain CHAR/VARCHAR values only. The caller retains
+  // Normalized integer, DECIMAL, DATETIME/TIMESTAMP and plain CHAR/VARCHAR values.
+  // The caller retains
   // the Datum payload through synchronous encoding and handles casts/charset.
   static int build_datum_cell_value(const ObDatum &datum, const ObObjMeta &meta,
                    obmysql::MYSQL_PROTOCOL_TYPE type, ObIAllocator &scratch_allocator,
-                   obmysql::ObMySQLCellValue &out, const ObField *field);
+                   obmysql::ObMySQLCellValue &out, const ObField *field,
+                   const ObDataTypeCastParams &dtc_params);
   static int
   build_cell_value(const ObObj &obj, obmysql::MYSQL_PROTOCOL_TYPE type,
                    ObIAllocator &scratch_allocator,

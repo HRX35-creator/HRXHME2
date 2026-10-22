@@ -30,6 +30,13 @@ bool DatumMysqlRow::can_encode(const oceanbase::sql::ObExpr &expr, const ObField
   bool direct = !need_ps_cast || meta.get_type() == field.type_.get_type();
   if (direct && meta.is_integer_type()) {
     direct = expr.obj_datum_map_ == OBJ_DATUM_8BYTE_DATA;
+  } else if (direct && meta.get_type_class() == ObNumberTC) {
+    direct = expr.obj_datum_map_ == OBJ_DATUM_NUMBER;
+  } else if (direct && meta.is_decimal_int()) {
+    direct = expr.obj_datum_map_ == OBJ_DATUM_DECIMALINT && meta.get_scale() >= 0;
+  } else if (direct && (meta.get_type_class() == ObDateTimeTC
+                        || meta.get_type() == ObMySQLDateTimeType)) {
+    direct = expr.obj_datum_map_ == OBJ_DATUM_8BYTE_DATA;
   } else if (direct && (meta.get_type() == ObVarcharType || meta.get_type() == ObCharType)) {
     // Match both no-conversion cases in ObObj::convert_string_value_charset:
     // different collations in the same charset, and binary/no result charset.
@@ -62,7 +69,7 @@ int DatumMysqlRow::build_cell_value(int64_t idx, ObIAllocator &scratch_allocator
     ret = OB_INVALID_ARGUMENT;
   } else if (obj_indexes_[idx] < 0) {
     ret = ObSMUtils::build_datum_cell_value(row_.datum(idx), row_.expr(idx).obj_meta_,
-                                           type_, scratch_allocator, out, &fields_.at(idx));
+                                           type_, scratch_allocator, out, &fields_.at(idx), dtc_params_);
   } else {
     ret = ObSMUtils::build_cell_value(objects_[obj_indexes_[idx]], type_,
                                      scratch_allocator, out, dtc_params_, &fields_.at(idx),
