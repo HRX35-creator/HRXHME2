@@ -1283,7 +1283,7 @@ int ObTableScanOp::prepare_single_scan_range(int64_t group_idx, bool need_sort)
               tsc_rtdef_.fast_final_nlj_range_ctx_,
               range_allocator,
               ctx_,
-              plan_ctx->get_param_store(),
+              plan_ctx->get_datum_param_store(),
               tsc_rtdef_.range_buffer_idx_,
               locate_range_buffer(),
               key_ranges,

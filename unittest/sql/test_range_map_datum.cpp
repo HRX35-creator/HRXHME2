@@ -313,7 +313,7 @@ TEST(RangeMapDatum, fast_nlj_constant_bounds_survive_plan_arena_and_keep_null_ru
     ObSEArray<ObRangeColumnMeta *, 1> columns;
     ASSERT_EQ(OB_SUCCESS, columns.push_back(&column));
     ASSERT_EQ(OB_SUCCESS, graph.deep_copy_column_metas(columns));
-    ParamStore no_parameters;
+    DatumParamStore no_parameters;
     bool valid = false;
     ASSERT_EQ(OB_SUCCESS,
               ObRangeGenerator::check_can_final_fast_nlj_range(graph, no_parameters, valid));
@@ -338,7 +338,7 @@ TEST(RangeMapDatum, fast_nlj_constant_bounds_survive_plan_arena_and_keep_null_ru
   info.is_const_ = true;
   info.const_val_ = &null;
   info.const_meta_.set_null();
-  ParamStore empty;
+  DatumParamStore empty;
   ASSERT_EQ(OB_SUCCESS, ObRangeGenerator::generate_fast_nlj_range(graph, empty, a, range));
   EXPECT_TRUE(range->start_key_.get_obj_ptr()[0].is_max_value());
   EXPECT_TRUE(range->end_key_.get_obj_ptr()[0].is_min_value());
@@ -380,6 +380,163 @@ TEST(RangeMapDatum, legacy_value_import_preserves_every_captured_value_and_owns_
     ++count;
   }
   EXPECT_EQ(152, count);
+}
+
+TEST(RangeMapDatum, native_parameter_boundaries_keep_all_captured_scalar_values_and_own_bytes) {
+  int covered = 0;
+  for (const auto &f : frames()) {
+    if (f.name == "empty" || f.name == "mixed" || f.name == "sql-array-writer-only") {
+      continue;
+    }
+    SCOPED_TRACE(f.name);
+    ObArenaAllocator output;
+    char *buffer = static_cast<char *>(output.alloc(sizeof(ObNewRange) + 2 * sizeof(ObObj)));
+    ASSERT_NE(nullptr, buffer);
+    auto *range = new (buffer) ObNewRange();
+    new (buffer + sizeof(ObNewRange)) ObObj();
+    new (buffer + sizeof(ObNewRange) + sizeof(ObObj)) ObObj();
+    {
+      ObArenaAllocator input;
+      ObRangeMap original(input);
+      int64_t pos = 0;
+      ASSERT_EQ(OB_SUCCESS, original.deserialize(f.wire.data(), f.wire.size(), pos));
+      DatumParameter parameter;
+      parameter.set_datum(*original.expr_final_infos_.at(0).const_val_);
+      parameter.set_type_meta(original.expr_final_infos_.at(0).const_meta_);
+      DatumParamStore parameters((ObWrapperAllocator(input)));
+      ASSERT_EQ(OB_SUCCESS, parameters.push_back(parameter));
+      ObPreRangeGraph graph(input);
+      ObRangeNode node(input);
+      int64_t key = 0;
+      node.column_cnt_ = 1;
+      node.start_keys_ = &key;
+      node.end_keys_ = &key;
+      graph.set_range_head(&node);
+      ASSERT_EQ(OB_SUCCESS, graph.get_range_map().expr_final_infos_.prepare_allocate(1));
+      auto &entry = graph.get_range_map().expr_final_infos_.at(0);
+      entry.is_param_ = true;
+      entry.param_idx_ = 0;
+      entry.null_safe_ = true;
+      ASSERT_EQ(OB_SUCCESS,
+                ObRangeGenerator::generate_fast_nlj_range(graph, parameters, output, range));
+    }
+    const ObObj &start = range->start_key_.get_obj_ptr()[0];
+    std::string encoded(start.get_serialize_size(), '\0');
+    int64_t pos = 0;
+    ASSERT_EQ(OB_SUCCESS, start.serialize(&encoded[0], encoded.size(), pos));
+    EXPECT_EQ(bare_value(f.canonical), encoded);
+    ++covered;
+  }
+  EXPECT_EQ(151, covered);
+}
+TEST(RangeMapDatum, native_fast_parameter_bounds_keep_composite_types_and_lifetime) {
+  ObArenaAllocator output;
+  char *memory = static_cast<char *>(output.alloc(sizeof(ObNewRange) + 8 * sizeof(ObObj)));
+  ASSERT_NE(nullptr, memory);
+  auto *range = new (memory) ObNewRange();
+  for (int i = 0; i < 8; ++i) {
+    new (memory + sizeof(ObNewRange) + i * sizeof(ObObj)) ObObj();
+  }
+  {
+    ObArenaAllocator input;
+    ObPreRangeGraph graph(input);
+    ObRangeNode node(input);
+    int64_t keys[] = {0, 1, 2, 3};
+    node.column_cnt_ = 4;
+    node.start_keys_ = keys;
+    node.end_keys_ = keys;
+    node.include_start_ = true;
+    node.include_end_ = true;
+    graph.set_range_head(&node);
+    ASSERT_EQ(OB_SUCCESS, graph.get_range_map().expr_final_infos_.prepare_allocate(4));
+    ObObjParam raw[4];
+    raw[0].set_int(INT64_MIN);
+    raw[1].set_uint64(UINT64_MAX);
+    char text[] = "客户-key";
+    raw[2].set_varchar(text);
+    raw[2].set_collation_type(CS_TYPE_UTF8MB4_BIN);
+    raw[3].set_datetime(1792702301123456LL);
+    DatumParamStore parameters((ObWrapperAllocator(input)));
+    ObRangeColumnMeta columns[4];
+    ObSEArray<ObRangeColumnMeta *, 4> column_refs;
+    for (int i = 0; i < 4; ++i) {
+      DatumParameter value;
+      ASSERT_EQ(OB_SUCCESS, copy_legacy_parameter(raw[i], value, input));
+      ASSERT_EQ(OB_SUCCESS, parameters.push_back(value));
+      auto &entry = graph.get_range_map().expr_final_infos_.at(i);
+      entry.is_param_ = true;
+      entry.param_idx_ = i;
+      columns[i].column_type_.set_type(value.get_type());
+      columns[i].column_type_.set_collation_type(value.get_collation_type());
+      columns[i].column_type_.set_collation_level(value.get_collation_level());
+      ASSERT_EQ(OB_SUCCESS, column_refs.push_back(&columns[i]));
+    }
+    ASSERT_EQ(OB_SUCCESS, graph.deep_copy_column_metas(column_refs));
+    bool valid = false;
+    ASSERT_EQ(OB_SUCCESS,
+              ObRangeGenerator::check_can_final_fast_nlj_range(graph, parameters, valid));
+    EXPECT_TRUE(valid);
+    ASSERT_EQ(OB_SUCCESS,
+              ObRangeGenerator::generate_fast_nlj_range(graph, parameters, output, range));
+    memset(text, 'x', sizeof(text) - 1);
+  }
+  const ObObj *row = range->start_key_.get_obj_ptr();
+  EXPECT_EQ(INT64_MIN, row[0].get_int());
+  EXPECT_EQ(UINT64_MAX, row[1].get_uint64());
+  EXPECT_EQ(ObString("客户-key"), row[2].get_string());
+  EXPECT_EQ(1792702301123456LL, row[3].get_datetime());
+  EXPECT_TRUE(range->border_flag_.inclusive_start());
+  EXPECT_TRUE(range->border_flag_.inclusive_end());
+}
+TEST(RangeMapDatum, native_fast_parameter_bounds_preserve_null_rules_and_reject_missing_slots) {
+  ObArenaAllocator arena;
+  ObPreRangeGraph graph(arena);
+  ObRangeNode node(arena);
+  int64_t key = 0;
+  node.column_cnt_ = 1;
+  node.start_keys_ = &key;
+  node.end_keys_ = &key;
+  graph.set_range_head(&node);
+  ASSERT_EQ(OB_SUCCESS, graph.get_range_map().expr_final_infos_.prepare_allocate(1));
+  auto &entry = graph.get_range_map().expr_final_infos_.at(0);
+  entry.is_param_ = true;
+  entry.param_idx_ = 0;
+  ObRangeColumnMeta column;
+  column.column_type_.set_int();
+  ObSEArray<ObRangeColumnMeta *, 1> columns;
+  ASSERT_EQ(OB_SUCCESS, columns.push_back(&column));
+  ASSERT_EQ(OB_SUCCESS, graph.deep_copy_column_metas(columns));
+  char *memory = static_cast<char *>(arena.alloc(sizeof(ObNewRange) + 2 * sizeof(ObObj)));
+  ASSERT_NE(nullptr, memory);
+  auto *range = new (memory) ObNewRange();
+  new (memory + sizeof(ObNewRange)) ObObj();
+  new (memory + sizeof(ObNewRange) + sizeof(ObObj)) ObObj();
+  DatumParamStore parameters((ObWrapperAllocator(arena)));
+  bool valid = true;
+  EXPECT_EQ(OB_ERR_UNEXPECTED,
+            ObRangeGenerator::check_can_final_fast_nlj_range(graph, parameters, valid));
+  EXPECT_EQ(OB_ERR_UNEXPECTED,
+            ObRangeGenerator::generate_fast_nlj_range(graph, parameters, arena, range));
+  DatumParameter parameter;
+  ASSERT_EQ(OB_SUCCESS, parameters.push_back(parameter));
+  ASSERT_EQ(OB_SUCCESS, ObRangeGenerator::generate_fast_nlj_range(graph, parameters, arena, range));
+  EXPECT_TRUE(range->start_key_.get_obj_ptr()[0].is_max_value());
+  EXPECT_TRUE(range->end_key_.get_obj_ptr()[0].is_min_value());
+  entry.null_safe_ = true;
+  ASSERT_EQ(OB_SUCCESS, ObRangeGenerator::generate_fast_nlj_range(graph, parameters, arena, range));
+  EXPECT_TRUE(range->start_key_.get_obj_ptr()[0].is_null());
+  EXPECT_TRUE(range->end_key_.get_obj_ptr()[0].is_null());
+  int32_t raw = 123;
+  ObObjParam decimal;
+  decimal.set_decimal_int(4, 2, reinterpret_cast<ObDecimalInt *>(&raw));
+  decimal.set_precision(38);
+  ASSERT_EQ(OB_SUCCESS, copy_legacy_parameter(decimal, parameters.at(0), arena));
+  column.column_type_.set_type(ObDecimalIntType);
+  column.column_type_.set_scale(2);
+  column.column_type_.set_precision(38);
+  ASSERT_EQ(OB_SUCCESS, graph.deep_copy_column_metas(columns));
+  ASSERT_EQ(OB_SUCCESS, ObRangeGenerator::check_can_final_fast_nlj_range(graph, parameters, valid));
+  EXPECT_FALSE(valid);
 }
 
 int main(int argc, char **argv) {

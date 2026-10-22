@@ -1858,7 +1858,7 @@ int ObRangeGenerator::check_need_merge_range_nodes(const ObRangeNode *node,
   return ret;
 }
 int ObRangeGenerator::generate_fast_nlj_range(const ObPreRangeGraph &pre_range_graph,
-                                              const ParamStore &param_store,
+                                              const common::DatumParamStore &param_store,
                                               ObIAllocator &allocator,
                                               void *range_buffer)
 {
@@ -1881,26 +1881,38 @@ int ObRangeGenerator::generate_fast_nlj_range(const ObPreRangeGraph &pre_range_g
       ends[i].set_null();
     } else {
       const ObRangeMap::ExprFinalInfo& expr_info = range_map.expr_final_infos_.at(start_idx);
-      const ObObj* src_obj = nullptr;
-      ObObj constant_view;
+      const ObDatum *source = nullptr;
+      const ObObjMeta *source_meta = nullptr;
       if (expr_info.is_param_) {
-        src_obj = &param_store.at(expr_info.param_idx_);
-      } else if (expr_info.is_const_) {
-        if (expr_info.const_val_ == nullptr) {
+        const int64_t index = expr_info.param_idx_;
+        if (index < 0 || index >= param_store.count()) {
           ret = OB_ERR_UNEXPECTED;
-        }
-        else if (OB_FAIL(materialize_legacy_value(*expr_info.const_val_, expr_info.const_meta_, constant_view))) {
         } else {
-          src_obj = &constant_view;
+          const DatumParameter &parameter = param_store.at(index);
+          source = &parameter.datum_;
+          source_meta = &parameter.get_type_meta();
         }
+      } else if (expr_info.is_const_) {
+        source = expr_info.const_val_;
+        source_meta = &expr_info.const_meta_;
       }
       if (OB_FAIL(ret)) {
-      } else if (src_obj == nullptr) { ret = OB_ERR_UNEXPECTED;
-      } else if (src_obj->is_null() && !expr_info.null_safe_) {
+      } else if (source == nullptr || source_meta == nullptr) {
+        ret = OB_ERR_UNEXPECTED;
+      } else if (source->is_null() && !expr_info.null_safe_) {
         always_false = true;
-      } else if (OB_FAIL(ob_write_obj(allocator, *src_obj, *(starts + i)))) {
       } else {
-        *(ends + i) = *(starts + i);
+        // ObNewRange still owns legacy rowkeys. The runtime parameter reader
+        // stays native; adapt and own payloads only at this remaining boundary.
+        ObDatum bound = *source;
+        const ObObjDatumMapType mapping = ObDatum::get_obj_datum_map_type(source_meta->get_type());
+        if ((mapping == OBJ_DATUM_STRING || mapping == OBJ_DATUM_NUMBER ||
+             mapping == OBJ_DATUM_DECIMALINT) &&
+            OB_FAIL(bound.deep_copy(*source, allocator))) {
+        } else if (OB_FAIL(materialize_legacy_value(bound, *source_meta, *(starts + i)))) {
+        } else {
+          *(ends + i) = *(starts + i);
+        }
       }
     }
   }
@@ -1932,7 +1944,7 @@ int ObRangeGenerator::generate_fast_nlj_range(const ObPreRangeGraph &pre_range_g
 }
 
 int ObRangeGenerator::check_can_final_fast_nlj_range(const ObPreRangeGraph &pre_range_graph,
-                                                     const ParamStore &param_store,
+                                                     const common::DatumParamStore &param_store,
                                                      bool &is_valid)
 {
   int ret = OB_SUCCESS;
@@ -1959,7 +1971,12 @@ int ObRangeGenerator::check_can_final_fast_nlj_range(const ObPreRangeGraph &pre_
     } else if (start_idx == OB_RANGE_NULL_VALUE) {
       // do nothing
     } else if (range_map.expr_final_infos_.at(start_idx).is_param_) {
-      source_meta = &param_store.at(range_map.expr_final_infos_.at(start_idx).param_idx_).get_meta();
+      const int64_t index = range_map.expr_final_infos_.at(start_idx).param_idx_;
+      if (index < 0 || index >= param_store.count()) {
+        ret = OB_ERR_UNEXPECTED;
+      } else {
+        source_meta = &param_store.at(index).get_type_meta();
+      }
     } else if (range_map.expr_final_infos_.at(start_idx).is_const_) {
       if (range_map.expr_final_infos_.at(start_idx).const_val_ == nullptr) {
         ret = OB_ERR_UNEXPECTED;
