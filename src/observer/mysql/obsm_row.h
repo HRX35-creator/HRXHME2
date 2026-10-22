@@ -93,6 +93,8 @@ public:
                           ObCharsetType result_charset, bool need_ps_cast);
   int build_cell_value(int64_t idx, ObIAllocator &scratch_allocator,
                        obmysql::ObMySQLCellValue &out) const override;
+  int get_packed_row_blob(const char *&data, int64_t &len) const override
+  { data = nullptr; len = 0; return OB_STATE_NOT_MATCH; }
 protected:
   int64_t get_cells_cnt() const override;
 private:

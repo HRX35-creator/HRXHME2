@@ -1,4 +1,7 @@
 --echo # Datum result rows: direct cells and compatibility columns share one advance
+--disable_warnings
+DROP TABLE IF EXISTS datum_result_row_test;
+--enable_warnings
 CREATE TABLE datum_result_row_test (
   id INT PRIMARY KEY,
   si BIGINT,
@@ -32,7 +35,7 @@ SET sql_select_limit=DEFAULT;
 SELECT SQL_CALC_FOUND_ROWS id,s FROM datum_result_row_test ORDER BY id LIMIT 1;
 SELECT FOUND_ROWS();
 SELECT id,s FROM datum_result_row_test WHERE id<0;
-SET character_set_results=latin1;
+SET character_set_results=binary;
 SELECT id,s FROM datum_result_row_test WHERE id=2;
 SET character_set_results=utf8mb4;
 SELECT id,s FROM datum_result_row_test WHERE id=1;
