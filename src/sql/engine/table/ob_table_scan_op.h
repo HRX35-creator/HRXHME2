@@ -119,7 +119,7 @@ struct GroupRescanParamInfo
                K_(cur_param));
   int64_t param_idx_;
   DatumParameterArray *gr_param_; //group rescan param
-  common::ObObjParam cur_param_; //current param in param store, used to restore paramstore state after the completion of group rescan.
+  DatumParameter cur_param_; // Query-arena-owned value saved while group ranges are extracted.
 };
 typedef common::ObFixedArray<GroupRescanParamInfo, common::ObIAllocator> GroupRescanParamArray;
 
@@ -641,54 +641,52 @@ protected:
   class GroupRescanParamGuard
   {
   public:
-    GroupRescanParamGuard(ObTableScanRtDef &tsc_rtdef, ParamStore &param_store)
-      : tsc_rtdef_(tsc_rtdef),
-        param_store_(param_store),
-        range_buffer_idx_(0)
+    GroupRescanParamGuard(ObTableScanRtDef &tsc_rtdef, ObPhysicalPlanCtx &plan_ctx, common::ObIAllocator &allocator)
+      : tsc_rtdef_(tsc_rtdef), plan_ctx_(plan_ctx),
+        range_buffer_idx_(tsc_rtdef.range_buffer_idx_), saved_count_(0), ret_(common::OB_SUCCESS)
     {
-      //Save the original state in param store.
-      //The param store may be modified during the execution of group rescan.
-      //After the execution is completed, the original state needs to be restored.
-      for (int64_t i = 0; i < tsc_rtdef_.bnlj_params_.count(); ++i) {
-        int64_t param_idx = tsc_rtdef_.bnlj_params_.at(i).param_idx_;
-        common::ObObjParam &cur_param = param_store_.at(param_idx);
-        tsc_rtdef_.bnlj_params_.at(i).cur_param_ = cur_param;
+      for (int64_t i = 0; ret_ == common::OB_SUCCESS && i < tsc_rtdef_.bnlj_params_.count(); ++i) {
+        auto &info = tsc_rtdef_.bnlj_params_.at(i);
+        if (info.param_idx_ < 0 || info.param_idx_ >= plan_ctx_.get_datum_param_store().count()) {
+          ret_ = common::OB_ERR_UNEXPECTED;
+        } else if (common::OB_SUCCESS != (ret_ = info.cur_param_.deep_copy(
+                       plan_ctx_.get_datum_param_store().at(info.param_idx_), allocator))) {
+        } else { ++saved_count_; }
       }
-      range_buffer_idx_ = tsc_rtdef_.range_buffer_idx_;
     }
-
+    int status() const { return ret_; }
     int switch_group_rescan_param(int64_t group_idx)
     {
-      int ret = common::OB_SUCCESS;
-      //replace real param to param store to execute group rescan in TSC
+      int ret = ret_;
       for (int64_t i = 0; OB_SUCC(ret) && i < tsc_rtdef_.bnlj_params_.count(); ++i) {
-        DatumParameterArray *array_obj = tsc_rtdef_.bnlj_params_.at(i).gr_param_;
-        int64_t param_idx = tsc_rtdef_.bnlj_params_.at(i).param_idx_;
-        common::ObObjParam &dst_param = param_store_.at(param_idx);
-        if (array_obj == nullptr || group_idx < 0 || group_idx >= array_obj->count_) {
+        const auto &info = tsc_rtdef_.bnlj_params_.at(i);
+        DatumParameterArray *array = info.gr_param_;
+        if (array == nullptr || group_idx < 0 || group_idx >= array->count_) {
           ret = common::OB_ERR_UNEXPECTED;
-        } else if (OB_SUCC(ret = materialize_legacy_parameter(array_obj->data_[group_idx], dst_param))) {
-          dst_param.set_param_meta();
+        } else {
+          DatumParameter parameter = array->data_[group_idx];
+          parameter.set_param_meta();
+          ret = plan_ctx_.set_runtime_parameter(info.param_idx_, parameter);
         }
       }
       if (OB_SUCC(ret)) { tsc_rtdef_.range_buffer_idx_ = group_idx; }
       return ret;
     }
-
     ~GroupRescanParamGuard()
     {
-      //restore the original state to param store
-      for (int64_t i = 0; i < tsc_rtdef_.bnlj_params_.count(); ++i) {
-        int64_t param_idx = tsc_rtdef_.bnlj_params_.at(i).param_idx_;
-        common::ObObjParam &cur_param = param_store_.at(param_idx);
-        cur_param = tsc_rtdef_.bnlj_params_.at(i).cur_param_;
+      for (int64_t i = 0; i < saved_count_; ++i) {
+        const auto &info = tsc_rtdef_.bnlj_params_.at(i);
+        const int ret = plan_ctx_.set_runtime_parameter(info.param_idx_, info.cur_param_);
+        if (ret != common::OB_SUCCESS) { LOG_ERROR("failed to restore group parameter", K(ret)); }
       }
       tsc_rtdef_.range_buffer_idx_ = range_buffer_idx_;
     }
   private:
     ObTableScanRtDef &tsc_rtdef_;
-    ParamStore &param_store_;
+    ObPhysicalPlanCtx &plan_ctx_;
     int64_t range_buffer_idx_;
+    int64_t saved_count_;
+    int ret_;
   };
 
   OB_INLINE void* locate_range_buffer()

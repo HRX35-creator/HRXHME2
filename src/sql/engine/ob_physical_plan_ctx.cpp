@@ -92,13 +92,31 @@ ObPhysicalPlanCtx::~ObPhysicalPlanCtx()
 int ObPhysicalPlanCtx::reserve_param_space(int64_t param_count)
 {
   int ret = OB_SUCCESS;
+  const int64_t old_legacy_count = param_store_.count();
+  const int64_t old_native_count = datum_param_store_.count();
   ObObjParam null_obj;
-  if (OB_FAIL(param_store_.reserve(param_count))) {
+  if (param_count < 0) {
+    ret = OB_INVALID_ARGUMENT;
+  } else if (OB_FAIL(param_store_.reserve(param_count))) {
+  } else if (OB_FAIL(datum_param_store_.reserve(std::max(param_count, old_legacy_count)))) {
   }
-  int64_t N = param_count - param_store_.count();
-  for (int64_t i = 0; OB_SUCC(ret) && i < N; ++i) {
-    if (OB_SUCCESS != (ret = param_store_.push_back(null_obj))) {
+  for (int64_t i = old_legacy_count; OB_SUCC(ret) && i < param_count; ++i) {
+    ret = param_store_.push_back(null_obj);
+  }
+  // Execution variables are appended after input parameters and their SQL
+  // frames have already been bound. Grow the native descriptors without
+  // rebuilding input frames or discarding the initialized input values.
+  for (int64_t i = old_native_count; OB_SUCC(ret) && i < param_store_.count(); ++i) {
+    DatumParameter parameter;
+    if (i < old_legacy_count &&
+        OB_FAIL(copy_legacy_parameter(param_store_.at(i), parameter, allocator_))) {
+    } else if (OB_SUCC(ret)) {
+      ret = datum_param_store_.push_back(parameter);
     }
+  }
+  if (OB_FAIL(ret)) {
+    while (param_store_.count() > old_legacy_count) { param_store_.pop_back(); }
+    while (datum_param_store_.count() > old_native_count) { datum_param_store_.pop_back(); }
   }
   return ret;
 }
@@ -128,6 +146,22 @@ int ObPhysicalPlanCtx::init_datum_param_store()
     }
   }
 
+  return ret;
+}
+
+int ObPhysicalPlanCtx::set_runtime_parameter(int64_t index, const DatumParameter &parameter)
+{
+  int ret = OB_SUCCESS;
+  if (index < 0 || index >= datum_param_store_.count() || index >= param_store_.count()) {
+    ret = OB_INVALID_ARGUMENT;
+  } else {
+    ObObjParam legacy_view;
+    if (OB_FAIL(materialize_legacy_parameter(parameter, legacy_view))) {
+    } else {
+      datum_param_store_.at(index) = parameter;
+      param_store_.at(index) = legacy_view;
+    }
+  }
   return ret;
 }
 

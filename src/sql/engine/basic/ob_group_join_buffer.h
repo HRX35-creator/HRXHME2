@@ -104,10 +104,10 @@ private:
                                int64_t &group_size);
   int set_above_group_size();
   void reset_buffer_state();
-  int backup_above_params(common::ObIArray<ObObjParam> &left_params_backup,
-                          common::ObIArray<ObObjParam> &right_params_backup);
-  int restore_above_params(common::ObIArray<ObObjParam> &left_params_backup,
-                           common::ObIArray<ObObjParam> &right_params_backup);
+  int backup_above_params(common::ObIArray<DatumParameter> &left_params_backup,
+                          common::ObIArray<DatumParameter> &right_params_backup);
+  int restore_above_params(common::ObIArray<DatumParameter> &left_params_backup,
+                           common::ObIArray<DatumParameter> &right_params_backup);
 
 private:
   ObOperator *op_;

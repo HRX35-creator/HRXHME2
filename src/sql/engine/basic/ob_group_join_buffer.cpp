@@ -249,7 +249,7 @@ int ObGroupJoinBufffer::fill_cur_row_group_param()
       DatumParameterArray &arr = group_params_.at(i);
       dst->get_eval_info(*eval_ctx_).clear_evaluated_flag();
       ObDynamicParamSetter::clear_parent_evaluated_flag(*eval_ctx_, *dst);
-      if (OB_FAIL(materialize_legacy_parameter(arr.data_[cur_group_idx_], plan_ctx->get_param_store_for_update().at(param_idx)))) {
+      if (OB_FAIL(plan_ctx->set_runtime_parameter(param_idx, arr.data_[cur_group_idx_]))) {
       } else if (dst->res_buf_off_ != 0 && OB_FAIL(dst->deep_copy_datum(*eval_ctx_, arr.data_[cur_group_idx_].datum_))) {
       } else {
         if (dst->res_buf_off_ == 0) { param_datum = arr.data_[cur_group_idx_].datum_; }
@@ -274,7 +274,7 @@ int ObGroupJoinBufffer::fill_cur_row_group_param()
         ObDynamicParamSetter::clear_parent_evaluated_flag(*eval_ctx_, *dst);
         if (OB_UNLIKELY(above_group_idx_for_read_ >= arr->count_)) {
           ret = OB_ERR_UNEXPECTED;
-        } else if (OB_FAIL(materialize_legacy_parameter(arr->data_[above_group_idx_for_read_], plan_ctx->get_param_store_for_update().at(param_idx)))) {
+        } else if (OB_FAIL(plan_ctx->set_runtime_parameter(param_idx, arr->data_[above_group_idx_for_read_]))) {
         } else if (dst->res_buf_off_ != 0 && OB_FAIL(dst->deep_copy_datum(*eval_ctx_, arr->data_[above_group_idx_for_read_].datum_))) {
         } else {
           if (dst->res_buf_off_ == 0) { param_datum = arr->data_[above_group_idx_for_read_].datum_; }
@@ -307,7 +307,7 @@ int ObGroupJoinBufffer::get_next_left_iter()
         ObDatum &param_datum = dst->locate_datum_for_write(*eval_ctx_);
         dst->get_eval_info(*eval_ctx_).clear_evaluated_flag();
         ObDynamicParamSetter::clear_parent_evaluated_flag(*eval_ctx_, *dst);
-        if (OB_FAIL(materialize_legacy_parameter(array_obj->data_[above_group_idx_for_expand_], plan_ctx->get_param_store_for_update().at(param_idx)))) {
+        if (OB_FAIL(plan_ctx->set_runtime_parameter(param_idx, array_obj->data_[above_group_idx_for_expand_]))) {
         } else if (dst->res_buf_off_ != 0 && OB_FAIL(dst->deep_copy_datum(*eval_ctx_, array_obj->data_[above_group_idx_for_expand_].datum_))) {
         } else {
           if (dst->res_buf_off_ == 0) { param_datum = array_obj->data_[above_group_idx_for_expand_].datum_; }
@@ -461,8 +461,8 @@ int ObGroupJoinBufffer::rescan_right()
 int ObGroupJoinBufffer::fill_group_buffer()
 {
   int ret = OB_SUCCESS;
-  common::ObSEArray<ObObjParam, 1> left_params_backup;
-  common::ObSEArray<ObObjParam, 1> right_params_backup;
+  common::ObSEArray<DatumParameter, 1> left_params_backup;
+  common::ObSEArray<DatumParameter, 1> right_params_backup;
   if (!is_left_end_ && need_fill_group_buffer()) {
     if (OB_FAIL(backup_above_params(left_params_backup, right_params_backup))) {
     } else if (OB_FAIL(init_group_params())) {
@@ -540,8 +540,8 @@ int ObGroupJoinBufffer::batch_fill_group_buffer(const int64_t max_row_cnt,
                                                 const ObBatchRows *&batch_rows)
 {
   int ret = OB_SUCCESS;
-  common::ObSEArray<ObObjParam, 1> left_params_backup;
-  common::ObSEArray<ObObjParam, 1> right_params_backup;
+  common::ObSEArray<DatumParameter, 1> left_params_backup;
+  common::ObSEArray<DatumParameter, 1> right_params_backup;
   batch_rows = &left_->get_brs();
   if (!is_left_end_ && need_fill_group_buffer()) {
     if (OB_FAIL(init_group_params())) {
@@ -922,8 +922,8 @@ void ObGroupJoinBufffer::reset_buffer_state()
   mem_context_->get_arena_allocator().reset();
 }
 
-int ObGroupJoinBufffer::backup_above_params(common::ObIArray<ObObjParam> &left_params_backup,
-                                            common::ObIArray<ObObjParam> &right_params_backup)
+int ObGroupJoinBufffer::backup_above_params(common::ObIArray<DatumParameter> &left_params_backup,
+                                            common::ObIArray<DatumParameter> &right_params_backup)
 {
   int ret = OB_SUCCESS;
   if (is_multi_level_) {
@@ -932,22 +932,24 @@ int ObGroupJoinBufffer::backup_above_params(common::ObIArray<ObObjParam> &left_p
     right_params_backup.reuse();
     for (int64_t i = 0; OB_SUCC(ret) && i < left_rescan_params_->count(); i++) {
       int64_t param_idx = left_rescan_params_->at(i).param_idx_;
-      const ObObjParam &obj_param = plan_ctx->get_param_store().at(param_idx);
-      if (OB_FAIL(left_params_backup.push_back(obj_param))) {
+      DatumParameter value;
+      if (OB_FAIL(value.deep_copy(plan_ctx->get_datum_param_store().at(param_idx), ctx_->get_allocator()))) {
+      } else if (OB_FAIL(left_params_backup.push_back(value))) {
       }
     }
     for (int64_t i = 0; OB_SUCC(ret) && i < right_rescan_params_->count(); i++) {
       int64_t param_idx = right_rescan_params_->at(i).param_idx_;
-      const ObObjParam &obj_param = plan_ctx->get_param_store().at(param_idx);
-      if (OB_FAIL(right_params_backup.push_back(obj_param))) {
+      DatumParameter value;
+      if (OB_FAIL(value.deep_copy(plan_ctx->get_datum_param_store().at(param_idx), ctx_->get_allocator()))) {
+      } else if (OB_FAIL(right_params_backup.push_back(value))) {
       }
     }
   }
   return ret;
 }
 
-int ObGroupJoinBufffer::restore_above_params(common::ObIArray<ObObjParam> &left_params_backup,
-                                             common::ObIArray<ObObjParam> &right_params_backup)
+int ObGroupJoinBufffer::restore_above_params(common::ObIArray<DatumParameter> &left_params_backup,
+                                             common::ObIArray<DatumParameter> &right_params_backup)
 {
   int ret = OB_SUCCESS;
   if (is_multi_level_) {
@@ -961,11 +963,11 @@ int ObGroupJoinBufffer::restore_above_params(common::ObIArray<ObObjParam> &left_
     ObPhysicalPlanCtx *plan_ctx = GET_PHY_PLAN_CTX(*ctx_);
     for (int64_t i = 0; OB_SUCC(ret) && i < left_rescan_params_->count(); i++) {
       int64_t param_idx = left_rescan_params_->at(i).param_idx_;
-      plan_ctx->get_param_store_for_update().at(param_idx) = left_params_backup.at(i);
+      ret = plan_ctx->set_runtime_parameter(param_idx, left_params_backup.at(i));
     }
     for (int64_t i = 0; OB_SUCC(ret) && i < right_rescan_params_->count(); i++) {
       int64_t param_idx = right_rescan_params_->at(i).param_idx_;
-      plan_ctx->get_param_store_for_update().at(param_idx) = right_params_backup.at(i);
+      ret = plan_ctx->set_runtime_parameter(param_idx, right_params_backup.at(i));
     }
   }
   return ret;

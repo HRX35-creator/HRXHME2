@@ -178,6 +178,10 @@ public:
   const DatumParamStore &get_datum_param_store() const { return datum_param_store_; }
   const ObIArray<char *> &get_param_frame_ptrs() const { return param_frame_ptrs_; }
   int init_datum_param_store();
+  // Runtime values and metadata are authoritative in the native store. Keep a
+  // view for remaining legacy range/PL consumers until those are migrated.
+  // The caller owns the value payload for as long as this binding is used.
+  int set_runtime_parameter(int64_t index, const DatumParameter &parameter);
   void reset_datum_param_store()
   {
     param_store_.reuse();

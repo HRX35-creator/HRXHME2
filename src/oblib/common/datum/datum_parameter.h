@@ -47,6 +47,9 @@ public:
   bool is_lob() const { return type_meta_.is_lob(); }
   bool is_string_type() const { return type_meta_.is_string_type(); }
   bool is_null() const { return datum_.is_null(); }
+  // Preserve declared metadata, accuracy and flags, just as a runtime NULL
+  // assignment does. The raw value type/collation become NULL.
+  void set_null() { datum_.set_null(); type_meta_.set_null(); }
   bool has_lob_header() const { return type_meta_.has_lob_header(); }
 
   void set_accuracy(const ObAccuracy &accuracy) { accuracy_ = accuracy; }

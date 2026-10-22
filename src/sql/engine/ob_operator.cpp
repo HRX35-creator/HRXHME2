@@ -83,27 +83,21 @@ int ObDynamicParamSetter::capture_dynamic_param(ObEvalCtx &eval_ctx, DatumParame
   int ret = OB_SUCCESS;
   ObPhysicalPlanCtx *plan_ctx = eval_ctx.exec_ctx_.get_physical_plan_ctx();
   if (OB_ISNULL(plan_ctx) || OB_ISNULL(dst_) || param_idx_ < 0 ||
-      param_idx_ >= plan_ctx->get_param_store().count()) {
+      param_idx_ >= plan_ctx->get_datum_param_store().count()) {
     ret = OB_INVALID_ARGUMENT;
   } else {
-    // Only metadata is still supplied by the old scalar store. The value is
-    // taken directly from the SQL frame, never reconstructed from an Obj.
-    const ObObjParam &metadata = plan_ctx->get_param_store().at(param_idx_);
-    DatumParameter view;
+    DatumParameter view = plan_ctx->get_datum_param_store().at(param_idx_);
+    const ObDatum stored_value(view.datum_);
     view.set_datum(dst_->locate_expr_datum(eval_ctx));
-    view.set_type_meta(metadata.get_meta());
-    view.set_accuracy(metadata.get_accuracy());
-    view.set_result_flags(metadata.get_result_flag());
-    view.set_param_flag(metadata.get_param_flag());
-    view.set_param_meta(metadata.get_param_meta());
-    view.set_raw_text_info(metadata.get_raw_text_pos(), metadata.get_raw_text_len());
     if (!view.is_null() && view.is_ext_sql_array()) {
       if (view.datum_.len_ != sizeof(int64_t)) {
         if (!view.datum_.has_ext_value() || view.datum_.get_extend_type() != T_EXT_SQL_ARRAY) {
           ret = OB_ERR_UNEXPECTED;
         } else {
           const int64_t address = view.datum_.get_ext();
-          if (OB_FAIL(view.alloc_datum_reserved_buff(view.get_type_meta(), view.get_precision(), eval_ctx.exec_ctx_.get_allocator()))) {
+          if (!stored_value.is_null() && stored_value.len_ == sizeof(int64_t) && stored_value.get_int() == address) {
+            view.set_datum(stored_value);
+          } else if (OB_FAIL(view.alloc_datum_reserved_buff(view.get_type_meta(), view.get_precision(), eval_ctx.exec_ctx_.get_allocator()))) {
           } else { view.set_array_address(reinterpret_cast<const DatumParameterArray *>(address)); }
         }
       }
@@ -118,21 +112,18 @@ int ObDynamicParamSetter::restore_dynamic_param(ObEvalCtx &eval_ctx, const Datum
 {
   int ret = OB_SUCCESS;
   ObPhysicalPlanCtx *plan_ctx = eval_ctx.exec_ctx_.get_physical_plan_ctx();
-  if (OB_ISNULL(plan_ctx) || OB_ISNULL(dst_) || param_idx_ < 0 || param_idx_ >= plan_ctx->get_param_store().count()) {
+  if (OB_ISNULL(plan_ctx) || OB_ISNULL(dst_) || param_idx_ < 0 ||
+      param_idx_ >= plan_ctx->get_datum_param_store().count()) {
     ret = OB_INVALID_ARGUMENT;
   } else {
-    // Restore metadata before the normal setter applies its NULL/decimal rules.
-    // reset() also clears param_meta; its compatibility setter ignores NULL
-    // when an old non-NULL param_meta is still present.
-    ObObjParam &metadata = plan_ctx->get_param_store_for_update().at(param_idx_);
-    metadata.reset();
-    metadata.set_accuracy(param.get_accuracy());
-    metadata.set_result_flag(param.get_result_flag());
-    metadata.set_param_flag(param.get_param_flag());
-    metadata.set_param_meta(param.get_param_meta());
-    metadata.set_raw_text_info(param.get_raw_text_pos(), param.get_raw_text_len());
-    ObDatum value(param.datum_);
-    ret = update_dynamic_param(eval_ctx, value);
+    DatumParameter &slot = plan_ctx->get_datum_param_store().at(param_idx_);
+    const DatumParameter saved(slot);
+    const DatumParameter input(param);
+    slot = input;
+    ObDatum value(input.datum_);
+    if (OB_FAIL(update_dynamic_param(eval_ctx, value))) {
+      slot = saved;
+    }
   }
   return ret;
 }
@@ -143,31 +134,60 @@ int ObDynamicParamSetter::update_dynamic_param(ObEvalCtx &eval_ctx, ObDatum &dat
   ObPhysicalPlanCtx *phy_ctx = eval_ctx.exec_ctx_.get_physical_plan_ctx();
   if (OB_ISNULL(phy_ctx) || OB_ISNULL(dst_)) {
     ret = OB_INVALID_ARGUMENT;
+  } else if (param_idx_ < 0 || param_idx_ >= phy_ctx->get_datum_param_store().count()) {
+    ret = OB_ERR_UNEXPECTED;
   } else {
     clear_parent_evaluated_flag(eval_ctx, *dst_);
-    ObDatum &param_datum = dst_->locate_expr_datum(eval_ctx);
     dst_->get_eval_info(eval_ctx).evaluated_ = true;
-    ret = assign_parameter_to_expr(eval_ctx, *dst_, datum, dst_->obj_meta_);
-    // Initialize param store, used for query range calculation
-    ParamStore &param_store = phy_ctx->get_param_store_for_update();
-    if (OB_FAIL(ret)) {
-    } else if (OB_UNLIKELY(param_idx_ < 0 || param_idx_ >= param_store.count())) {
-      ret = OB_ERR_UNEXPECTED;
-    } else if (OB_FAIL(param_datum.to_obj(param_store.at(param_idx_),
-                                   dst_->obj_meta_,
-                                   dst_->obj_datum_map_))) {
+    if (OB_FAIL(assign_parameter_to_expr(eval_ctx, *dst_, datum, dst_->obj_meta_))) {
     } else {
-      // if exec param is decimal int, accuracy must be properly set
-      if (dst_->obj_meta_.is_decimal_int()) {
-        ObAccuracy acc(dst_->datum_meta_.precision_, dst_->datum_meta_.scale_);
-        param_store.at(param_idx_).set_param_meta(dst_->obj_meta_);
-        param_store.at(param_idx_).set_accuracy(acc);
+      const ObDatum &frame = dst_->locate_expr_datum(eval_ctx);
+      DatumParameter updated = phy_ctx->get_datum_param_store().at(param_idx_);
+      updated.set_datum(frame);
+      if (frame.is_null()) {
+        updated.set_null();
+      } else if (dst_->obj_datum_map_ == OBJ_DATUM_NULL) {
+        updated.set_type_meta(dst_->obj_meta_);
+        updated.set_null();
+      } else if ((dst_->obj_meta_.is_decimal_int() && dst_->obj_meta_.get_scale() < 0) ||
+                 dst_->obj_datum_map_ == OBJ_DATUM_MAPPING_MAX) {
+        ret = OB_ERR_UNEXPECTED;
+      } else if (dst_->obj_datum_map_ == OBJ_DATUM_EXTEND) {
+        ObObjMeta meta;
+        if (frame.is_native_extend()) {
+          meta.set_ext();
+          meta.set_extend_type(frame.get_extend_type());
+          meta.set_cs_level(frame.get_extend_collation_level());
+          meta.set_cs_type(frame.get_extend_collation());
+        } else if (frame.len_ == DATUM_LEGACY_EXTEND_SIZE && frame.is_ext()) {
+          MEMCPY(&meta, frame.ptr_, sizeof(meta));
+        } else {
+          ret = OB_ERR_UNEXPECTED;
+        }
+        if (OB_SUCC(ret)) {
+          updated.set_type_meta(meta);
+          if (meta.is_null()) {
+            updated.datum_.set_null();
+          } else if (meta.is_ext_sql_array()) {
+            const int64_t address = frame.get_ext();
+            if (OB_FAIL(updated.alloc_datum_reserved_buff(meta, updated.get_precision(), eval_ctx.exec_ctx_.get_allocator()))) {
+            } else { updated.set_array_address(reinterpret_cast<const DatumParameterArray *>(address)); }
+          }
+        }
       } else {
-        param_store.at(param_idx_).set_param_meta();
+        updated.set_type_meta(dst_->obj_meta_);
+      }
+      if (OB_SUCC(ret)) {
+        if (dst_->obj_meta_.is_decimal_int()) {
+          updated.set_param_meta(dst_->obj_meta_);
+          updated.set_accuracy(ObAccuracy(dst_->datum_meta_.precision_, dst_->datum_meta_.scale_));
+        } else {
+          updated.set_param_meta();
+        }
+        ret = phy_ctx->set_runtime_parameter(param_idx_, updated);
       }
     }
   }
-
   return ret;
 }
 
@@ -1368,9 +1388,19 @@ void ObOperator::do_clear_datum_eval_flag()
 void ObOperator::set_pushdown_param_null(const ObIArray<ObDynamicParamSetter> &rescan_params)
 {
   ObPhysicalPlanCtx *plan_ctx = GET_PHY_PLAN_CTX(ctx_);
-  ParamStore &param_store = plan_ctx->get_param_store_for_update();
   FOREACH_CNT(param, rescan_params) {
-    param_store.at(param->param_idx_).set_null();
+    const int64_t index = param->param_idx_;
+    int ret = OB_SUCCESS;
+    if (index < 0 || index >= plan_ctx->get_datum_param_store().count()) {
+      ret = OB_ERR_UNEXPECTED;
+      LOG_ERROR("invalid pushdown parameter", K(ret), K(index));
+    } else {
+      DatumParameter value = plan_ctx->get_datum_param_store().at(index);
+      value.set_null();
+      if (OB_FAIL(plan_ctx->set_runtime_parameter(index, value))) {
+        LOG_ERROR("failed to clear pushdown parameter", K(ret), K(index));
+      }
+    }
     param->dst_->locate_expr_datum(eval_ctx_, 0).set_null();
   }
 }

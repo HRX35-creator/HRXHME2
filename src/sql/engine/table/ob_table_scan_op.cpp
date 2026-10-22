@@ -920,7 +920,8 @@ int ObTableScanOp::prepare_all_das_tasks()
     } else {
       int64_t group_size = (output_ == iter_tree_) ?  1: tsc_rtdef_.group_size_;
       bool need_sort = MY_CTDEF.ordering_used_by_parent_;
-      GroupRescanParamGuard grp_guard(tsc_rtdef_, GET_PHY_PLAN_CTX(ctx_)->get_param_store_for_update());
+      GroupRescanParamGuard grp_guard(tsc_rtdef_, *GET_PHY_PLAN_CTX(ctx_), ctx_.get_allocator());
+      if (OB_SUCC(ret)) { ret = grp_guard.status(); }
       for (int64_t i = 0; OB_SUCC(ret) && i < group_size; ++i) {
         if (need_perform_real_batch_rescan()) {
           ret = grp_guard.switch_group_rescan_param(i);
@@ -1206,7 +1207,8 @@ int ObTableScanOp::prepare_batch_scan_range()
     }
   }
   bool need_sort = MY_CTDEF.ordering_used_by_parent_;
-  GroupRescanParamGuard grp_guard(tsc_rtdef_, GET_PHY_PLAN_CTX(ctx_)->get_param_store_for_update());
+  GroupRescanParamGuard grp_guard(tsc_rtdef_, *GET_PHY_PLAN_CTX(ctx_), ctx_.get_allocator());
+  if (OB_SUCC(ret)) { ret = grp_guard.status(); }
   for (int64_t i = 0; OB_SUCC(ret) && i < tsc_rtdef_.group_size_; ++i) {
     //replace real param to param store to extract scan range
     ret = grp_guard.switch_group_rescan_param(i);

@@ -1010,8 +1010,7 @@ int ObExecContext::fill_px_batch_info(ObBatchRescanParams &params,
           params.get_param_idx(i) >= phy_plan_ctx_->get_param_store().count()) {
         ret = OB_ERR_UNEXPECTED;
       } else {
-        ret = materialize_legacy_parameter(one_params.at(i),
-            phy_plan_ctx_->get_param_store_for_update().at(params.get_param_idx(i)));
+        ret = phy_plan_ctx_->set_runtime_parameter(params.get_param_idx(i), one_params.at(i));
         if (params.param_expr_idxs_.count() == one_params.count()) {
           const sql::ObExpr *expr = NULL;
           int64_t idx = params.param_expr_idxs_.at(i);

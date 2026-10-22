@@ -68,7 +68,7 @@ cc_library(
 cc_test(
     name = "test_batch_rescan_params",
     linkstatic = True,
-    data = ["data/batch_rescan_params.golden", "//src/observer:liboceanbase_test_runtime"],
+    data = ["data/batch_rescan_params.golden", "data/range_map.golden", "//src/observer:liboceanbase_test_runtime"],
     env = {"LD_LIBRARY_PATH": "src/observer"},
     deps = [":batch_rescan_param_cases", "//src/observer:liboceanbase"],
 )

@@ -1403,7 +1403,7 @@ int ObSubPlanFilterOp::fill_cur_row_das_batch_param(ObEvalCtx& eval_ctx, uint64_
       const DatumParameterArray &arr = das_batch_params_.at(i);
       dst->get_eval_info(eval_ctx).clear_evaluated_flag();
       ObDynamicParamSetter::clear_parent_evaluated_flag(eval_ctx, *dst);
-      if (OB_FAIL(materialize_legacy_parameter(arr.data_[current_group], plan_ctx->get_param_store_for_update().at(param_idx)))) {
+      if (OB_FAIL(plan_ctx->set_runtime_parameter(param_idx, arr.data_[current_group]))) {
       } else if (dst->res_buf_off_ != 0 && OB_FAIL(dst->deep_copy_datum(eval_ctx, arr.data_[current_group].datum_))) {
       } else {
         if (dst->res_buf_off_ == 0) { param_datum = arr.data_[current_group].datum_; }
