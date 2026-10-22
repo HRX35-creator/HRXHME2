@@ -60,6 +60,7 @@ OBLIB_UNITY_GROUPS = {
             srcs = [
                 "src/oblib/common/datum/ob_datum.cpp",
                 "src/oblib/common/datum/datum_metadata.cpp",
+                "src/oblib/common/datum/datum_parameter_codec.cpp",
             ],
         ),
         struct(

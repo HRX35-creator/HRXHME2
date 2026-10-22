@@ -70,3 +70,20 @@ cc_test(
     linkstatic = True,
     deps = [":datum_core_cases", "//src/oblib:oblib_test_runtime"],
 )
+
+cc_library(
+    name = "datum_parameter_codec_cases",
+    srcs = ["test_datum_parameter_codec.cpp"],
+    alwayslink = True,
+    deps = [
+        "//src/oblib:oblib_unit_test_internal_headers",
+        "//bazel/third_party:gtest",
+    ],
+)
+
+cc_test(
+    name = "test_datum_parameter_codec",
+    data = ["data/datum_parameter_codec.golden"],
+    linkstatic = True,
+    deps = [":datum_parameter_codec_cases", "//src/oblib:oblib_test_runtime"],
+)
