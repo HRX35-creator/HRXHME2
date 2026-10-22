@@ -452,7 +452,18 @@ int materialize_legacy_parameter(const DatumParameter &source, ObObjParam &desti
   if (source.is_ext_sql_array() && !source.is_null()) {
     output.set_extend(reinterpret_cast<int64_t>(source.get_array<DatumParameterArray>()), T_EXT_SQL_ARRAY);
     output.set_meta_type(source.get_type_meta());
+  } else if (!source.is_null() && source.get_type() == ObDecimalIntType) {
+    // Parameter wire permits raw decimal metadata (including negative scale).
+    // Preserve that representation without applying SQL-expression to_obj rules.
+    output.set_decimal_int(source.datum_.len_, source.get_type_meta().get_scale(),
+        const_cast<ObDecimalInt *>(source.datum_.get_decimal_int()));
+    output.set_meta_type(source.get_type_meta());
   } else { ret = source.datum_.to_obj(output, source.get_type_meta()); }
+  // A decoded NULL has real wire metadata too. Generic to_obj() initializes
+  // its default NULL collation, which would change untouched sparse slots.
+  if (OB_SUCC(ret) && source.is_null() && source.get_type_meta().is_null()) {
+    output.set_meta_type(source.get_type_meta());
+  }
   if (OB_SUCC(ret)) {
     output.set_accuracy(source.get_accuracy());
     output.set_result_flag(source.get_result_flag());

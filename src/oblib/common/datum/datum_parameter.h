@@ -83,6 +83,20 @@ public:
   { raw_text_pos_ = pos; raw_text_len_ = len; }
   int32_t get_raw_text_pos() const { return raw_text_pos_; }
   int32_t get_raw_text_len() const { return raw_text_len_; }
+  // Initialize declared type and numeric defaults after a parameter crosses a
+  // wire/protocol boundary. A typed NULL keeps its existing declared metadata.
+  void set_param_meta()
+  {
+    if (param_meta_.is_null() || get_type() != ObNullType) { param_meta_ = type_meta_; }
+    if (ob_is_numeric_type(get_type())) {
+      const ObAccuracy &defaults = ObAccuracy::DDL_DEFAULT_ACCURACY[get_type()];
+      if (get_scale() < 0) {
+        if (type_meta_.get_scale() >= 0) { set_scale(type_meta_.get_scale()); }
+        else if (ob_is_integer_type(get_type())) { set_scale(defaults.get_scale()); }
+      }
+      if (get_precision() == PRECISION_UNKNOWN_YET) { set_precision(defaults.get_precision()); }
+    }
+  }
   void set_param_meta(const ObObjMeta &meta) { param_meta_ = meta; }
   const ObObjMeta &get_param_meta() const { return param_meta_; }
 

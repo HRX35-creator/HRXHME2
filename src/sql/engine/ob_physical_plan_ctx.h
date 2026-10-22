@@ -491,7 +491,6 @@ public:
   int get_local_session_vars(int64_t idx, const ObSolidifiedVarsContext *&local_vars);
   bool is_param_datum_frame_inited() const { return param_frame_ptrs_.count() > 0; }
 private:
-  int init_param_store_after_deserialize();
   void reset_datum_frame(char *frame, int64_t expr_cnt);
   int extend_param_frame(const int64_t old_size);
   int reserve_param_frame(const int64_t capacity);

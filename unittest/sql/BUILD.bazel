@@ -24,7 +24,7 @@ cc_test(
 
 cc_library(
     name = "datum_parameter_constraint_cases",
-    srcs = ["test_datum_parameter_constraints.cpp"],
+    srcs = ["test_datum_parameter_constraints.cpp", "test_context_datum_parameters.cpp"],
     alwayslink = True,
     deps = [
         "//src/sql:sql_runtime_interface",
@@ -36,7 +36,7 @@ cc_library(
 cc_test(
     name = "test_datum_parameter_constraints",
     linkstatic = True,
-    data = ["//src/observer:liboceanbase_test_runtime"],
+    data = ["data/physical_plan_context.golden", "//src/observer:liboceanbase_test_runtime"],
     env = {"LD_LIBRARY_PATH": "src/observer"},
     deps = [":datum_parameter_constraint_cases", "//src/observer:liboceanbase"],
 )

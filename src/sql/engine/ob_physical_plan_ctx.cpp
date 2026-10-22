@@ -689,21 +689,34 @@ OB_DEF_SERIALIZE_SIZE(ObPhysicalPlanCtx)
 OB_DEF_DESERIALIZE(ObPhysicalPlanCtx)
 {
   int ret = OB_SUCCESS;
+  reset_datum_param_store();
   int64_t param_cnt = 0;
   int32_t real_param_cnt = 0;
   int64_t param_idx = OB_INVALID_INDEX;
-  ObObjParam param_obj;
   int64_t cursor_count = 0;
   int64_t local_var_array_cnt = 0;
   // used for function sys_view_bigint_param(idx), @note unused anymore
   int64_t obsolete_sys_view_param_count = 0;
   char message_[1] = {'\0'}; //error msg buffer, unused anymore
+  auto publish_parameter = [this](int64_t index) {
+    DatumParameter &parameter = datum_param_store_.at(index);
+    parameter.set_param_meta();
+    // The native decoder owns the payload. Old scalar consumers only borrow a
+    // view until their query-range/PL interfaces migrate to Datum parameters.
+    const int result = materialize_legacy_parameter(parameter, param_store_.at(index));
+    if (result == OB_SUCCESS && parameter.has_lob_header()) {
+      parameter.set_result_flag(HAS_LOB_HEADER_FLAG);
+    }
+    return result;
+  };
   // Follow the old sequence method
   OB_UNIS_DECODE(tsc_snapshot_timestamp_);
   OB_UNIS_DECODE(cur_time_);
   OB_UNIS_DECODE(ts_timeout_us_);
   OB_UNIS_DECODE(consistency_level_);
-  OB_UNIS_DECODE(param_store_);
+  if (OB_SUCC(ret)) {
+    ret = DatumParameterCodec::decode_store(buf, data_len, pos, allocator_, datum_param_store_);
+  }
   OB_UNIS_DECODE(obsolete_sys_view_param_count);
   if (OB_SUCC(ret) && (obsolete_sys_view_param_count < 0 ||
       obsolete_sys_view_param_count > (data_len - pos) / sizeof(ObObjMeta))) {
@@ -722,36 +735,25 @@ OB_DEF_DESERIALIZE(ObPhysicalPlanCtx)
   OB_UNIS_DECODE(expr_op_size_);
   OB_UNIS_DECODE(is_ignore_stmt_);
   OB_UNIS_DECODE(param_cnt);
+  if (OB_SUCC(ret) && param_cnt < 0) { ret = OB_DESERIALIZE_ERROR; }
   if (OB_SUCC(ret) && param_cnt > 0) {
-    if (OB_FAIL(param_store_.prepare_allocate(param_cnt))) {
-    } else if (OB_FAIL(serialization::decode_i32(buf, data_len, pos, &real_param_cnt))) {
+    if (OB_FAIL(serialization::decode_i32(buf, data_len, pos, &real_param_cnt))) {
+    } else if (real_param_cnt < 0 || real_param_cnt > (data_len - pos) / 7 ||
+               param_cnt > INT64_MAX / static_cast<int64_t>(sizeof(DatumParameter)) || !datum_param_store_.empty()) {
+      ret = OB_DESERIALIZE_ERROR;
+    } else if (OB_FAIL(datum_param_store_.prepare_allocate(param_cnt))) {
+    } else if (OB_FAIL(param_store_.prepare_allocate(param_cnt))) {
     }
+    // Unselected slots stay NULL. Repeated indexes intentionally keep the last
+    // value, as the v2 sparse parameter stream permits duplicate row mappings.
     for (int64_t i = 0; OB_SUCC(ret) && i < real_param_cnt; ++i) {
       OB_UNIS_DECODE(param_idx);
-      OB_UNIS_DECODE(param_obj);
-      ObObjParam tmp = param_obj;
-      if (OB_UNLIKELY(param_idx < 0) || OB_UNLIKELY(param_idx >= param_cnt)) {
-        ret = OB_ERR_UNEXPECTED;
-        LOG_WARN("invalid param idx", K(param_idx), K(param_cnt));
-      } else if (OB_FAIL(deep_copy_obj(allocator_, param_obj, tmp))) {
-      } else {
-        param_store_.at(param_idx) = tmp;
-        param_store_.at(param_idx).set_param_meta();
-      }
+      if (OB_FAIL(ret)) {
+      } else if (param_idx < 0 || param_idx >= param_cnt) {
+        ret = OB_DESERIALIZE_ERROR;
+      } else if (OB_FAIL(DatumParameterCodec::decode_parameter(buf, data_len, pos, allocator_, datum_param_store_.at(param_idx)))) {
+      } else { ret = publish_parameter(param_idx); }
     }
-  }
-  if (OB_SUCC(ret) && param_cnt <= 0) {
-    //param count <= 0 not related to on-demand serialization partition param store, directly serialize all param
-    // So need to perform a deep copy on all elements of param store
-  	for (int64_t i = 0; OB_SUCC(ret) && i < param_store_.count(); ++i) {
-  	  const ObObjParam &objpara = param_store_.at(i);
-      ObObjParam tmp = objpara;
-      if (OB_FAIL(deep_copy_obj(allocator_, objpara, tmp))) {
-      } else {
-        param_store_.at(i) = tmp;
-        param_store_.at(i).set_param_meta();
-      }
-  	}
   }
   OB_UNIS_DECODE(foreign_key_checks_);
   OB_UNIS_DECODE(runtime_schema_version_);
@@ -793,14 +795,15 @@ OB_DEF_DESERIALIZE(ObPhysicalPlanCtx)
       OB_UNIS_DECODE(*local_vars);
     }
   }
-  // following is not deserialize, please add deserialize ahead.
-  if (OB_SUCC(ret) && array_group_count > 0 &&
-      datum_param_store_.count() == 0 &&
-      datum_param_store_.count() != param_store_.count()) {
-    if (OB_FAIL(init_param_store_after_deserialize())) {
+  OB_UNIS_DECODE(check_pdml_affected_rows_);
+  if (OB_SUCC(ret) && param_cnt == 0) {
+    if (OB_FAIL(param_store_.prepare_allocate(datum_param_store_.count()))) {
+    }
+    for (int64_t i = 0; OB_SUCC(ret) && i < datum_param_store_.count(); ++i) {
+      ret = publish_parameter(i);
     }
   }
-  OB_UNIS_DECODE(check_pdml_affected_rows_);
+  if (OB_FAIL(ret)) { reset_datum_param_store(); }
   return ret;
 }
 
@@ -1152,37 +1155,6 @@ int ObPhysicalPlanCtx::get_local_session_vars(int64_t local_var_array_id, const 
   return ret;
 }
 
-// white list: init param_store after deserialize which it's needed really.
-int ObPhysicalPlanCtx::init_param_store_after_deserialize()
-{
-  int ret = OB_SUCCESS;
-  datum_param_store_.reuse();
-  if (OB_FAIL(datum_param_store_.prepare_allocate(param_store_.count()))) {
-  }
-  for (int64_t i = 0; OB_SUCC(ret) && i < param_store_.count(); i++) {
-    ObObjParam &obj_param = param_store_.at(i);
-    DatumParameter &datum_param = datum_param_store_.at(i);
-    if (obj_param.is_ext_sql_array()) {
-      DatumParameterArray *array_obj = NULL;
-      int64_t array_pos = 0;
-      if (OB_FAIL(DatumParameterCodec::decode_array(reinterpret_cast<const char *>(obj_param.get_ext()),
-                                                     obj_param.get_val_len(), array_pos, allocator_, array_obj))) {
-      } else if (OB_UNLIKELY(array_pos != obj_param.get_val_len())) {
-        ret = OB_DESERIALIZE_ERROR;
-      } else {
-        obj_param.set_extend(reinterpret_cast<int64_t>(array_obj), T_EXT_SQL_ARRAY);
-      }
-    }
-    if (OB_SUCC(ret)) {
-      if (OB_FAIL(datum_param.alloc_datum_reserved_buff(obj_param.meta_,
-                                                        obj_param.get_precision(),
-                                                        allocator_))) {
-      } else if (OB_FAIL(import_legacy_parameter(obj_param, datum_param, &allocator_))) {
-      }
-    }
-  }
-  return ret;
-}
 
 } //sql
 } //oceanbase
