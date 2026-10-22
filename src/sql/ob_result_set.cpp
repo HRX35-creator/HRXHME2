@@ -345,7 +345,15 @@ int ObResultSet::get_next_row(const common::ObNewRow *&row)
   return inner_get_next_row(row);
 }
 
-OB_INLINE int ObResultSet::inner_get_next_row(const common::ObNewRow *&row)
+int ObResultSet::get_next_result_row(ResultRowView &view)
+{
+  LinkExecCtxGuard link_guard(my_session_, get_exec_context());
+  const common::ObNewRow *row = nullptr;
+  view = ResultRowView();
+  return inner_get_next_row(row, &view);
+}
+
+OB_INLINE int ObResultSet::inner_get_next_row(const common::ObNewRow *&row, ResultRowView *view)
 {
   int &ret = errcode_;
   ObPhysicalPlan* physical_plan_ = static_cast<ObPhysicalPlan*>(cache_obj_guard_.get_cache_obj());
@@ -353,7 +361,9 @@ OB_INLINE int ObResultSet::inner_get_next_row(const common::ObNewRow *&row)
   if (OB_LIKELY(NULL != physical_plan_)) { // take this branch more frequently
     if (OB_ISNULL(exec_result_)) {
       ret = OB_ERR_UNEXPECTED;
-    } else if (OB_FAIL(exec_result_->get_next_row(get_exec_context(), row))) {
+    } else if (OB_FAIL(nullptr != view && !physical_plan_->is_packed()
+                          ? exec_result_->get_next_result_row(get_exec_context(), *view)
+                          : exec_result_->get_next_row(get_exec_context(), row))) {
       if (OB_ITER_END != ret) {
         // marked last execute status
         physical_plan_->set_is_last_exec_succ(false);
@@ -379,6 +389,10 @@ OB_INLINE int ObResultSet::inner_get_next_row(const common::ObNewRow *&row)
   }
   // Record access errors for retry bookkeeping before statement cleanup.
   DAS_CTX(get_exec_context()).record_access_error(ret);
+
+  if (OB_SUCC(ret) && nullptr != view && !view->is_datum_row() && nullptr == view->legacy_row()) {
+    view->set_legacy(row);
+  }
 
   return ret;
 }

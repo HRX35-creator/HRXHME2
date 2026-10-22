@@ -51,8 +51,14 @@ namespace common
 class ObDataTypeCastParams;
 class ObField;
 class ObIAllocator;
+struct ObDatum;
 class ObSMUtils {
 public:
+  // Normalized integer and plain CHAR/VARCHAR values only. The caller retains
+  // the Datum payload through synchronous encoding and handles casts/charset.
+  static int build_datum_cell_value(const ObDatum &datum, const ObObjMeta &meta,
+                   obmysql::MYSQL_PROTOCOL_TYPE type, ObIAllocator &scratch_allocator,
+                   obmysql::ObMySQLCellValue &out, const ObField *field);
   static int
   build_cell_value(const ObObj &obj, obmysql::MYSQL_PROTOCOL_TYPE type,
                    ObIAllocator &scratch_allocator,

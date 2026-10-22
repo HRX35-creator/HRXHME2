@@ -29,6 +29,36 @@ class ObPhyOperator;
 class ObOperator;
 class ObOpSpec;
 
+// Borrowed until the next advance/close. Values stay in the expression frame;
+// type information stays in the output expressions. Legacy producers can
+// supply an ObNewRow without changing their execution or cursor semantics.
+class ResultRowView
+{
+public:
+  ResultRowView() : legacy_(nullptr), exprs_(nullptr), ctx_(nullptr), count_(0), idx_(0), batch_(false) {}
+  void set_legacy(const common::ObNewRow *row) { *this = ResultRowView(); legacy_ = row; }
+  void set_datums(const ExprFixedArray &exprs, ObEvalCtx &ctx, int64_t idx, bool batch)
+  { legacy_ = nullptr; exprs_ = &exprs.at(0); ctx_ = &ctx; count_ = exprs.count(); idx_ = idx; batch_ = batch; }
+  bool is_datum_row() const { return nullptr != exprs_; }
+  const common::ObNewRow *legacy_row() const { return legacy_; }
+  int64_t count() const { return is_datum_row() ? count_ : (legacy_ ? legacy_->get_count() : 0); }
+  const ObExpr &expr(int64_t i) const { return *exprs_[i]; }
+  const common::ObDatum &datum(int64_t i) const
+  {
+    const ObExpr &e = expr(i);
+    return batch_ ? e.locate_batch_datums(*ctx_)[e.is_batch_result() ? idx_ : 0]
+                  : e.locate_expr_datum(*ctx_);
+  }
+  int materialize_cell(int64_t i, common::ObObj &cell) const;
+private:
+  const common::ObNewRow *legacy_;
+  ObExpr *const *exprs_;
+  ObEvalCtx *ctx_;
+  int64_t count_;
+  int64_t idx_;
+  bool batch_;
+};
+
 class ObIExecuteResult
 {
 public:
@@ -36,6 +66,13 @@ public:
 
   virtual int open(ObExecContext &ctx) = 0;
   virtual int get_next_row(ObExecContext &ctx, const common::ObNewRow *&row) = 0;
+  virtual int get_next_result_row(ObExecContext &ctx, ResultRowView &view)
+  {
+    const common::ObNewRow *row = nullptr;
+    int ret = get_next_row(ctx, row);
+    view.set_legacy(row);
+    return ret;
+  }
   virtual int close(ObExecContext &ctx) = 0;
 };
 
@@ -45,11 +82,14 @@ class ObExecuteResult : public ObIExecuteResult
 public:
   ObExecuteResult()
     : err_code_(OB_ERR_UNEXPECTED),
-      static_engine_root_(NULL) {}
+      static_engine_root_(NULL),
+      checked_row_view_(false),
+      can_view_datums_(false) {}
   virtual ~ObExecuteResult() {}
 
   virtual int open(ObExecContext &ctx) override;
   virtual int get_next_row(ObExecContext &ctx, const common::ObNewRow *&row) override;
+  virtual int get_next_result_row(ObExecContext &ctx, ResultRowView &view) override;
   virtual int close(ObExecContext &ctx) override;
 
   inline int get_err_code() { return err_code_; }
@@ -63,11 +103,14 @@ public:
   {
     static_engine_root_ = op;
     br_it_.set_operator(op);
+    checked_row_view_ = false;
   }
 
 private:
   int err_code_;
   ObOperator *static_engine_root_;
+  bool checked_row_view_;
+  bool can_view_datums_;
   // row used to adapt old get_next_row interface.
   mutable common::ObNewRow row_;
   mutable ObBatchRowIter br_it_;

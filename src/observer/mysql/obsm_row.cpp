@@ -17,10 +17,50 @@
 #include "obsm_row.h"
 
 #include "query/protocol/ob_mysql_protocol_util.h"
+#include "sql/executor/ob_execute_result.h"
 
 using namespace oceanbase::share::schema;
 using namespace oceanbase::common;
 using namespace oceanbase::obmysql;
+
+bool DatumMysqlRow::can_encode(const oceanbase::sql::ObExpr &expr, const ObField &field,
+                               ObCharsetType result_charset, bool need_ps_cast)
+{
+  const ObObjMeta &meta = expr.obj_meta_;
+  bool direct = !need_ps_cast || meta.get_type() == field.type_.get_type();
+  if (direct && meta.is_integer_type()) {
+    direct = expr.obj_datum_map_ == OBJ_DATUM_8BYTE_DATA;
+  } else if (direct && (meta.get_type() == ObVarcharType || meta.get_type() == ObCharType)) {
+    // Match the existing no-conversion branch, including its charset validity
+    // check. Other collations keep the established charset/warning handling.
+    direct = expr.obj_datum_map_ == OBJ_DATUM_STRING
+             && meta.get_collation_type() == ObCharset::get_default_collation(result_charset)
+             && CS_TYPE_INVALID != meta.get_collation_type()
+             && nullptr != ObCharset::get_charset(meta.get_collation_type());
+  } else {
+    direct = false;
+  }
+  return direct;
+}
+
+int64_t DatumMysqlRow::get_cells_cnt() const { return row_.count(); }
+
+int DatumMysqlRow::build_cell_value(int64_t idx, ObIAllocator &scratch_allocator,
+                                    ObMySQLCellValue &out) const
+{
+  int ret = OB_SUCCESS;
+  if (OB_UNLIKELY(idx < 0 || idx >= row_.count())) {
+    ret = OB_INVALID_ARGUMENT;
+  } else if (obj_indexes_[idx] < 0) {
+    ret = ObSMUtils::build_datum_cell_value(row_.datum(idx), row_.expr(idx).obj_meta_,
+                                           type_, scratch_allocator, out, &fields_.at(idx));
+  } else {
+    ret = ObSMUtils::build_cell_value(objects_[obj_indexes_[idx]], type_,
+                                     scratch_allocator, out, dtc_params_, &fields_.at(idx),
+                                     session_, schema_guard_);
+  }
+  return ret;
+}
 
 ObSMRow::ObSMRow(MYSQL_PROTOCOL_TYPE type,
                  const ObNewRow &obrow,

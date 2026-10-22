@@ -84,6 +84,53 @@ int ObExecuteResult::get_next_row(ObExecContext &ctx, const common::ObNewRow *&r
   return ret;
 }
 
+int ResultRowView::materialize_cell(int64_t i, common::ObObj &cell) const
+{
+  const ObExpr &e = expr(i);
+  return datum(i).to_obj(cell, e.obj_meta_, e.obj_datum_map_);
+}
+
+int ObExecuteResult::get_next_result_row(ObExecContext &ctx, ResultRowView &view)
+{
+  int ret = OB_SUCCESS;
+  view = ResultRowView();
+  if (OB_ISNULL(static_engine_root_)) {
+    ret = OB_NOT_INIT;
+  } else {
+    const ObOpSpec &spec = static_engine_root_->get_spec();
+    if (!checked_row_view_) {
+      can_view_datums_ = spec.output_.count() > 0;
+      for (int64_t i = 0; can_view_datums_ && i < spec.output_.count(); ++i) {
+        const ObExpr &e = *spec.output_.at(i);
+        // Keep potentially failing/full adapters on the old eager path.
+        can_view_datums_ = e.obj_datum_map_ < OBJ_DATUM_FULL
+                          || e.obj_datum_map_ == OBJ_DATUM_DECIMALINT;
+        can_view_datums_ &= !e.obj_meta_.is_decimal_int() || e.obj_meta_.get_scale() >= 0;
+      }
+      checked_row_view_ = true;
+    }
+    if (!can_view_datums_) {
+      const common::ObNewRow *row = nullptr;
+      ret = get_next_row(ctx, row);
+      view.set_legacy(row);
+    } else if (spec.is_vectorized()) {
+      if (OB_SUCC(ret = br_it_.get_next_row())) {
+        view.set_datums(spec.output_, static_engine_root_->get_eval_ctx(), br_it_.cur_idx(), true);
+      }
+    } else if (OB_SUCC(ret = get_next_row())) {
+      ObEvalCtx &eval_ctx = static_engine_root_->get_eval_ctx();
+      for (int64_t i = 0; OB_SUCC(ret) && i < spec.output_.count(); ++i) {
+        ObDatum *datum = nullptr;
+        ret = spec.output_.at(i)->eval(eval_ctx, datum);
+      }
+      if (OB_SUCC(ret)) {
+        view.set_datums(spec.output_, eval_ctx, 0, false);
+      }
+    }
+  }
+  return ret;
+}
+
 int ObExecuteResult::close(ObExecContext &ctx)
 {
   int ret = OB_SUCCESS;

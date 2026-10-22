@@ -15,6 +15,7 @@
  */
 
 #include "query/protocol/ob_mysql_protocol_util.h"
+#include "common/datum/ob_datum.h"
 
 #include <algorithm>
 #include <cstring>
@@ -173,6 +174,47 @@ int set_zerofill_bytes(ObIAllocator &allocator, const char *data,
   return ret;
 }
 
+int build_integer_cell_value(const ObObjType obj_type, const int64_t value,
+                             MYSQL_PROTOCOL_TYPE type, ObIAllocator &scratch_allocator,
+                             bool zerofill, int32_t zflength, ObMySQLCellValue &out)
+{
+  int ret = OB_SUCCESS;
+  const bool is_unsigned = obj_type >= ObUTinyIntType && obj_type <= ObUInt64Type;
+  if (TEXT == type) {
+    ObFastFormatInt ffi(value, is_unsigned);
+    ret = set_zerofill_bytes(scratch_allocator, ffi.ptr(), ffi.length(),
+                             zerofill, zflength, out);
+  } else {
+    out.value_ = static_cast<uint64_t>(value);
+    switch (obj_type) {
+    case ObTinyIntType:
+    case ObUTinyIntType:
+      out.kind_ = ObMySQLCellValueKind::I8;
+      break;
+    case ObSmallIntType:
+    case ObUSmallIntType:
+      out.kind_ = ObMySQLCellValueKind::I16;
+      break;
+    case ObMediumIntType:
+    case ObUMediumIntType:
+    case ObInt32Type:
+    case ObUInt32Type:
+      out.kind_ = ObMySQLCellValueKind::I32;
+      break;
+    case ObIntType:
+    case ObUInt64Type:
+      out.kind_ = ObMySQLCellValueKind::I64;
+      break;
+    default:
+      ret = OB_INVALID_ARGUMENT;
+      OB_LOG(WARN, "invalid integer object type", K(ret),
+             K(obj_type));
+      break;
+    }
+  }
+  return ret;
+}
+
 void set_date_time_parts(const ObTime &ob_time, const ObMySQLCellValueKind kind,
                          ObMySQLCellValue &out) {
   out.kind_ = kind;
@@ -193,6 +235,28 @@ int finish_local_text(const int ret, const int64_t pos, ObMySQLCellValue &out) {
 }
 
 } // namespace
+
+int ObSMUtils::build_datum_cell_value(const ObDatum &datum, const ObObjMeta &meta,
+                                      MYSQL_PROTOCOL_TYPE type,
+                                      ObIAllocator &scratch_allocator,
+                                      ObMySQLCellValue &out, const ObField *field)
+{
+  int ret = OB_SUCCESS;
+  out.reset();
+  if (datum.is_null()) {
+    out.kind_ = ObMySQLCellValueKind::NULL_VALUE;
+  } else if (meta.is_integer_type()) {
+    ret = build_integer_cell_value(meta.get_type(), datum.get_int(), type,
+                                   scratch_allocator,
+                                   field && (field->flags_ & ZEROFILL_FLAG),
+                                   field ? field->length_ : 0, out);
+  } else if (meta.get_type() == ObVarcharType || meta.get_type() == ObCharType) {
+    ret = set_borrowed_lenenc_bytes(datum.get_string(), out);
+  } else {
+    ret = OB_NOT_SUPPORTED;
+  }
+  return ret;
+}
 
 int ObSMUtils::build_cell_value(const ObObj &obj, MYSQL_PROTOCOL_TYPE type,
                                 ObIAllocator &scratch_allocator,
@@ -231,40 +295,8 @@ int ObSMUtils::build_cell_value(const ObObj &obj, MYSQL_PROTOCOL_TYPE type,
     }
     case ObIntTC:
     case ObUIntTC: {
-      const bool is_unsigned = ObUIntTC == obj.get_type_class();
-      const int64_t value = obj.get_int();
-      if (TEXT == type) {
-        ObFastFormatInt ffi(value, is_unsigned);
-        ret = set_zerofill_bytes(scratch_allocator, ffi.ptr(), ffi.length(),
-                                 zerofill, zflength, out);
-      } else {
-        out.value_ = static_cast<uint64_t>(value);
-        switch (obj.get_type()) {
-        case ObTinyIntType:
-        case ObUTinyIntType:
-          out.kind_ = ObMySQLCellValueKind::I8;
-          break;
-        case ObSmallIntType:
-        case ObUSmallIntType:
-          out.kind_ = ObMySQLCellValueKind::I16;
-          break;
-        case ObMediumIntType:
-        case ObUMediumIntType:
-        case ObInt32Type:
-        case ObUInt32Type:
-          out.kind_ = ObMySQLCellValueKind::I32;
-          break;
-        case ObIntType:
-        case ObUInt64Type:
-          out.kind_ = ObMySQLCellValueKind::I64;
-          break;
-        default:
-          ret = OB_INVALID_ARGUMENT;
-          OB_LOG(WARN, "invalid integer object type", K(ret),
-                 K(obj.get_type()));
-          break;
-        }
-      }
+      ret = build_integer_cell_value(obj.get_type(), obj.get_int(), type,
+                                     scratch_allocator, zerofill, zflength, out);
       break;
     }
     case ObFloatTC: {

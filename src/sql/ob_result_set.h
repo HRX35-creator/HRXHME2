@@ -120,6 +120,7 @@ public:
   /// get the next result row
   /// @return OB_ITER_END when no more data available
   int get_next_row(const common::ObNewRow *&row);
+  int get_next_result_row(ResultRowView &row);
   /// close the result set after get all the rows
   int close() { return do_close(NULL); }
   // close result set and rewrite the client ret
@@ -350,7 +351,7 @@ private:
   void store_found_rows(ObPhysicalPlanCtx &plan_ctx);
   int store_last_insert_id(ObExecContext &ctx);
   int drive_dml_query();
-  int inner_get_next_row(const common::ObNewRow *&row);
+  int inner_get_next_row(const common::ObNewRow *&row, ResultRowView *view = nullptr);
   static int clear_ddl_checksum(ObPhysicalPlan *physical_plan);
 
   // make final field name

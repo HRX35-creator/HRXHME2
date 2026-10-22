@@ -24,6 +24,11 @@
 
 namespace oceanbase
 {
+namespace sql
+{
+class ResultRowView;
+struct ObExpr;
+}
 
 namespace share
 {
@@ -70,6 +75,35 @@ private:
 
   DISALLOW_COPY_AND_ASSIGN(ObSMRow);
 }; // end of class OBMP
+
+// Protocol adapter for borrowed execution values. Only compatibility columns
+// have ObObj cells; ordinary values remain in the execution frame.
+class DatumMysqlRow final : public obmysql::ObMySQLRow
+{
+public:
+  DatumMysqlRow(obmysql::MYSQL_PROTOCOL_TYPE type, const sql::ResultRowView &row,
+                const ObIArray<int64_t> &obj_indexes, const ObIArray<ObObj> &objects,
+                const ObDataTypeCastParams &dtc_params,
+                const sql::ObSQLSessionInfo &session, const ColumnsFieldIArray &fields,
+                share::schema::ObSchemaGetterGuard *schema_guard)
+      : ObMySQLRow(type), row_(row), obj_indexes_(&obj_indexes.at(0)),
+        objects_(objects.empty() ? nullptr : &objects.at(0)),
+        dtc_params_(dtc_params), session_(session), fields_(fields), schema_guard_(schema_guard) {}
+  static bool can_encode(const sql::ObExpr &expr, const ObField &field,
+                          ObCharsetType result_charset, bool need_ps_cast);
+  int build_cell_value(int64_t idx, ObIAllocator &scratch_allocator,
+                       obmysql::ObMySQLCellValue &out) const override;
+protected:
+  int64_t get_cells_cnt() const override;
+private:
+  const sql::ResultRowView &row_;
+  const int64_t *obj_indexes_;
+  const ObObj *objects_;
+  const ObDataTypeCastParams &dtc_params_;
+  const sql::ObSQLSessionInfo &session_;
+  const ColumnsFieldIArray &fields_;
+  share::schema::ObSchemaGetterGuard *schema_guard_;
+};
 
 } // end of namespace common
 } // end of namespace oceanbase

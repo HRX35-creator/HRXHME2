@@ -134,6 +134,9 @@ int ObQueryDriver::response_query_result(ObResultSet &result,
   can_retry = true;
   bool is_first_row = true;
   const ObNewRow *result_row = NULL;
+  ResultRowView result_view;
+  ObSEArray<int64_t, 16> obj_indexes;
+  ObSEArray<ObObj, 4> fallback_cells;
   bool is_cac_found_rows =  result.is_calc_found_rows();
   int64_t row_num = 0;
   ObSqlCtx *sql_ctx = result.get_exec_context().get_sql_ctx();
@@ -167,8 +170,34 @@ int ObQueryDriver::response_query_result(ObResultSet &result,
 
   const ObDataTypeCastParams dtc_params =
       ObBasicSessionInfo::create_dtc_params(&session_);
-  while (OB_SUCC(ret) && row_num < limit_count && !OB_FAIL(result.get_next_row(result_row)) ) {
-    ObNewRow *row = const_cast<ObNewRow*>(result_row);
+  while (OB_SUCC(ret) && row_num < limit_count && !OB_FAIL(result.get_next_result_row(result_view)) ) {
+    ObNewRow *row = const_cast<ObNewRow*>(result_view.legacy_row());
+    if (result_view.is_datum_row()) {
+      if (OB_UNLIKELY(result_view.count() != fields->count())) {
+        ret = OB_ERR_UNEXPECTED;
+      } else if (is_first_row) {
+        int64_t obj_count = 0;
+        if (OB_FAIL(obj_indexes.prepare_allocate(result_view.count()))) {
+        } else {
+          for (int64_t i = 0; i < result_view.count(); ++i) {
+            obj_indexes.at(i) = DatumMysqlRow::can_encode(
+                result_view.expr(i), fields->at(i), charset_type, result.is_ps_protocol())
+                                    ? -1 : obj_count++;
+          }
+          ret = fallback_cells.prepare_allocate(obj_count);
+        }
+      }
+      // Finish all compatibility materialization before sending the header,
+      // retaining the old retry boundary for conversion errors.
+      for (int64_t i = 0; OB_SUCC(ret) && i < result_view.count(); ++i) {
+        if (obj_indexes.at(i) >= 0) {
+          ret = result_view.materialize_cell(i, fallback_cells.at(obj_indexes.at(i)));
+        }
+      }
+      if (OB_FAIL(ret)) {
+        break;
+      }
+    }
     // If it is the first line, then reply to the client with field information etc.
     if (is_first_row) {
       is_first_row = false;
@@ -176,8 +205,12 @@ int ObQueryDriver::response_query_result(ObResultSet &result,
       if (OB_FAIL(response_query_header(result, has_more_result, false))) {
       }
     }
-    for (int64_t i = 0; OB_SUCC(ret) && i < row->get_count(); i++) {
-      ObObj& value = row->get_cell(i);
+    for (int64_t i = 0; OB_SUCC(ret) && i < result_view.count(); i++) {
+      if (result_view.is_datum_row() && obj_indexes.at(i) < 0) {
+        continue;
+      }
+      ObObj& value = result_view.is_datum_row()
+                         ? fallback_cells.at(obj_indexes.at(i)) : row->get_cell(i);
       if (result.is_ps_protocol() && !is_packed) {
         if (value.get_type() != fields->at(i).type_.get_type()) {
           ObCastCtx cast_ctx(&result.get_mem_pool(), NULL, CM_WARN_ON_FAIL, 
@@ -212,14 +245,17 @@ int ObQueryDriver::response_query_result(ObResultSet &result,
       }
     }
     if (OB_SUCC(ret)) {
-      ObSMRow sm(protocol_type, *row, dtc_params,
-                         session_,  
-                         result.get_field_columns(),
-                         ctx_.schema_guard_);
-      sm.set_packed(is_packed);
-      OMPKRow rp(sm);
-      if (OB_FAIL(sender_.response_packet(rp))) {
+      if (result_view.is_datum_row()) {
+        DatumMysqlRow sm(protocol_type, result_view, obj_indexes, fallback_cells,
+                        dtc_params, session_, *fields, ctx_.schema_guard_);
+        OMPKRow rp(sm);
+        ret = sender_.response_packet(rp);
       } else {
+        ObSMRow sm(protocol_type, *row, dtc_params, session_,
+                   result.get_field_columns(), ctx_.schema_guard_);
+        sm.set_packed(is_packed);
+        OMPKRow rp(sm);
+        ret = sender_.response_packet(rp);
       }
       if (OB_SUCC(ret)) {
         ++row_num;
