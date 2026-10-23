@@ -17,6 +17,7 @@
 #define USING_LOG_PREFIX SQL_RESV
 #include "rust/config.h"
 #include "ob_dml_resolver.h"
+#include "share/datum/datum_ndv_hash.h"
 #include "sql/resolver/dml/ob_view_table_resolver.h"
 #include "sql/optimizer/ob_optimizer_util.h"
 #include "sql/resolver/dml/ob_default_value_utils.h"
@@ -11564,6 +11565,22 @@ int ObDMLResolver::add_obj_to_llc_bitmap(const ObObj &obj, char *llc_bitmap, dou
   return ret;
 }
 
+int ObDMLResolver::add_datum_to_llc_bitmap(const ObDatum &datum, const ObObjMeta &meta,
+                                          char *llc_bitmap, double &num_null)
+{
+  int ret = OB_SUCCESS;
+  uint64_t hash_value = 0;
+  if (OB_ISNULL(llc_bitmap)) {
+    ret = OB_ERR_UNEXPECTED;
+  } else if (datum.is_null()) {
+    num_null += 1.0;
+  } else if (OB_FAIL(hash_datum_for_ndv(datum, meta, 0, hash_value))) {
+  } else if (OB_FAIL(ObAggregateProcessor::llc_add_value(
+               hash_value, llc_bitmap, ObOptColumnStat::NUM_LLC_BUCKET))) {
+  }
+  return ret;
+}
+
 /*
   row_cnt <= compute_ndv_thredhold(2000), do accurate estimate stats
   row_cnt > compute_ndv_thredhold(2000), do accurate sampling 2000 rows record at head
@@ -11617,9 +11634,9 @@ int ObDMLResolver::estimate_values_table_stats(ObValuesTableDef &table_def)
               ret = OB_ERR_UNEXPECTED;
             } else {
               for (int64_t i = 0; OB_SUCC(ret) && i < array_obj->count_ && i < compute_ndv_thredhold; i++) {
-                ObObjParam obj_param;
-                if (OB_FAIL(materialize_legacy_parameter(array_obj->data_[i], obj_param))) {
-                } else if (OB_FAIL(add_obj_to_llc_bitmap(obj_param, llc_bitmap, num_null))) {
+                const DatumParameter &value = array_obj->data_[i];
+                if (OB_FAIL(add_datum_to_llc_bitmap(value.datum_, value.get_type_meta(),
+                                                     llc_bitmap, num_null))) {
                 }
               }
             }
@@ -11640,12 +11657,9 @@ int ObDMLResolver::estimate_values_table_stats(ObValuesTableDef &table_def)
       } else if (ObValuesTableDef::ACCESS_VALUE == table_def.access_type_) {
         for (int64_t i = 0; OB_SUCC(ret) && i < table_def.row_cnt_ && i < compute_ndv_thredhold; i++) {
           int64_t param_idx = i * table_def.column_cnt_ + col_idx;
-          // The NDV hash API still consumes legacy values. Keep that view at
-          // the hash boundary; constants and their copies remain native.
-          ObObj view;
           const DatumParameter &value = table_def.access_values_.at(param_idx);
-          if (OB_FAIL(materialize_legacy_value(value.datum_, value.get_type_meta(), view))) {
-          } else if (OB_FAIL(add_obj_to_llc_bitmap(view, llc_bitmap, num_null))) {
+          if (OB_FAIL(add_datum_to_llc_bitmap(value.datum_, value.get_type_meta(),
+                                               llc_bitmap, num_null))) {
           }
         }
       }

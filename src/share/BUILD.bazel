@@ -1387,6 +1387,7 @@ grouped_unity_cc_library(
     public_hdrs = [
         "datum/ob_datum_cmp_func_def.h",
         "datum/ob_datum_compare.h",
+        "datum/datum_ndv_hash.h",
         "datum/ob_datum_funcs.h",
         "datum/ob_datum_util.h",
         "datum/ob_defined_collations.h",

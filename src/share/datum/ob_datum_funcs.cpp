@@ -17,6 +17,7 @@
 #define USING_LOG_PREFIX SHARE
 
 #include "ob_datum_funcs.h"
+#include "datum_ndv_hash.h"
 #include "ob_datum_cmp_func_def.h"
 #include "common/object/ob_obj_funcs.h"
 
@@ -210,6 +211,29 @@ ObDatumBasicFuncs* ObDatumFuncs::get_basic_func(const ObObjType type,
     LOG_WARN_RET(common::OB_INVALID_ARGUMENT, "invalid obj type", K(type));
   }
   return res;
+}
+
+int hash_datum_for_ndv(const ObDatum &datum, const ObObjMeta &meta,
+                               const uint64_t seed, uint64_t &result)
+{
+  int ret = OB_SUCCESS;
+  const ObObjType type = meta.get_type();
+  if (OB_UNLIKELY(type < ObNullType || type >= ObMaxType)) {
+    ret = OB_INVALID_ARGUMENT;
+  } else if ((meta.is_string_type() || meta.is_enumset_inner_type()) && !datum.is_null()) {
+    // VALUES statistics historically hash the stored bytes, including any
+    // locator header, without dereferencing external LOB data. ENUM/SET inner
+    // values use the same string representation and hash semantics.
+    result = ObCharset::hash(meta.get_collation_type(), datum.ptr_, datum.len_,
+                             seed, false, NULL);
+  } else if (OB_ISNULL(EXPR_BASIC_FUNCS[type].default_hash_)) {
+    ret = OB_NOT_SUPPORTED;
+  } else {
+    // Use the unspecialized scalar table: get_basic_func() may select rounded
+    // DOUBLE, width-specific DECIMAL or LOB-reading expression semantics.
+    ret = EXPR_BASIC_FUNCS[type].default_hash_(datum, seed, result, NULL);
+  }
+  return ret;
 }
 
 bool ObDatumFuncs::is_string_type(const ObObjType type)
