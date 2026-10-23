@@ -23,6 +23,8 @@
 #include "sql/engine/cmd/ob_load_data_parser.h"
 #include "sql/resolver/cmd/ob_load_data_stmt.h"
 #include "sql/resolver/ob_resolver_utils.h"
+#include "common/datum/datum_parameter.h"
+#include "sql/engine/expr/ob_expr.h"
 #include "sql/code_generator/ob_column_index_provider.h"
 #include "query/resolver/ob_partition_type_policy.h"
 #include "sql/resolver/cmd/ob_load_data_stmt.h"
@@ -1913,13 +1915,191 @@ int ObResolverUtils::set_string_val_charset(ObIAllocator &allocator,
   return ret;
 }
 
-int ObResolverUtils::resolve_const(const ParseNode *node,
+namespace
+{
+// Literal setters write into native storage. Small scalar scratch bytes are
+// copied into the statement arena before publication; parsed decimal/NUMBER
+// payloads already belong to that arena. This writer is never a stored value.
+class LiteralDatumWriter
+{
+public:
+  explicit LiteralDatumWriter(ObIAllocator &allocator)
+    : allocator_(allocator), value_(), status_(OB_SUCCESS), owned_(false) {}
+  const ObObjMeta &get_meta() const { return value_.get_type_meta(); }
+  ObObjType get_type() const { return value_.get_type(); }
+  ObCollationType get_collation_type() const { return value_.get_collation_type(); }
+  const char *get_string_ptr() const { return value_.datum_.ptr_; }
+  int32_t get_string_len() const { return value_.datum_.len_; }
+  void set_collation_type(ObCollationType cs)
+  { ObObjMeta meta = get_meta(); meta.set_collation_type(cs); value_.set_type_meta(meta); }
+  void set_collation_level(ObCollationLevel level)
+  { ObObjMeta meta = get_meta(); meta.set_collation_level(level); value_.set_type_meta(meta); }
+  void set_length(ObLength length) { value_.set_length(length); }
+  void set_length_semantics(ObLengthSemantics semantics) { value_.set_length_semantics(semantics); }
+  void set_precision(ObPrecision precision) { value_.set_precision(precision); }
+  void set_scale(ObScale scale) { value_.set_scale(scale); }
+  void set_result_flag(uint32_t flag) { value_.set_result_flag(flag); }
+  void unset_result_flag(uint32_t flag) { value_.unset_result_flag(flag); }
+  void set_is_boolean(bool flag) { value_.get_param_flag().is_boolean_ = flag; }
+  void set_param_meta(const ObObjMeta &meta) { value_.set_param_meta(meta); }
+
+  void set_int(int64_t v) { scalar_meta(&ObObjMeta::set_int); value_.datum_.set_int(v); }
+  void set_uint64(uint64_t v) { scalar_meta(&ObObjMeta::set_uint64); value_.datum_.set_uint(v); }
+  void set_float(float v) { scalar_meta(&ObObjMeta::set_float); value_.datum_.set_float(v); }
+  void set_double(double v) { scalar_meta(&ObObjMeta::set_double); value_.datum_.set_double(v); }
+  void set_bool(bool v) { scalar_meta(&ObObjMeta::set_tinyint); value_.datum_.set_bool(v); }
+  void set_unknown(int64_t v) { scalar_meta(&ObObjMeta::set_unknown); value_.datum_.set_int(v); }
+  void set_date(int32_t v) { scalar_meta(&ObObjMeta::set_date); value_.datum_.set_date(v); }
+  void set_datetime(int64_t v) { scalar_meta(&ObObjMeta::set_datetime); value_.datum_.set_datetime(v); }
+  void set_time(int64_t v) { scalar_meta(&ObObjMeta::set_time); value_.datum_.set_time(v); }
+  void set_year(uint8_t v) { scalar_meta(&ObObjMeta::set_year); value_.datum_.set_year(static_cast<int8_t>(v)); }
+  void set_mysql_date(ObMySQLDate v)
+  { scalar_meta(&ObObjMeta::set_mysql_date); value_.datum_.set_mysql_date(v); }
+  void set_mysql_datetime(ObMySQLDateTime v)
+  { scalar_meta(&ObObjMeta::set_mysql_datetime); value_.datum_.set_mysql_datetime(v); }
+  void set_null() { value_.set_null(); owned_ = true; }
+  void set_string(ObObjType type, const ObString &str)
+  { set_string(type, str.ptr(), str.length()); }
+  void set_string(ObObjType type, const char *data, int32_t length)
+  {
+    ObObjMeta meta = get_meta();
+    meta.set_type(type);
+    meta.set_collation_level(CS_LEVEL_IMPLICIT);
+    value_.set_type_meta(meta);
+    value_.datum_.set_string(data, length);
+    owned_ = false;
+  }
+  void set_hex_string(const ObString &str)
+  {
+    ObObjMeta meta = get_meta();
+    meta.set_hex_string();
+    value_.set_type_meta(meta);
+    value_.datum_.set_string(str);
+    owned_ = false;
+  }
+  void set_decimal_int(int16_t length, ObScale scale, const ObDecimalInt *data)
+  {
+    ObObjMeta meta = get_meta();
+    meta.set_decimal_int(scale);
+    value_.set_type_meta(meta);
+    value_.datum_.set_decimal_int_shallow(data, length);
+    owned_ = true; // wide::from_string allocated these bytes in allocator_.
+  }
+  void set_number(const number::ObNumber &num)
+  {
+    ObObjMeta meta = get_meta();
+    meta.set_number();
+    value_.set_type_meta(meta);
+    const int64_t size = sizeof(number::ObCompactNumber) + num.d_.len_ * sizeof(uint32_t);
+    char *data = static_cast<char *>(allocator_.alloc(size));
+    if (OB_ISNULL(data)) {
+      status_ = OB_ALLOCATE_MEMORY_FAILED;
+      value_.datum_.set_null();
+    } else {
+      value_.datum_.ptr_ = data;
+      value_.datum_.set_number(num);
+      owned_ = true;
+    }
+  }
+  void set_otimestamp_value(ObObjType type, const ObOTimestampData &v)
+  {
+    ObObjMeta meta = get_meta();
+    meta.set_otimestamp_type(type);
+    value_.set_type_meta(meta);
+    // The current literal timestamp parser leaves its output type NULL.
+    // Preserve that behavior and the ordinary 8-byte timestamp bridge.
+    if (type == ObNullType) {
+      value_.datum_.set_null();
+      owned_ = true;
+    } else if (type == ObTimestampType || type == ObDateTimeType) {
+      scalar_storage();
+      value_.datum_.set_int(v.time_us_);
+    } else {
+      status_ = OB_ERR_UNEXPECTED;
+      value_.datum_.set_null();
+    }
+  }
+  int finish(DatumParameter &result)
+  {
+    int ret = status_;
+    DatumParameter candidate = value_;
+    if (OB_SUCC(ret) && !owned_) {
+      ret = clone_datum_value(value_.datum_, get_meta(), candidate.datum_, allocator_);
+    }
+    if (OB_SUCC(ret)) { result = candidate; }
+    return ret;
+  }
+  TO_STRING_KV(K_(value));
+private:
+  void scalar_storage() { value_.datum_.ptr_ = scalar_; owned_ = false; }
+  void scalar_meta(void (ObObjMeta::*setter)())
+  {
+    scalar_storage();
+    ObObjMeta meta = get_meta();
+    (meta.*setter)();
+    value_.set_type_meta(meta);
+  }
+  ObIAllocator &allocator_;
+  DatumParameter value_;
+  int status_;
+  bool owned_;
+  alignas(16) char scalar_[sizeof(ObOTimestampData)];
+};
+
+int set_literal_charset(ObIAllocator &allocator, ObObjParam &value, ObString &charset,
+                        bool is_strict_mode, bool ret_error)
+{
+  ObObj checked;
+  return ObResolverUtils::set_string_val_charset(allocator, value, charset, checked,
+                                                 is_strict_mode, ret_error);
+}
+
+int set_literal_charset(ObIAllocator &allocator, LiteralDatumWriter &value, ObString &charset,
+                        bool is_strict_mode, bool ret_error)
+{
+  int ret = OB_SUCCESS;
+  const ObCharsetType type = ObCharset::charset_type(charset.trim());
+  if (type == CHARSET_INVALID) {
+    ret = OB_ERR_UNKNOWN_CHARSET;
+    LOG_USER_ERROR(OB_ERR_UNKNOWN_CHARSET, charset.length(), charset.ptr());
+  } else {
+    const ObCollationType collation = ObCharset::get_default_collation(type);
+    value.set_collation_type(collation);
+    value.set_length(static_cast<ObLength>(ObCharset::strlen_char(
+        collation, value.get_string_ptr(), value.get_string_len())));
+    const ObCharsetInfo *cs = ObCharset::get_charset(collation);
+    if (OB_ISNULL(cs)) {
+      ret = OB_ERR_UNEXPECTED;
+    } else if (cs->mbminlen > 0 && value.get_string_len() % cs->mbminlen != 0) {
+      const int64_t pad = cs->mbminlen - value.get_string_len() % cs->mbminlen;
+      char *data = static_cast<char *>(allocator.alloc(value.get_string_len() + pad));
+      if (OB_ISNULL(data)) {
+        ret = OB_ALLOCATE_MEMORY_FAILED;
+      } else {
+        MEMSET(data, 0, pad);
+        MEMCPY(data + pad, value.get_string_ptr(), value.get_string_len());
+        value.set_string(value.get_type(), data, value.get_string_len() + pad);
+      }
+    }
+    ObString checked;
+    bool is_null = false;
+    if (OB_SUCC(ret)) {
+      ret = ObSQLUtils::check_well_formed_str(
+          ObString(value.get_string_len(), value.get_string_ptr()), collation,
+          checked, is_null, is_strict_mode, ret_error);
+    }
+  }
+  return ret;
+}
+
+template <typename Value, auto ParseReal>
+int resolve_literal_value(const ParseNode *node,
                                    const stmt::StmtType stmt_type,
                                    ObIAllocator &allocator,
                                    const ObCollationType connection_collation,
                                    const ObCollationType nchar_collation,
                                    const ObTimeZoneInfo *tz_info,
-                                   ObObjParam &val,
+                                   Value &val,
                                    const bool is_paramlize,
                                    common::ObString &literal_prefix,
                                    const ObLengthSemantics default_length_semantics,
@@ -1962,7 +2142,6 @@ int ObResolverUtils::resolve_const(const ParseNode *node,
     case T_NCHAR:
     case T_CHAR: {
       ObString str_val;
-      ObObj result_val;
       bool is_nchar = T_NVARCHAR2 == node->type_ || T_NCHAR == node->type_;
       str_val.assign_ptr(const_cast<char *>(node->str_value_), static_cast<int32_t>(node->str_len_));
       val.set_string(is_nchar ?
@@ -1985,7 +2164,7 @@ int ObResolverUtils::resolve_const(const ParseNode *node,
         // for STRING without collation, e.g. show tables like STRING;
         if (is_nchar) {
           ObString charset(strlen("utf8mb4"), "utf8mb4");
-          if (OB_FAIL(set_string_val_charset(allocator, val, charset, result_val, false, false))) {
+          if (OB_FAIL(set_literal_charset(allocator, val, charset, false, false))) {
           }
         } else {
           val.set_collation_type(connection_collation);
@@ -2005,7 +2184,7 @@ int ObResolverUtils::resolve_const(const ParseNode *node,
           bool is_hex_string = node->num_child_ == 1 ? true : false;
           if (charset_node != NULL) {
             ObString charset(charset_node->str_len_, charset_node->str_value_);
-            if (OB_FAIL(set_string_val_charset(allocator, val, charset, result_val, false, is_hex_string))) {
+            if (OB_FAIL(set_literal_charset(allocator, val, charset, false, is_hex_string))) {
             }
           }
         }
@@ -2049,7 +2228,7 @@ int ObResolverUtils::resolve_const(const ParseNode *node,
       int err = 0;
       double value = 0;
       char *endptr = NULL;
-      value = strntod(node->str_value_, static_cast<int32_t>(node->str_len_),
+      value = ParseReal(node->str_value_, static_cast<int32_t>(node->str_len_),
                       node->type_, &endptr, &err);
       if (EOVERFLOW == err) {
         literal_prefix.assign_ptr(node->str_value_, static_cast<int32_t>(node->str_len_));
@@ -2318,6 +2497,67 @@ int ObResolverUtils::resolve_const(const ParseNode *node,
     }
     }
   }
+  return ret;
+}
+
+} // namespace
+
+int ObResolverUtils::resolve_const(const ParseNode *node,
+                                   const stmt::StmtType stmt_type,
+                                   ObIAllocator &allocator,
+                                   const ObCollationType connection_collation,
+                                   const ObCollationType nchar_collation,
+                                   const ObTimeZoneInfo *tz_info,
+                                   ObObjParam &val,
+                                   const bool is_paramlize,
+                                   common::ObString &literal_prefix,
+                                   const ObLengthSemantics default_length_semantics,
+                                   const ObCollationType server_collation,
+                                   ObExprInfo *parents_expr_info,
+                                   const ObSQLMode sql_mode,
+                                   bool enable_decimal_int_type,
+                                   const share::ObCompatType compat_type,
+                                   const bool enable_mysql_compatible_dates,
+                                   int8_t min_const_integer_precision,
+                                   bool is_from_pl /* false */,
+                                   bool fmt_int_or_ch_decint /* false */)
+{
+  return resolve_literal_value<ObObjParam, &ObResolverUtils::strntod>(node, stmt_type, allocator, connection_collation,
+                               nchar_collation, tz_info, val, is_paramlize, literal_prefix,
+                               default_length_semantics, server_collation, parents_expr_info,
+                               sql_mode, enable_decimal_int_type, compat_type,
+                               enable_mysql_compatible_dates, min_const_integer_precision,
+                               is_from_pl, fmt_int_or_ch_decint);
+}
+
+int ObResolverUtils::resolve_const(const ParseNode *node,
+                                   const stmt::StmtType stmt_type,
+                                   ObIAllocator &allocator,
+                                   const ObCollationType connection_collation,
+                                   const ObCollationType nchar_collation,
+                                   const ObTimeZoneInfo *tz_info,
+                                   DatumParameter &result,
+                                   const bool is_paramlize,
+                                   common::ObString &literal_prefix,
+                                   const ObLengthSemantics default_length_semantics,
+                                   const ObCollationType server_collation,
+                                   ObExprInfo *parents_expr_info,
+                                   const ObSQLMode sql_mode,
+                                   bool enable_decimal_int_type,
+                                   const share::ObCompatType compat_type,
+                                   const bool enable_mysql_compatible_dates,
+                                   int8_t min_const_integer_precision,
+                                   bool is_from_pl /* false */,
+                                   bool fmt_int_or_ch_decint /* false */)
+{
+  LiteralDatumWriter val(allocator);
+  int ret = resolve_literal_value<LiteralDatumWriter, &ObResolverUtils::strntod>(node, stmt_type, allocator, connection_collation,
+                               nchar_collation, tz_info, val, is_paramlize, literal_prefix,
+                               default_length_semantics, server_collation, parents_expr_info,
+                               sql_mode, enable_decimal_int_type, compat_type,
+                               enable_mysql_compatible_dates, min_const_integer_precision,
+                               is_from_pl, fmt_int_or_ch_decint);
+  if (OB_SUCC(ret)) { ret = val.finish(result); }
   return ret;
 }
 

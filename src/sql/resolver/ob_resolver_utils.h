@@ -43,6 +43,7 @@
 
 namespace oceanbase
 {
+namespace common { class DatumParameter; }
 namespace pl
 {
 class ObPLBlockNS;
@@ -359,6 +360,28 @@ public:
                            const ObCollationType nchar_collation,
                            const common::ObTimeZoneInfo *tz_info,
                            common::ObObjParam &val,
+                           const bool is_paramlize,
+                           common::ObString &literal_prefix,
+                           const ObLengthSemantics default_length_semantics,
+                           const common::ObCollationType server_collation,
+                           ObExprInfo *parents_expr_info,
+                           const ObSQLMode mode,
+                           bool enable_decimal_int_type,
+                           const share::ObCompatType compat_type,
+                           const bool enable_mysql_compatible_dates,
+                           int8_t min_const_integer_precision,
+                           bool is_from_pl = false,
+                           bool fmt_int_or_ch_decint = false);
+
+  // Native literal output owns its payload in allocator. Failure leaves the
+  // destination unchanged; the old overload remains for unmigrated callers.
+  static int resolve_const(const ParseNode *node,
+                           const stmt::StmtType stmt_type,
+                           common::ObIAllocator &allocator,
+                           const common::ObCollationType connection_collation,
+                           const ObCollationType nchar_collation,
+                           const common::ObTimeZoneInfo *tz_info,
+                           common::DatumParameter &val,
                            const bool is_paramlize,
                            common::ObString &literal_prefix,
                            const ObLengthSemantics default_length_semantics,

@@ -459,11 +459,10 @@ int ObInListResolver::resolve_access_obj_values_table(const ParseNode &in_list,
     }
     for (int64_t j = 0; OB_SUCC(ret) && j < column_cnt; j++) {
       const ParseNode *element = column_cnt == 1 ? row_node : row_node->children_[j];
-      ObObjParam obj_param;
       DatumParameter value;
       ObRawExprResType res_type;
       if (OB_FAIL(ObResolverUtils::resolve_const(element, stmt_type, *allocator, coll_type,
-                                                 nchar_collation, timezone_info, obj_param, is_parameterize,
+                                                 nchar_collation, timezone_info, value, is_parameterize,
                                                  literal_prefix, length_semantics,
                                                  static_cast<ObCollationType>(server_collation),
                                                  &parents_expr_info,
@@ -473,12 +472,11 @@ int ObInListResolver::resolve_access_obj_values_table(const ParseNode &in_list,
                                                  enable_mysql_compatible_dates,
                                                  session_info->get_min_const_integer_precision(),
                                                  is_from_pl))) {
-      } else if (OB_FAIL(copy_legacy_parameter(obj_param, value, *allocator))) {
       } else if (OB_FAIL(table_def.access_values_.push_back(value))) {
       } else {
-        res_type.set_meta(obj_param.get_param_meta());
-        res_type.set_accuracy(obj_param.get_accuracy());
-        res_type.set_result_flag(obj_param.get_result_flag());
+        res_type.set_meta(value.get_param_meta());
+        res_type.set_accuracy(value.get_accuracy());
+        res_type.set_result_flag(value.get_result_flag());
         if (i == 0) {
           if (OB_FAIL(table_def.column_types_.push_back(res_type))) {
           }
