@@ -53,6 +53,13 @@ class OllamaEndpointIntegrationTest(AISQLMockTestCase):
     def test_omitted_key_is_allowed(self):
         self.create_endpoint()
 
+    def test_alter_provider_and_clear_existing_key(self):
+        self.execute("CALL DBMS_AI_SERVICE.ALTER_AI_MODEL_ENDPOINT(%s,%s)",
+                     (self.endpoint, '{"provider":"Ollama","access_key":""}'))
+        value = self.execute("SELECT ai_embed(%s,'hello')", (self.model,))[0][0]
+        self.assertEqual([1, 2], json.loads(value))
+        self.assertIsNone(self.server.request_metadata.get_nowait()["authorization"])
+
     def test_other_providers_still_require_keys(self):
         for provider in ("openai", "siliconflow"):
             with self.subTest(provider=provider):
