@@ -1,0 +1,1283 @@
+{
+  "baseline_source": "154bac9c8857bfa37517e17175ab68a0379f2c1d",
+  "results": {
+    "utf8-0-beng-default": {
+      "value": {
+        "tokens": [],
+        "doc_len": 0
+      }
+    },
+    "utf8-0-ik-smart": {
+      "value": {
+        "tokens": [],
+        "doc_len": 0
+      }
+    },
+    "utf8-0-ik-max_word": {
+      "value": {
+        "tokens": [],
+        "doc_len": 0
+      }
+    },
+    "utf8-1-beng-default": {
+      "value": {
+        "tokens": [],
+        "doc_len": 0
+      }
+    },
+    "utf8-1-ik-smart": {
+      "value": {
+        "tokens": [],
+        "doc_len": 0
+      }
+    },
+    "utf8-1-ik-max_word": {
+      "value": {
+        "tokens": [],
+        "doc_len": 0
+      }
+    },
+    "utf8-2-beng-default": {
+      "value": {
+        "tokens": [],
+        "doc_len": 0
+      }
+    },
+    "utf8-2-ik-smart": {
+      "value": {
+        "tokens": [],
+        "doc_len": 0
+      }
+    },
+    "utf8-2-ik-max_word": {
+      "value": {
+        "tokens": [],
+        "doc_len": 0
+      }
+    },
+    "utf8-3-beng-default": {
+      "value": {
+        "tokens": [
+          {
+            "hello": 1
+          },
+          {
+            "world": 1
+          }
+        ],
+        "doc_len": 2
+      }
+    },
+    "utf8-3-ik-smart": {
+      "value": {
+        "tokens": [
+          {
+            "hello": 1
+          },
+          {
+            "world": 1
+          }
+        ],
+        "doc_len": 2
+      }
+    },
+    "utf8-3-ik-max_word": {
+      "value": {
+        "tokens": [
+          {
+            "hello": 1
+          },
+          {
+            "world": 1
+          }
+        ],
+        "doc_len": 2
+      }
+    },
+    "utf8-4-beng-default": {
+      "value": {
+        "tokens": [
+          {
+            "hello": 3
+          },
+          {
+            "world": 2
+          }
+        ],
+        "doc_len": 5
+      }
+    },
+    "utf8-4-ik-smart": {
+      "value": {
+        "tokens": [
+          {
+            "hello": 3
+          },
+          {
+            "world": 2
+          }
+        ],
+        "doc_len": 5
+      }
+    },
+    "utf8-4-ik-max_word": {
+      "value": {
+        "tokens": [
+          {
+            "hello": 3
+          },
+          {
+            "world": 2
+          }
+        ],
+        "doc_len": 5
+      }
+    },
+    "utf8-5-beng-default": {
+      "value": {
+        "tokens": [
+          {
+            "and": 1
+          },
+          {
+            "data": 1
+          },
+          {
+            "database": 1
+          },
+          {
+            "search": 1
+          }
+        ],
+        "doc_len": 4
+      }
+    },
+    "utf8-5-ik-smart": {
+      "value": {
+        "tokens": [
+          {
+            "and": 1
+          },
+          {
+            "data": 1
+          },
+          {
+            "database": 1
+          },
+          {
+            "of": 1
+          },
+          {
+            "search": 1
+          },
+          {
+            "the": 1
+          }
+        ],
+        "doc_len": 6
+      }
+    },
+    "utf8-5-ik-max_word": {
+      "value": {
+        "tokens": [
+          {
+            "and": 1
+          },
+          {
+            "data": 1
+          },
+          {
+            "database": 1
+          },
+          {
+            "of": 1
+          },
+          {
+            "search": 1
+          },
+          {
+            "the": 1
+          }
+        ],
+        "doc_len": 6
+      }
+    },
+    "utf8-6-beng-default": {
+      "value": {
+        "tokens": [
+          {
+            "abc": 1
+          },
+          {
+            "abcd": 1
+          }
+        ],
+        "doc_len": 2
+      }
+    },
+    "utf8-6-ik-smart": {
+      "value": {
+        "tokens": [
+          {
+            "a": 1
+          },
+          {
+            "ab": 1
+          },
+          {
+            "abc": 1
+          },
+          {
+            "abcd": 1
+          }
+        ],
+        "doc_len": 4
+      }
+    },
+    "utf8-6-ik-max_word": {
+      "value": {
+        "tokens": [
+          {
+            "a": 1
+          },
+          {
+            "ab": 1
+          },
+          {
+            "abc": 1
+          },
+          {
+            "abcd": 1
+          }
+        ],
+        "doc_len": 4
+      }
+    },
+    "utf8-7-beng-default": {
+      "value": {
+        "tokens": [
+          {
+            "eight": 1
+          },
+          {
+            "example": 1
+          },
+          {
+            "five": 1
+          },
+          {
+            "four": 1
+          },
+          {
+            "one": 1
+          },
+          {
+            "seven": 1
+          },
+          {
+            "six": 1
+          },
+          {
+            "three": 1
+          },
+          {
+            "two": 1
+          }
+        ],
+        "doc_len": 9
+      }
+    },
+    "utf8-7-ik-smart": {
+      "value": {
+        "tokens": [
+          {
+            "eight": 1
+          },
+          {
+            "four-five_six@example.com": 1
+          },
+          {
+            "one": 1
+          },
+          {
+            "seven": 1
+          },
+          {
+            "three": 1
+          },
+          {
+            "two": 1
+          }
+        ],
+        "doc_len": 6
+      }
+    },
+    "utf8-7-ik-max_word": {
+      "value": {
+        "tokens": [
+          {
+            "com": 1
+          },
+          {
+            "eight": 1
+          },
+          {
+            "example": 1
+          },
+          {
+            "five": 1
+          },
+          {
+            "four": 1
+          },
+          {
+            "four-five_six@example.com": 1
+          },
+          {
+            "one": 1
+          },
+          {
+            "seven": 1
+          },
+          {
+            "six": 1
+          },
+          {
+            "three": 1
+          },
+          {
+            "two": 1
+          }
+        ],
+        "doc_len": 11
+      }
+    },
+    "utf8-8-beng-default": {
+      "value": {
+        "tokens": [
+          {
+            "one": 2
+          },
+          {
+            "three": 1
+          },
+          {
+            "two": 1
+          },
+          {
+            "zero": 1
+          }
+        ],
+        "doc_len": 5
+      }
+    },
+    "utf8-8-ik-smart": {
+      "value": {
+        "tokens": [
+          {
+            "one": 2
+          },
+          {
+            "three": 1
+          },
+          {
+            "two": 1
+          },
+          {
+            "zero": 1
+          }
+        ],
+        "doc_len": 5
+      }
+    },
+    "utf8-8-ik-max_word": {
+      "value": {
+        "tokens": [
+          {
+            "one": 2
+          },
+          {
+            "three": 1
+          },
+          {
+            "two": 1
+          },
+          {
+            "zero": 1
+          }
+        ],
+        "doc_len": 5
+      }
+    },
+    "utf8-9-beng-default": {
+      "value": {
+        "tokens": [
+          {
+            "oceanbase是一款非常稳定的数据库，支持全文索引和向量检索。": 1
+          }
+        ],
+        "doc_len": 1
+      }
+    },
+    "utf8-9-ik-smart": {
+      "value": {
+        "tokens": [
+          {
+            "一款": 1
+          },
+          {
+            "全文索引": 1
+          },
+          {
+            "向量": 1
+          },
+          {
+            "和": 1
+          },
+          {
+            "支持": 1
+          },
+          {
+            "数据库": 1
+          },
+          {
+            "是": 1
+          },
+          {
+            "检索": 1
+          },
+          {
+            "的": 1
+          },
+          {
+            "稳定": 1
+          },
+          {
+            "非常": 1
+          },
+          {
+            "oceanbase": 1
+          }
+        ],
+        "doc_len": 12
+      }
+    },
+    "utf8-9-ik-max_word": {
+      "value": {
+        "tokens": [
+          {
+            "一": 1
+          },
+          {
+            "一款": 1
+          },
+          {
+            "全文": 1
+          },
+          {
+            "全文索引": 1
+          },
+          {
+            "向量": 1
+          },
+          {
+            "和": 1
+          },
+          {
+            "库": 1
+          },
+          {
+            "支持": 1
+          },
+          {
+            "数据": 1
+          },
+          {
+            "数据库": 1
+          },
+          {
+            "是": 1
+          },
+          {
+            "检索": 1
+          },
+          {
+            "款": 1
+          },
+          {
+            "的": 1
+          },
+          {
+            "稳定": 1
+          },
+          {
+            "索引": 1
+          },
+          {
+            "非常": 1
+          },
+          {
+            "oceanbase": 1
+          }
+        ],
+        "doc_len": 18
+      }
+    },
+    "utf8-10-beng-default": {
+      "value": {
+        "tokens": [
+          {
+            "中华人民共和国人民大会堂": 1
+          }
+        ],
+        "doc_len": 1
+      }
+    },
+    "utf8-10-ik-smart": {
+      "value": {
+        "tokens": [
+          {
+            "中华人民共和国": 1
+          },
+          {
+            "人民大会堂": 1
+          }
+        ],
+        "doc_len": 2
+      }
+    },
+    "utf8-10-ik-max_word": {
+      "value": {
+        "tokens": [
+          {
+            "中华": 1
+          },
+          {
+            "中华人民": 1
+          },
+          {
+            "中华人民共和国": 1
+          },
+          {
+            "人民": 2
+          },
+          {
+            "人民共和国": 1
+          },
+          {
+            "人民大会": 1
+          },
+          {
+            "人民大会堂": 1
+          },
+          {
+            "会堂": 1
+          },
+          {
+            "共和": 1
+          },
+          {
+            "共和国": 1
+          },
+          {
+            "华人": 1
+          },
+          {
+            "国人": 1
+          },
+          {
+            "大会": 1
+          },
+          {
+            "大会堂": 1
+          }
+        ],
+        "doc_len": 15
+      }
+    },
+    "utf8-11-beng-default": {
+      "value": {
+        "tokens": [
+          {
+            "一二三四五": 1
+          },
+          {
+            "九十百千万亿": 1
+          },
+          {
+            "六七八": 1
+          }
+        ],
+        "doc_len": 3
+      }
+    },
+    "utf8-11-ik-smart": {
+      "value": {
+        "tokens": [
+          {
+            "一二三四五": 1
+          },
+          {
+            "九十百千万亿": 1
+          },
+          {
+            "六七八": 1
+          }
+        ],
+        "doc_len": 3
+      }
+    },
+    "utf8-11-ik-max_word": {
+      "value": {
+        "tokens": [
+          {
+            "一二三四五": 1
+          },
+          {
+            "七八": 1
+          },
+          {
+            "万亿": 1
+          },
+          {
+            "九十百千万亿": 1
+          },
+          {
+            "二三": 1
+          },
+          {
+            "六七": 1
+          },
+          {
+            "六七八": 1
+          },
+          {
+            "千万": 1
+          },
+          {
+            "四五": 1
+          }
+        ],
+        "doc_len": 9
+      }
+    },
+    "utf8-12-beng-default": {
+      "value": {
+        "tokens": [
+          {
+            "123": 1
+          },
+          {
+            "2026": 1
+          },
+          {
+            "2亿": 1
+          },
+          {
+            "456": 2
+          }
+        ],
+        "doc_len": 5
+      }
+    },
+    "utf8-12-ik-smart": {
+      "value": {
+        "tokens": [
+          {
+            "1.2亿": 1
+          },
+          {
+            "123": 1
+          },
+          {
+            "2026-10-27": 1
+          },
+          {
+            "3,456.78": 1
+          },
+          {
+            "456": 1
+          }
+        ],
+        "doc_len": 5
+      }
+    },
+    "utf8-12-ik-max_word": {
+      "value": {
+        "tokens": [
+          {
+            "1.2": 1
+          },
+          {
+            "10": 1
+          },
+          {
+            "123": 1
+          },
+          {
+            "2026": 1
+          },
+          {
+            "2026-10-27": 1
+          },
+          {
+            "27": 1
+          },
+          {
+            "3": 1
+          },
+          {
+            "3,456.78": 1
+          },
+          {
+            "456": 1
+          },
+          {
+            "456.78": 1
+          },
+          {
+            "亿": 1
+          }
+        ],
+        "doc_len": 11
+      }
+    },
+    "utf8-13-beng-default": {
+      "value": {
+        "tokens": [
+          {
+            "all": 1
+          },
+          {
+            "example": 1
+          },
+          {
+            "hello": 1
+          },
+          {
+            "one": 1
+          },
+          {
+            "test": 1
+          },
+          {
+            "world": 1
+          }
+        ],
+        "doc_len": 6
+      }
+    },
+    "utf8-13-ik-smart": {
+      "value": {
+        "tokens": [
+          {
+            "all-in-one": 1
+          },
+          {
+            "hello-world": 1
+          },
+          {
+            "test@example.com": 1
+          }
+        ],
+        "doc_len": 3
+      }
+    },
+    "utf8-13-ik-max_word": {
+      "value": {
+        "tokens": [
+          {
+            "all": 1
+          },
+          {
+            "all-in-one": 1
+          },
+          {
+            "com": 1
+          },
+          {
+            "example": 1
+          },
+          {
+            "hello": 1
+          },
+          {
+            "hello-world": 1
+          },
+          {
+            "in": 1
+          },
+          {
+            "one": 1
+          },
+          {
+            "test": 1
+          },
+          {
+            "test@example.com": 1
+          },
+          {
+            "world": 1
+          }
+        ],
+        "doc_len": 11
+      }
+    },
+    "utf8-14-beng-default": {
+      "value": {
+        "tokens": [
+          {
+            "ａｂｃ１２３ａｂｃ，全文索引；数据库。": 1
+          }
+        ],
+        "doc_len": 1
+      }
+    },
+    "utf8-14-ik-smart": {
+      "value": {
+        "tokens": [
+          {
+            "全文索引": 1
+          },
+          {
+            "数据库": 1
+          },
+          {
+            "ａｂｃ１２３ａｂｃ": 1
+          }
+        ],
+        "doc_len": 3
+      }
+    },
+    "utf8-14-ik-max_word": {
+      "value": {
+        "tokens": [
+          {
+            "全文": 1
+          },
+          {
+            "全文索引": 1
+          },
+          {
+            "库": 1
+          },
+          {
+            "数据": 1
+          },
+          {
+            "数据库": 1
+          },
+          {
+            "索引": 1
+          },
+          {
+            "１２３": 1
+          },
+          {
+            "ａｂｃ": 2
+          },
+          {
+            "ａｂｃ１２３ａｂｃ": 1
+          }
+        ],
+        "doc_len": 10
+      }
+    },
+    "utf8-15-beng-default": {
+      "value": {
+        "tokens": [
+          {
+            "ひらがな": 1
+          },
+          {
+            "カタカナ": 1
+          },
+          {
+            "日本語のテスト": 1
+          },
+          {
+            "한국어": 1
+          }
+        ],
+        "doc_len": 4
+      }
+    },
+    "utf8-15-ik-smart": {
+      "value": {
+        "tokens": [
+          {
+            "が": 1
+          },
+          {
+            "な": 1
+          },
+          {
+            "の": 1
+          },
+          {
+            "ひ": 1
+          },
+          {
+            "ら": 1
+          },
+          {
+            "カ": 2
+          },
+          {
+            "ス": 1
+          },
+          {
+            "タ": 1
+          },
+          {
+            "テ": 1
+          },
+          {
+            "ト": 1
+          },
+          {
+            "ナ": 1
+          },
+          {
+            "日本": 1
+          },
+          {
+            "語": 1
+          },
+          {
+            "국": 1
+          },
+          {
+            "어": 1
+          },
+          {
+            "한": 1
+          }
+        ],
+        "doc_len": 17
+      }
+    },
+    "utf8-15-ik-max_word": {
+      "value": {
+        "tokens": [
+          {
+            "が": 1
+          },
+          {
+            "な": 1
+          },
+          {
+            "の": 1
+          },
+          {
+            "ひ": 1
+          },
+          {
+            "ら": 1
+          },
+          {
+            "カ": 2
+          },
+          {
+            "ス": 1
+          },
+          {
+            "タ": 1
+          },
+          {
+            "テ": 1
+          },
+          {
+            "ト": 1
+          },
+          {
+            "ナ": 1
+          },
+          {
+            "日本": 1
+          },
+          {
+            "語": 1
+          },
+          {
+            "국": 1
+          },
+          {
+            "어": 1
+          },
+          {
+            "한": 1
+          }
+        ],
+        "doc_len": 17
+      }
+    },
+    "utf8-16-beng-default": {
+      "value": {
+        "tokens": [
+          {
+            "数据库😀𠀀向量🚀": 1
+          },
+          {
+            "café": 2
+          },
+          {
+            "istanbul": 1
+          },
+          {
+            "naïve": 1
+          },
+          {
+            "straße": 1
+          }
+        ],
+        "doc_len": 6
+      }
+    },
+    "utf8-16-ik-smart": {
+      "value": {
+        "tokens": [
+          {
+            "向量": 1
+          },
+          {
+            "数据库": 1
+          },
+          {
+            "caf": 2
+          },
+          {
+            "e": 1
+          },
+          {
+            "na": 1
+          },
+          {
+            "stanbul": 1
+          },
+          {
+            "stra": 1
+          },
+          {
+            "ve": 1
+          }
+        ],
+        "doc_len": 9
+      }
+    },
+    "utf8-16-ik-max_word": {
+      "value": {
+        "tokens": [
+          {
+            "向量": 1
+          },
+          {
+            "库": 1
+          },
+          {
+            "数据": 1
+          },
+          {
+            "数据库": 1
+          },
+          {
+            "caf": 2
+          },
+          {
+            "e": 1
+          },
+          {
+            "na": 1
+          },
+          {
+            "stanbul": 1
+          },
+          {
+            "stra": 1
+          },
+          {
+            "ve": 1
+          }
+        ],
+        "doc_len": 11
+      }
+    },
+    "utf8-17-beng-default": {
+      "value": {
+        "tokens": [
+          {
+            " attached ": 1
+          },
+          {
+            "data search　全文​索引": 1
+          }
+        ],
+        "doc_len": 2
+      }
+    },
+    "utf8-17-ik-smart": {
+      "value": {
+        "tokens": [
+          {
+            "全文": 1
+          },
+          {
+            "索引": 1
+          },
+          {
+            "attached": 1
+          },
+          {
+            "data": 1
+          },
+          {
+            "search": 1
+          }
+        ],
+        "doc_len": 5
+      }
+    },
+    "utf8-17-ik-max_word": {
+      "value": {
+        "tokens": [
+          {
+            "全文": 1
+          },
+          {
+            "索引": 1
+          },
+          {
+            "attached": 1
+          },
+          {
+            "data": 1
+          },
+          {
+            "search": 1
+          }
+        ],
+        "doc_len": 5
+      }
+    },
+    "utf8-18-beng-default": {
+      "value": {
+        "tokens": [
+          {
+            "数据库": 80
+          },
+          {
+            "database": 80
+          }
+        ],
+        "doc_len": 160
+      }
+    },
+    "utf8-18-ik-smart": {
+      "value": {
+        "tokens": [
+          {
+            "库": 80
+          },
+          {
+            "据": 80
+          },
+          {
+            "数": 80
+          },
+          {
+            "数据库": 80
+          },
+          {
+            "database": 80
+          }
+        ],
+        "doc_len": 400
+      }
+    },
+    "utf8-18-ik-max_word": {
+      "value": {
+        "tokens": [
+          {
+            "库": 160
+          },
+          {
+            "据": 80
+          },
+          {
+            "数": 80
+          },
+          {
+            "数据": 80
+          },
+          {
+            "数据库": 80
+          },
+          {
+            "database": 80
+          }
+        ],
+        "doc_len": 560
+      }
+    },
+    "utf16-3-ik": {
+      "error_code": 1115
+    },
+    "utf16-4-ik": {
+      "error_code": 1115
+    },
+    "utf16-9-ik": {
+      "error_code": 1115
+    },
+    "utf16-10-ik": {
+      "error_code": 1115
+    },
+    "utf16-11-ik": {
+      "error_code": 1115
+    },
+    "utf16-12-ik": {
+      "error_code": 1115
+    },
+    "utf16-14-ik": {
+      "error_code": 1115
+    },
+    "utf16-15-ik": {
+      "error_code": 1115
+    },
+    "utf16-16-ik": {
+      "error_code": 1115
+    },
+    "utf16-17-ik": {
+      "error_code": 1115
+    },
+    "utf16le-3-ik": {
+      "error_code": 1115
+    },
+    "utf16le-4-ik": {
+      "error_code": 1115
+    },
+    "utf16le-9-ik": {
+      "error_code": 1115
+    },
+    "utf16le-10-ik": {
+      "error_code": 1115
+    },
+    "utf16le-11-ik": {
+      "error_code": 1115
+    },
+    "utf16le-12-ik": {
+      "error_code": 1115
+    },
+    "utf16le-14-ik": {
+      "error_code": 1115
+    },
+    "utf16le-15-ik": {
+      "error_code": 1115
+    },
+    "utf16le-16-ik": {
+      "error_code": 1115
+    },
+    "utf16le-17-ik": {
+      "error_code": 1115
+    }
+  }
+}
