@@ -169,7 +169,7 @@ class FileSQLIntegrationTest(unittest.TestCase):
             "empty":pa.nulls(2)}),path,row_group_size=1,compression='snappy')
         self.assertEqual(((datetime.date(2024,2,29),recent,recent,str(2**64-1),None),
                           (None,before_epoch,before_epoch,'0',None)),self.execute(
-            "SELECT day,micros,nanos,unsigned,empty FROM read_parquet(%s)",(str(path),)))
+            "SELECT day,micros,nanos,`unsigned`,`empty` FROM read_parquet(%s)",(str(path),)))
 
     def test_inner_left_and_cross_format_joins(self):
         rows=self.execute("SELECT c.id,c.name,j.note FROM read_csv(%s) c "
