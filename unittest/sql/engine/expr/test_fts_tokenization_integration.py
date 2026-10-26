@@ -105,6 +105,17 @@ class FTSTokenizationIntegrationTest(unittest.TestCase):
                               'parser': 'beng', 'mode': None, 'charset': 'utf8mb4'})
             self.assertEqual({'value': {'doc_len': 5, 'tokens': [{'hello': 3}, {'world': 2}]}}, actual)
 
+    def test_lowercase_tokens_survive_later_tokens_and_documents(self):
+        with self.connection.cursor() as cursor:
+            cursor.execute("SELECT TOKENIZE(doc,'beng','[{\"output\":\"all\"}]') FROM "
+                           "(SELECT 1 AS id,'alpha bravo alpha' AS doc UNION ALL "
+                           "SELECT 2,'delta echo delta') t ORDER BY id")
+            actual = [canonical(json.loads(row[0])) for row in cursor.fetchall()]
+            self.assertEqual([
+                {'doc_len': 3, 'tokens': [{'alpha': 2}, {'bravo': 1}]},
+                {'doc_len': 3, 'tokens': [{'delta': 2}, {'echo': 1}]},
+            ], actual)
+
 
 if __name__ == '__main__':
     unittest.main()
