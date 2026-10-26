@@ -157,6 +157,20 @@ class FileSQLIntegrationTest(unittest.TestCase):
         self.assertEqual(((5,1,5,15),),self.execute("SELECT count(*),min(id),max(id),sum(id) FROM read_parquet(%s)",
                                                    (str(self.parquet_path),)))
 
+    def test_parquet_dates_timestamps_unsigned_boundaries_and_null_type(self):
+        path=self.root/'typed.parquet'
+        before_epoch=datetime.datetime(1969,12,31,23,59,59,999999)
+        recent=datetime.datetime(2026,8,1,10,11,12,123456)
+        pq.write_table(pa.table({
+            "day":pa.array([datetime.date(2024,2,29),None],type=pa.date32()),
+            "micros":pa.array([recent,before_epoch],type=pa.timestamp('us')),
+            "nanos":pa.array([recent,before_epoch],type=pa.timestamp('ns')),
+            "unsigned":pa.array([2**64-1,0],type=pa.uint64()),
+            "empty":pa.nulls(2)}),path,row_group_size=1,compression='snappy')
+        self.assertEqual(((datetime.date(2024,2,29),recent,recent,str(2**64-1),None),
+                          (None,before_epoch,before_epoch,'0',None)),self.execute(
+            "SELECT day,micros,nanos,unsigned,empty FROM read_parquet(%s)",(str(path),)))
+
     def test_inner_left_and_cross_format_joins(self):
         rows=self.execute("SELECT c.id,c.name,j.note FROM read_csv(%s) c "
                           "LEFT JOIN read_json(%s) j ON c.id=j.id WHERE c.id>=2 ORDER BY c.id",
