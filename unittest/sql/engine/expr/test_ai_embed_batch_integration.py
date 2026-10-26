@@ -147,13 +147,21 @@ class AIEmbedBatchIntegrationTest(AISQLMockTestCase):
         self.assertEqual(((1,),), self.execute("SELECT 1"))
 
     def test_failed_batch_does_not_poison_next_query(self):
-        self.respond({"error": {"message": "intentional mock failure"}}, status=500)
+        self.respond({"error": {"message": "intentional mock failure"}}, status=400)
         with self.assertRaises(pymysql.MySQLError) as error:
             self.rows()
         self.assertNotIn(error.exception.args[0], (2003, 2006, 2013))
         self.requests()
         self.assert_rows(self.rows("ORDER BY id"), self.expected())
         self.assertEqual(1, len(self.requests()))
+
+    def test_transient_http_error_retries_the_same_batch(self):
+        self.respond({"error": {"message": "temporary mock failure"}}, status=500)
+        self.assert_rows(self.rows("ORDER BY id"), self.expected())
+        requests = self.requests()
+        self.assertEqual(2, len(requests))
+        self.assertEqual(requests[0], requests[1])
+        self.assertEqual([s for s in self.inputs if s is not None], requests[0]["input"])
 
 
 if __name__ == "__main__":
