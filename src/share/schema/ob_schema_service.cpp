@@ -426,9 +426,17 @@ int AlterTableSchema::assign(const ObTableSchema &src_schema)
   if (OB_SUCC(ret)) {
     semistruct_encoding_type_ = src_schema.semistruct_encoding_type_;
   }
-  if (OB_SUCC(ret)) { table_flags_ = src_schema.get_table_flags(); }
-  for (int64_t i = 0; OB_SUCC(ret) && i < src_schema.get_ai_column_count(); ++i) {
-    ret = add_ai_column(*src_schema.get_ai_column_by_idx(i));
+  if (this != &src_schema) {
+    if (OB_SUCC(ret)) { table_flags_ = src_schema.get_table_flags(); }
+    if (OB_SUCC(ret) && src_schema.get_ai_column_count() > 0) {
+      ai_columns_ = static_cast<AIColumnSchema **>(
+          alloc(src_schema.get_ai_column_count() * sizeof(AIColumnSchema *)));
+      if (ai_columns_ == nullptr) { ret = OB_ALLOCATE_MEMORY_FAILED; }
+      else { ai_column_capacity_ = src_schema.get_ai_column_count(); }
+    }
+    for (int64_t i = 0; OB_SUCC(ret) && i < src_schema.get_ai_column_count(); ++i) {
+      ret = add_ai_column(*src_schema.get_ai_column_by_idx(i));
+    }
   }
   return ret;
 }

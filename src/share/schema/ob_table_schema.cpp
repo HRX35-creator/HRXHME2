@@ -1302,6 +1302,12 @@ int ObTableSchema::assign(const ObTableSchema &src_schema)
         }
       }
 
+      if (OB_SUCC(ret) && src_schema.ai_column_count_ > 0) {
+        ai_columns_ = static_cast<AIColumnSchema **>(
+            alloc(src_schema.ai_column_count_ * sizeof(AIColumnSchema *)));
+        if (ai_columns_ == nullptr) { ret = OB_ALLOCATE_MEMORY_FAILED; }
+        else { ai_column_capacity_ = src_schema.ai_column_count_; }
+      }
       for (int64_t i = 0; OB_SUCC(ret) && i < src_schema.ai_column_count_; ++i) {
         ret = add_ai_column(*src_schema.ai_columns_[i]);
       }

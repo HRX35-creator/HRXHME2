@@ -1982,7 +1982,9 @@ int ObDDLResolver::resolve_ai_column_definition(
   ObSEArray<uint64_t, 4> dependencies;
   const ParseNode *expression_node = attribute.num_child_ == 2 ? attribute.children_[0] : nullptr;
   if (expression_node == nullptr || result_column.is_rowkey_column() || !result_column.is_nullable()
-      || result_column.is_autoincrement() || result_column.is_generated_column()) {
+      || result_column.is_autoincrement() || result_column.is_generated_column()
+      || !result_column.get_cur_default_value().is_null()
+      || result_column.is_default_expr_v2_column() || result_column.is_on_update_current_timestamp()) {
     ret = OB_INVALID_ARGUMENT;
   } else if (OB_FAIL(ObRawExprUtils::build_generated_column_expr(*params_.expr_factory_,
           *session_info_, *expression_node, expression, names, &table, nullptr, schema_checker_))) {
