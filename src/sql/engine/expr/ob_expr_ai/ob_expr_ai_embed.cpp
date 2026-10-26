@@ -59,8 +59,9 @@ int ObExprAIEmbed::calc_result_typeN(ObExprResType &type,
     types_stack[CONTENT_IDX].set_calc_collation_type(CS_TYPE_UTF8MB4_BIN);
     if (param_num == 3) {
       if (ob_is_integer_type(types_stack[DIM_IDX].get_type())) {
-        types_stack[DIM_IDX].set_calc_type(ObIntType);
-        types_stack[DIM_IDX].set_precision(10);
+        types_stack[DIM_IDX].set_calc_type(ob_is_unsigned_type(types_stack[DIM_IDX].get_type())
+                                         ? ObUInt64Type : ObIntType);
+        types_stack[DIM_IDX].set_precision(20);
         types_stack[DIM_IDX].set_scale(0);
       } else {
         ret = OB_INVALID_ARGUMENT;
@@ -80,11 +81,32 @@ int ObExprAIEmbed::eval_ai_embed(const ObExpr &expr, ObEvalCtx &ctx, ObDatum &re
   ObDatum *arg_model_id = nullptr;
   ObDatum *arg_content = nullptr;
   ObDatum *arg_dim = nullptr;
+  int64_t dim = 0;
   if (expr.arg_cnt_ == 3 ? OB_FAIL(expr.eval_param_value(ctx, arg_model_id, arg_content, arg_dim))
                          : OB_FAIL(expr.eval_param_value(ctx, arg_model_id, arg_content))) {
-  } else if (arg_model_id->is_null() || arg_content->is_null()) {
+  } else if (OB_NOT_NULL(arg_dim)) {
+    if (arg_dim->is_null()) {
+      ret = OB_INVALID_ARGUMENT;
+    } else if (ob_is_unsigned_type(expr.args_[DIM_IDX]->datum_meta_.type_)) {
+      uint64_t unsigned_dim = arg_dim->get_uint();
+      if (unsigned_dim == 0 || unsigned_dim > INT64_MAX) {
+        ret = OB_INVALID_ARGUMENT;
+      } else {
+        dim = static_cast<int64_t>(unsigned_dim);
+      }
+    } else if ((dim = arg_dim->get_int()) <= 0) {
+      ret = OB_INVALID_ARGUMENT;
+    }
+    if (OB_FAIL(ret)) {
+      LOG_USER_ERROR(OB_INVALID_ARGUMENT, "ai_embed, dimension parameter must be a positive integer");
+    }
+  }
+  if (OB_FAIL(ret)) {
+  } else if (arg_model_id->is_null()) {
     ret = OB_INVALID_ARGUMENT;
-    LOG_USER_ERROR(OB_INVALID_ARGUMENT, "ai_embed, model id or content is null");
+    LOG_USER_ERROR(OB_INVALID_ARGUMENT, "ai_embed, model id is null");
+    res.set_null();
+  } else if (arg_content->is_null()) {
     res.set_null();
   } else {
     ObEvalCtx::TempAllocGuard tmp_alloc_g(ctx);
@@ -103,17 +125,11 @@ int ObExprAIEmbed::eval_ai_embed(const ObExpr &expr, ObEvalCtx &ctx, ObDatum &re
       LOG_USER_ERROR(OB_INVALID_ARGUMENT, "ai_embed, model id or input is empty");
       res.set_null();
     }
-    int64_t dim = 0;
     ObJsonInt *dim_json = nullptr;
     ObJsonObject *config = nullptr;
     if (OB_FAIL(ret)) {
     } else if (OB_NOT_NULL(arg_dim)) {
-      dim = arg_dim->get_int();
-      if (dim <= 0) {
-        ret = OB_INVALID_ARGUMENT;
-        LOG_USER_ERROR(OB_INVALID_ARGUMENT, "ai_embed, dimension parameter must be a positive integer");
-        res.set_null();
-      } else if (OB_FAIL(ObAIFuncJsonUtils::get_json_object(temp_allocator, config))) {
+      if (OB_FAIL(ObAIFuncJsonUtils::get_json_object(temp_allocator, config))) {
       } else if (OB_FAIL(ObAIFuncJsonUtils::get_json_int(temp_allocator, dim, dim_json))) {
       } else if (OB_FAIL(config->add("dimensions", dim_json))) {
       }
