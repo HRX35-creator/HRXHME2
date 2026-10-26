@@ -2119,6 +2119,16 @@ int ObDmlCgService::generate_dml_base_ctdef(ObLogicalOperator &op,
     }
   }
 
+  if (OB_SUCC(ret) && index_dml_info.is_primary_index_) {
+    const ObTableSchema *schema = nullptr;
+    if (OB_FAIL(cg_.opt_ctx_->get_schema_guard()->get_table_schema(index_dml_info.ref_table_id_, schema))) {
+    } else if (OB_ISNULL(schema)) {
+      ret = OB_ERR_UNEXPECTED;
+    } else {
+      dml_base_ctdef.has_ai_columns_ = schema->has_ai_columns();
+    }
+  }
+
   if (OB_SUCC(ret) &&
       log_op_def::LOG_INSERT == op.get_type()) {
     ObLogInsert &log_ins_op = static_cast<ObLogInsert &>(op);
