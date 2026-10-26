@@ -36,6 +36,7 @@
 #include "storage/fts/dict/ob_ft_dict_iterator.h"
 #include "storage/fts/dict/ob_ft_dict_table_iter.h"
 #include "storage/fts/dict/ob_ft_trie.h"
+#include "lib/charset/ob_charset_string_helper.h"
 
 #define USING_LOG_PREFIX STORAGE_FTS
 
@@ -44,6 +45,25 @@ namespace oceanbase
 namespace storage
 {
 
+namespace {
+// UTF8MB4_BIN orders complete single characters by Unicode code point. Keep
+// the existing collation comparator for malformed or longer byte strings.
+bool range_single_codepoint(const ObString &word, uint32_t &codepoint)
+{
+  bool valid = false;
+  if (!word.empty()) {
+    ob_wc_t decoded = 0;
+    const auto *start = reinterpret_cast<const unsigned char *>(word.ptr());
+    int length = common::ob_charset_decode_unicode<common::CHARSET_UTF8MB4>(
+        start, start + word.length(), decoded);
+    if (length > 0 && length == word.length()) {
+      codepoint = decoded;
+      valid = true;
+    }
+  }
+  return valid;
+}
+}
 
 int ObFTRangeDict::build_cache_from_ik_dict(const ObFTDictDesc &desc, ObFTCacheRangeContainer &range_container)
 {
@@ -382,7 +402,20 @@ int ObFTRangeDict::find_first_char_range(const ObString &single_word, ObIFTDict 
 {
   int ret = OB_SUCCESS;
   bool found = false;
-  for (int i = 0; OB_SUCC(ret) && !found && i < range_dicts_.size(); ++i) {
+  uint32_t codepoint = 0;
+  if (codepoint_ranges_ && range_single_codepoint(single_word, codepoint)) {
+    int64_t left = 0;
+    int64_t right = range_dicts_.size();
+    while (left < right) {
+      const int64_t middle = left + (right - left) / 2;
+      if (range_dicts_[middle].start_codepoint_ <= codepoint) { left = middle + 1; }
+      else { right = middle; }
+    }
+    if (left > 0 && codepoint <= range_dicts_[left - 1].end_codepoint_) {
+      dict = range_dicts_[left - 1].dict_;
+      found = true;
+    }
+  } else for (int i = 0; OB_SUCC(ret) && !found && i < range_dicts_.size(); ++i) {
     if (ObCharset::strcmp(ObCollationType::CS_TYPE_UTF8MB4_BIN,
                           range_dicts_[i].start_.get_word(),
                           single_word)
@@ -418,6 +451,13 @@ int ObFTRangeDict::build_dict_from_cache(const ObFTCacheRangeContainer &range_co
       range.start_ = dat->start_word_;
       range.end_ = dat->end_word_;
       range.dict_ = dict;
+      if (!range_single_codepoint(range.start_.get_word(), range.start_codepoint_)
+          || !range_single_codepoint(range.end_.get_word(), range.end_codepoint_)
+          || range.start_codepoint_ > range.end_codepoint_
+          || (range_dicts_.size() > 0
+              && range_dicts_[range_dicts_.size() - 1].end_codepoint_ >= range.start_codepoint_)) {
+        codepoint_ranges_ = false;
+      }
       if (OB_FAIL(range_dicts_.push_back(range))) {
       }
     }
