@@ -99,4 +99,3 @@ class AISQLMockTestCase(unittest.TestCase):
 
     def respond(self, response, status=200):
         self.server.responses.put((status, response))
-
