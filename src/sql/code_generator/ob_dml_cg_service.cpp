@@ -2126,6 +2126,10 @@ int ObDmlCgService::generate_dml_base_ctdef(ObLogicalOperator &op,
       ret = OB_ERR_UNEXPECTED;
     } else {
       dml_base_ctdef.has_ai_columns_ = schema->has_ai_columns();
+      if (dml_base_ctdef.has_ai_columns_) {
+        cg_.phy_plan_->set_has_nested_sql(true);
+        cg_.phy_plan_->set_need_serial_exec(true);
+      }
     }
   }
 
