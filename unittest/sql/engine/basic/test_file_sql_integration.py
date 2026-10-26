@@ -1,0 +1,224 @@
+#!/usr/bin/env python3
+# Copyright (c) 2026 OceanBase.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+"""Native File SQL contract tests. Run only against an isolated local instance.
+
+Requires PyMySQL and PyArrow (fixture generation only). Uses SEEKDB_TEST_*.
+Changes secure_file_priv for the duration of the class and restores its value.
+"""
+
+import csv
+import datetime
+import json
+import os
+from pathlib import Path
+import tempfile
+import unittest
+
+import pyarrow as pa
+import pyarrow.parquet as pq
+import pymysql
+
+
+class FileSQLIntegrationTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        options = {"host": os.environ.get("SEEKDB_TEST_HOST", "127.0.0.1"),
+                   "port": int(os.environ.get("SEEKDB_TEST_PORT", "2881")),
+                   "user": os.environ.get("SEEKDB_TEST_USER", "root"),
+                   "password": os.environ.get("SEEKDB_TEST_PASSWORD", ""),
+                   "database": os.environ.get("SEEKDB_TEST_DATABASE", "test"),
+                   "charset": "utf8mb4", "autocommit": True, "read_timeout": 60}
+        if os.environ.get("SEEKDB_TEST_SOCKET"):
+            options["unix_socket"] = os.environ["SEEKDB_TEST_SOCKET"]
+        cls.connection = pymysql.connect(**options)
+        cls.addClassCleanup(cls.connection.close)
+        cls.directory = tempfile.TemporaryDirectory(prefix="seekdb-file-sql-")
+        cls.addClassCleanup(cls.directory.cleanup)
+        cls.root = Path(cls.directory.name).resolve()
+        cls.default_enabled = cls.execute("SELECT @@session.enable_file_sql")[0][0]
+        cls.original_secure_path = cls.execute("SELECT @@global.secure_file_priv")[0][0]
+        cls.addClassCleanup(cls.execute, "SET GLOBAL secure_file_priv=%s", (cls.original_secure_path,))
+        cls.execute("SET GLOBAL secure_file_priv=%s", (str(cls.root),))
+        cls.csv_path = cls.root / "data.csv"
+        with cls.csv_path.open("w", newline="", encoding="utf-8") as output:
+            writer = csv.writer(output)
+            writer.writerow(["id", "name", "score", "active", "day", "created", "note", "id"])
+            writer.writerows([
+                [1,"Alice",98.5,"true","2026-08-01","2026-08-01 10:11:12","hello,\nworld",101],
+                [2,"世界",87,"false","","","plain",102],
+                [3,"Chen",90.25,"true","2026-08-03","2026-08-03T12:13:14",'say "hi"',103]])
+        cls.json_path = cls.root / "data.jsonl"
+        cls.json_path.write_text('\n'.join(json.dumps(row,ensure_ascii=False) for row in [
+            {"id":1,"name":"Alice","score":98.5,"active":True},
+            {"id":2,"name":"世界","active":False,"day":"2026-08-02"},
+            {"id":3,"name":"Chen","score":90,"active":True,"note":"ok"}])+"\n")
+        cls.parquet_path = cls.root / "data.parquet"
+        pq.write_table(pa.table({"id":pa.array([1,2,3,4,5],type=pa.int64()),
+                                 "name":["one",None,"世界","four","five"],
+                                 "value":pa.array([1.5,None,-2.5,0,4],type=pa.float64()),
+                                 "active":[True,False,None,True,False]}),
+                       cls.parquet_path,row_group_size=2,compression="snappy",use_dictionary=True)
+
+    @classmethod
+    def execute(cls, statement, args=()):
+        with cls.connection.cursor() as cursor:
+            cursor.execute(statement,args)
+            return cursor.fetchall() if cursor.description else ()
+
+    def setUp(self):
+        self.execute("SET SESSION enable_file_sql=ON")
+        self.execute("SET GLOBAL secure_file_priv=%s", (str(self.root),))
+
+    def write(self,name,content):
+        path=self.root/name
+        path.write_text(content,encoding="utf-8")
+        return str(path)
+
+    def test_default_off_and_gate(self):
+        self.assertEqual(0,self.default_enabled)
+        self.execute("SET SESSION enable_file_sql=OFF")
+        for function in ("read_csv","read_json","read_ndjson","read_parquet","glob"):
+            with self.subTest(function=function):
+                with self.assertRaises(pymysql.MySQLError) as error:
+                    self.execute(f"SELECT * FROM {function}(%s)",(str(self.root/"missing.file"),))
+                self.assertEqual(1235,error.exception.args[0])
+
+    def test_csv_types_multiline_unicode_and_duplicate_headers(self):
+        rows=self.execute("SELECT id,name,score,active,day,created,note,id__2 FROM read_csv(%s) f ORDER BY id",
+                          (str(self.csv_path),))
+        self.assertEqual((1,"Alice",98.5,1,datetime.date(2026,8,1),datetime.datetime(2026,8,1,10,11,12),"hello,\nworld",101),rows[0])
+        self.assertEqual((2,"世界",87,0,None,None,"plain",102),rows[1])
+        self.assertEqual('say "hi"',rows[2][6])
+
+    def test_describe_select(self):
+        rows=self.execute("DESCRIBE SELECT * FROM read_csv(%s)",(str(self.csv_path),))
+        self.assertEqual(["id","name","score","active","day","created","note","id__2"],[row[0] for row in rows])
+        self.assertEqual(["BIGINT","VARCHAR","DOUBLE","BOOLEAN","DATE","DATETIME","VARCHAR","BIGINT"],
+                         [row[1] for row in rows])
+        self.assertEqual(["NO","NO","NO","NO","YES","YES","NO","NO"],[row[2] for row in rows])
+
+    def test_csv_options_and_headerless_input(self):
+        path=self.write("options.csv",'1;"a;b";NULL\r\n2;"line\nnext";3\r\n')
+        rows=self.execute("SELECT * FROM read_csv(%s,header=false,delim=';',nullstr='NULL') ORDER BY column0",(path,))
+        self.assertEqual(((1,"a;b",None),(2,"line\nnext",3)),rows)
+
+    def test_full_schema_inference_and_numeric_boundaries(self):
+        path=self.write("infer.csv","i,n,d,b\n9223372036854775807,,2024-02-29,true\n-9223372036854775808,,2026-02-29,false\n")
+        rows=self.execute("SELECT * FROM read_csv(%s)",(path,))
+        self.assertEqual(((9223372036854775807,None,"2024-02-29",1),(-9223372036854775808,None,"2026-02-29",0)),rows)
+        overflow=self.write("overflow.csv","v\n9223372036854775808\n-9223372036854775809\n")
+        self.assertEqual((("9223372036854775808",),("-9223372036854775809",)),self.execute("SELECT v FROM read_csv(%s)",(overflow,)))
+
+    def test_aggregate_filter_having_and_limit(self):
+        rows=self.execute("SELECT active,COUNT(*) AS n,SUM(id) AS s FROM read_csv(%s) f "
+                          "WHERE score>80 GROUP BY active HAVING COUNT(*)>=1 ORDER BY active DESC LIMIT 1",
+                          (str(self.csv_path),))
+        self.assertEqual(((1,2,4),),rows)
+
+    def test_json_field_union_and_missing_values(self):
+        for function in ("read_json","read_ndjson"):
+            with self.subTest(function=function):
+                rows=self.execute(f"SELECT id,name,score,active,day,note FROM {function}(%s) ORDER BY id",
+                                  (str(self.json_path),))
+                self.assertEqual(((1,"Alice",98.5,1,None,None),
+                                  (2,"世界",None,0,datetime.date(2026,8,2),None),
+                                  (3,"Chen",90,1,None,"ok")),rows)
+
+    def test_json_type_conflict_and_null(self):
+        path=self.write("conflict.jsonl",'{"x":1,"n":null}\n{"x":"text"}\n{"x":true,"n":null}\n')
+        self.assertEqual((("1",None),("text",None),("true",None)),self.execute("SELECT x,n FROM read_json(%s)",(path,)))
+
+    def test_nested_json_is_rejected(self):
+        for content in ('{"x":{"nested":1}}\n','{"x":[1]}\n','[1,2]\n','{"x":1}\n{bad}\n'):
+            with self.subTest(content=content):
+                path=self.write("bad.jsonl",content)
+                with self.assertRaises(pymysql.MySQLError):
+                    self.execute("SELECT * FROM read_json(%s)",(path,))
+                self.assertEqual(((1,),),self.execute("SELECT 1"))
+
+    def test_parquet_multi_row_group_nullable_and_projection(self):
+        rows=self.execute("SELECT id,name,value,active FROM read_parquet(%s) ORDER BY id",(str(self.parquet_path),))
+        self.assertEqual(((1,"one",1.5,1),(2,None,None,0),(3,"世界",-2.5,None),(4,"four",0,1),(5,"five",4,0)),rows)
+        self.assertEqual(((5,1,5,15),),self.execute("SELECT count(*),min(id),max(id),sum(id) FROM read_parquet(%s)",
+                                                   (str(self.parquet_path),)))
+
+    def test_inner_left_and_cross_format_joins(self):
+        rows=self.execute("SELECT c.id,c.name,j.note FROM read_csv(%s) c "
+                          "LEFT JOIN read_json(%s) j ON c.id=j.id WHERE c.id>=2 ORDER BY c.id",
+                          (str(self.csv_path),str(self.json_path)))
+        self.assertEqual(((2,"世界",None),(3,"Chen","ok")),rows)
+        self.assertEqual(((3,),),self.execute("SELECT count(*) FROM read_csv(%s) c INNER JOIN read_parquet(%s) p ON c.id=p.id",
+                                              (str(self.csv_path),str(self.parquet_path))))
+
+    def test_native_plan_and_rescan(self):
+        plan=self.execute("EXPLAIN SELECT sum(c.id) FROM read_csv(%s) c JOIN "
+                          "(SELECT 1 AS k UNION ALL SELECT 2) x ON c.id=x.k",(str(self.csv_path),))
+        self.assertTrue(plan)
+        self.assertEqual(((3,),),self.execute("SELECT sum(c.id) FROM read_csv(%s) c JOIN "
+                                              "(SELECT 1 AS k UNION ALL SELECT 2) x ON c.id=x.k",(str(self.csv_path),)))
+
+    def test_glob_only_returns_files(self):
+        folder=self.root/"glob-data"
+        folder.mkdir(exist_ok=True)
+        (folder/"a.csv").write_text("x\n1\n")
+        (folder/"b.txt").write_text("text")
+        (folder/"subdir").mkdir(exist_ok=True)
+        rows=self.execute("SELECT file FROM glob(%s) ORDER BY file",(str(folder/"*"),))
+        self.assertEqual(((str(folder/"a.csv"),),(str(folder/"b.txt"),)),rows)
+
+    def test_copy_roundtrip_and_existing_target(self):
+        target=self.root/"export.csv"
+        target.unlink(missing_ok=True)
+        self.execute("COPY (SELECT id,name,note FROM read_csv(%s) ORDER BY id) TO %s "
+                     "(FORMAT CSV,HEADER,NULLSTR 'NULL')",(str(self.csv_path),str(target)))
+        self.assertEqual(((1,"Alice","hello,\nworld"),(2,"世界","plain"),(3,"Chen",'say "hi"')),
+                         self.execute("SELECT * FROM read_csv(%s,nullstr='NULL') ORDER BY id",(str(target),)))
+        original=target.read_bytes()
+        with self.assertRaises(pymysql.MySQLError):
+            self.execute("COPY (SELECT 1) TO %s (FORMAT CSV)",(str(target),))
+        self.assertEqual(original,target.read_bytes())
+
+    def test_outside_and_symlink_paths_are_rejected(self):
+        with tempfile.TemporaryDirectory(prefix="seekdb-file-outside-") as outside:
+            path=Path(outside)/"secret.csv"
+            path.write_text("x\n1\n")
+            link=self.root/"escape.csv"
+            link.unlink(missing_ok=True)
+            link.symlink_to(path)
+            for candidate in (str(path),str(link)):
+                with self.subTest(candidate=candidate):
+                    with self.assertRaises(pymysql.MySQLError):
+                        self.execute("SELECT * FROM read_csv(%s)",(candidate,))
+            with self.assertRaises(pymysql.MySQLError):
+                self.execute("COPY (SELECT 1) TO %s (FORMAT CSV)",(str(Path(outside)/"output.csv"),))
+
+    def test_secure_path_disabled_still_blocks(self):
+        self.execute("SET GLOBAL secure_file_priv=NULL")
+        with self.assertRaises(pymysql.MySQLError):
+            self.execute("SELECT * FROM read_csv(%s)",(str(self.csv_path),))
+
+    def test_bad_csv_and_unsupported_sampling(self):
+        for content in ('a,b\n1\n','a,b\n1,2,3\n','a,b\n"unterminated,2\n'):
+            with self.subTest(content=content):
+                path=self.write("bad.csv",content)
+                with self.assertRaises(pymysql.MySQLError):
+                    self.execute("SELECT * FROM read_csv(%s)",(path,))
+                self.assertEqual(((1,),),self.execute("SELECT 1"))
+        with self.assertRaises(pymysql.MySQLError):
+            self.execute("SELECT * FROM read_csv(%s,sample_size=10)",(str(self.csv_path),))
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)
