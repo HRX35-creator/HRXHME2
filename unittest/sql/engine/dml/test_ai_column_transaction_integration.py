@@ -82,6 +82,46 @@ class AIColumnTransactionIntegrationTest(AISQLMockTestCase):
             self.execute(f"UPDATE `{table}` SET result='forged' WHERE id=1")
         self.assertTrue(self.server.requests.empty())
 
+    def test_partial_supersession_keeps_the_other_columns_original_task(self):
+        table = self.create("partial", two=True)
+        self.execute(f"INSERT INTO `{table}`(id,title,content) VALUES(1,'title','content')")
+        initial = self.tasks(table)
+        self.assertEqual(2, len(initial))
+        original_request = initial[0][1]
+        self.assertEqual(original_request, initial[1][1])
+        self.execute(f"UPDATE `{table}` SET content='new content' WHERE id=1")
+        partial = self.tasks(table)
+        self.assertEqual(2, len(partial))
+        self.assertEqual(2, len({row[1] for row in partial}))
+        self.assertEqual(1, sum(row[1] == original_request for row in partial))
+        self.execute(f"UPDATE `{table}` SET title='new title',content='newest content' WHERE id=1")
+        together = self.tasks(table)
+        self.assertEqual(2, len(together))
+        self.assertEqual(1, len({row[1] for row in together}))
+        self.assertNotEqual(original_request, together[0][1])
+        self.execute(f"DELETE FROM `{table}`")
+        self.assertEqual((), self.tasks(table))
+        self.assertEqual(((0,),), self.execute(
+            "SELECT COUNT(*) FROM oceanbase.__all_ai_column_group g "
+            "JOIN oceanbase.__all_table t ON t.table_id=g.table_id WHERE t.table_name=%s", (table,)))
+        self.assertTrue(self.server.requests.empty())
+
+    def test_null_dependency_comparison_and_rollback_keep_request_identity(self):
+        table = self.create("nullable")
+        self.execute(f"INSERT INTO `{table}`(id,content) VALUES(1,NULL)")
+        initial = self.tasks(table)
+        self.assertEqual(1, len(initial))
+        self.execute(f"UPDATE `{table}` SET content=NULL WHERE id=1")
+        self.assertEqual(initial, self.tasks(table))
+        self.execute("SAVEPOINT before_dependency_change")
+        self.execute(f"UPDATE `{table}` SET content='' WHERE id=1")
+        changed = self.tasks(table)
+        self.assertEqual(1, len(changed))
+        self.assertNotEqual(initial[0][1], changed[0][1])
+        self.execute("ROLLBACK TO SAVEPOINT before_dependency_change")
+        self.assertEqual(initial, self.tasks(table))
+        self.assertTrue(self.server.requests.empty())
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
