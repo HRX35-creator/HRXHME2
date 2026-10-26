@@ -1999,7 +1999,6 @@ int ObDDLResolver::resolve_ai_column_definition(
           static_cast<int>(sizeof("AI column expression") - 1), "AI column expression");
     } else if (source->is_ai_column() || source->is_generated_column()) {
       ret = OB_NOT_SUPPORTED;
-      LOG_USER_ERROR(OB_NOT_SUPPORTED, "AI column dependencies on derived columns");
     } else if (OB_FAIL(ObRawExprUtils::init_column_expr(*source, session_info_, *name.ref_expr_))) {
     } else if (OB_FAIL(dependencies.push_back(source->get_column_id()))) {
     }
