@@ -42,6 +42,36 @@ class AICompleteIntegrationTest(AISQLMockTestCase):
         self.assertNotIn(error.exception.args[0], (2003, 2006, 2013))
         self.assertEqual(((1,),), self.execute("SELECT 1"))
 
+    def test_system_prompt_preserves_user_content_and_provider_options(self):
+        instruction = 'Return JSON only. 世界\n"quoted"'
+        config = json.dumps({"system_prompt": instruction, "max_tokens": 13})
+        self.assertEqual("accepted", self.complete("unchanged input", config, True))
+        request = self.server.requests.get_nowait()
+        self.assertEqual([{"role": "system", "content": instruction},
+                          {"role": "user", "content": "unchanged input"}], request["messages"])
+        self.assertEqual(13, request["max_tokens"])
+        self.assertNotIn("system_prompt", request)
+
+    def test_system_prompt_configuration_is_not_consumed_across_rows(self):
+        rows = self.execute("SELECT ai_complete(%s,'unchanged',"
+                            "JSON_OBJECT('system_prompt','Return JSON only.','max_tokens',9)) "
+                            "FROM (SELECT 1 UNION ALL SELECT 2) AS inputs", (self.model,))
+        self.assertEqual((("accepted",), ("accepted",)), rows)
+        for _ in range(2):
+            request = self.server.requests.get_nowait()
+            self.assertEqual("Return JSON only.", request["messages"][0]["content"])
+            self.assertEqual("unchanged", request["messages"][1]["content"])
+            self.assertEqual(9, request["max_tokens"])
+            self.assertNotIn("system_prompt", request)
+
+    def test_invalid_system_prompt_fails_before_http(self):
+        for value in (None, True, 1, [], {}):
+            with self.subTest(value=value):
+                with self.assertRaises(pymysql.MySQLError):
+                    self.complete(config=json.dumps({"system_prompt": value}), explicit_config=True)
+                self.assertTrue(self.server.requests.empty())
+        self.assertEqual(((1,),), self.execute("SELECT 1"))
+
     def test_plain_prompt_request(self):
         self.assertEqual("accepted", self.complete())
         self.assertEqual({"model": "local-mock", "messages": [{"role": "user", "content": "hello"}]},

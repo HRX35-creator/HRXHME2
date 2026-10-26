@@ -2090,23 +2090,12 @@ int ObDDLResolver::resolve_ai_column_definition(
     const char *hint = nullptr;
     const ObObjType type = result_column.get_data_type();
     if (ob_is_json(type)) { hint = "\nReturn exactly one valid JSON value. Do not add markdown or commentary."; }
-    else if (ob_is_integer_type(type)) { hint = "\nReturn exactly one integer as plain decimal digits, with no commentary."; }
+    else if (ob_is_integer_type(type)) { hint = "\nReturn exactly one base-10 integer as plain decimal digits, with no commentary."; }
     else if (ob_is_numeric_type(type) || ob_is_decimal_int(type)) { hint = "\nReturn exactly one finite decimal number, with no commentary."; }
     else if (ob_is_datetime_tc(type) || ob_is_date_tc(type) || (type == ObTimestampType || ob_is_otimestampe_tc(type))) { hint = "\nReturn exactly one valid SQL date or timestamp in ISO 8601 format, with no commentary."; }
     else if (ob_is_string_type(type) || ob_is_text_tc(type)) { hint = "\nReturn only the requested text value, with no markdown or commentary."; }
     else { ret = OB_NOT_SUPPORTED; LOG_USER_ERROR(OB_NOT_SUPPORTED, "AI_COMPLETE result column type"); }
-    ObSysFunRawExpr *concat = nullptr;
-    ObConstRawExpr *prompt = nullptr;
-    if (OB_FAIL(ret)) {
-    } else if (OB_FAIL(params_.expr_factory_->create_raw_expr(T_OP_CNN, concat))) {
-    } else if (OB_FAIL(ObRawExprUtils::build_const_string_expr(*params_.expr_factory_, ObVarcharType,
-        ObString::make_string(hint), CS_TYPE_UTF8MB4_BIN, prompt))) {
-    } else if (OB_FAIL(concat->add_param_expr(function->get_param_expr(1)))) {
-    } else if (OB_FAIL(concat->add_param_expr(prompt))) {
-    } else {
-      concat->set_func_name(ObString::make_string("concat"));
-      function->get_param_expr(1) = concat;
-    }
+    if (OB_SUCC(ret)) { ret = definition.set_system_prompt(ObString::make_string(hint)); }
   }
   // Print resolved SQL, so identifiers, literals and session escape modes are
   // normalized once at DDL time instead of reconstructed by the worker.
@@ -2125,6 +2114,32 @@ int ObDDLResolver::resolve_ai_column_definition(
   if (OB_FAIL(ret)) {
   } else if (OB_FAIL(print_expr_to_default_value(*expression, printed, schema_checker_, session_info_->get_timezone_info()))) {
   } else if (OB_FAIL(definition.set_normalized_expr(printed.get_cur_default_value().get_string()))) {
+  }
+  if (OB_SUCC(ret) && !definition.embedding_) {
+    ObSqlString normalized;
+    auto append_literal = [&normalized](const ObString &value) {
+      int code = normalized.append("CONVERT(X'");
+      for (int64_t i = 0; code == OB_SUCCESS && i < value.length(); ++i) {
+        code = normalized.append_fmt("%02x", static_cast<unsigned char>(value.ptr()[i]));
+      }
+      if (code == OB_SUCCESS) { code = normalized.append("' USING utf8mb4)"); }
+      return code;
+    };
+    if (OB_FAIL(normalized.append("AI_COMPLETE("))) {
+    } else if (OB_FAIL(append_literal(definition.get_model_name()))) {
+    } else if (OB_FAIL(normalized.append_fmt(",(%.*s),JSON_MERGE_PATCH(COALESCE((%.*s),JSON_OBJECT()),JSON_OBJECT('system_prompt',",
+        definition.get_input_expr().length(), definition.get_input_expr().ptr(),
+        definition.get_config_expr().empty() ? static_cast<int>(sizeof("JSON_OBJECT()") - 1) : definition.get_config_expr().length(),
+        definition.get_config_expr().empty() ? "JSON_OBJECT()" : definition.get_config_expr().ptr()))) {
+    // These fixed type instructions contain no SQL quotes or backslashes.
+    // Keep them readable in SHOW and the persisted normalized expression.
+    } else if (OB_FAIL(normalized.append_fmt("'%.*s'", definition.get_system_prompt().length(),
+        definition.get_system_prompt().ptr()))) {
+    } else if (OB_FAIL(normalized.append(")))"))) {
+    } else if (OB_FAIL(definition.set_normalized_expr(normalized.string()))) {
+    }
+  }
+  if (OB_FAIL(ret)) {
   } else if (OB_FAIL(definition.set_original_expr(ObString(expression_node->str_len_, expression_node->str_value_)))) {
   } else if (OB_FAIL(definition.set_column_name(result_column.get_column_name_str()))) {
   } else if (OB_FAIL(definition.set_dependencies(dependencies))) {

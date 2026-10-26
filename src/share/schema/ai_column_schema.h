@@ -39,6 +39,8 @@ public:
   int set_original_expr(const common::ObString &value) { return deep_copy_str(value, original_expr_); }
   int set_normalized_expr(const common::ObString &value) { return deep_copy_str(value, normalized_expr_); }
   int set_input_expr(const common::ObString &value) { return deep_copy_str(value, input_expr_); }
+  int set_system_prompt(const common::ObString &value) { return deep_copy_str(value, system_prompt_); }
+  const common::ObString &get_system_prompt() const { return system_prompt_; }
   int set_config_expr(const common::ObString &value) { return deep_copy_str(value, config_expr_); }
   const common::ObString &get_column_name() const { return column_name_; }
   const common::ObString &get_model_name() const { return model_name_; }
@@ -62,6 +64,7 @@ private:
   common::ObString normalized_expr_;
   common::ObString input_expr_;
   common::ObString config_expr_;
+  common::ObString system_prompt_;
   int64_t dependency_count_;
   uint64_t *dependencies_;
 };

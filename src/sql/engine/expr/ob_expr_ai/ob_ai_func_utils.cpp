@@ -1359,7 +1359,7 @@ int ObAIFuncUtils::get_ai_func_info(ObIAllocator &allocator, const ObString &mod
   return ret;
 }
 
-int ObAIFuncModel::call_completion(ObString &prompt, ObJsonObject *config, ObString &result)
+int ObAIFuncModel::call_completion(ObString &prompt, ObJsonObject *config, ObString &result, int64_t max_retry_times)
 {
   int ret = OB_SUCCESS;
   ObArray<ObString> headers;
@@ -1368,17 +1368,33 @@ int ObAIFuncModel::call_completion(ObString &prompt, ObJsonObject *config, ObStr
   ObIJsonBase *result_base = nullptr;
   ObAIFuncIComplete *complete_provider = nullptr;
   ObString prompt_str;
+  ObJsonObject *provider_config = config;
+  if (config != nullptr && config->get_value("system_prompt") != nullptr) {
+    ObJsonNode *system = config->get_value("system_prompt");
+    if (system->json_type() != ObJsonNodeType::J_STRING) { ret = OB_INVALID_ARGUMENT; }
+    else {
+      prompt_str = static_cast<ObJsonString *>(system)->get_str();
+      ret = ObAIFuncJsonUtils::get_json_object(*allocator_, provider_config);
+    }
+    for (int64_t i = 0; OB_SUCC(ret) && i < config->element_count(); ++i) {
+      ObString key;
+      if (OB_FAIL(config->get_key(i, key))) {
+      } else if (key != "system_prompt") { ret = provider_config->add(key, config->get_value(i)); }
+    }
+  }
   ObString result_str;
   ObAIFuncClient client;
+  if (max_retry_times >= 0) { client.set_max_retry_times(max_retry_times); }
   ObString unencrypted_access_key;
   ObString request_model_name = get_request_model_name();
-  if (!is_completion_type()) {
+  if (OB_FAIL(ret)) {
+  } else if (!is_completion_type()) {
     ret = OB_INVALID_ARGUMENT;
     LOG_USER_ERROR(OB_INVALID_ARGUMENT, "ai_complete, info type is not completion");
   } else if (OB_FAIL(ObAIFuncUtils::get_complete_provider(*allocator_, endpoint_info_.get_provider(), complete_provider))) {
   } else if (OB_FAIL(endpoint_info_.get_unencrypted_access_key(*allocator_, unencrypted_access_key))) {
   } else if (OB_FAIL(complete_provider->get_header(*allocator_, unencrypted_access_key, headers))) {
-  } else if (OB_FAIL(complete_provider->get_body(*allocator_, request_model_name, prompt_str, prompt, config, body))) {
+  } else if (OB_FAIL(complete_provider->get_body(*allocator_, request_model_name, prompt_str, prompt, provider_config, body))) {
   } else if (OB_FAIL(client.send_post(*allocator_, endpoint_info_.get_url(), headers, body, response))) {
   } else if (OB_FAIL(complete_provider->parse_output(*allocator_, response, result_base))) {
   } else if (OB_ISNULL(result_base) || result_base->json_type() != ObJsonNodeType::J_STRING

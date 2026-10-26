@@ -16,7 +16,7 @@ void AIColumnSchema::reset()
   definition_version_ = 0; owner_user_id_ = OB_INVALID_ID;
   max_retries_ = 2; embedding_ = false; vector_dimension_ = 0;
   column_name_.reset(); model_name_.reset(); original_expr_.reset(); normalized_expr_.reset();
-  input_expr_.reset(); config_expr_.reset(); dependency_count_ = 0; dependencies_ = nullptr;
+  input_expr_.reset(); config_expr_.reset(); system_prompt_.reset(); dependency_count_ = 0; dependencies_ = nullptr;
   ObSchema::reset();
 }
 
@@ -81,6 +81,7 @@ int AIColumnSchema::assign(const AIColumnSchema &other)
     } else if (OB_FAIL(set_normalized_expr(other.normalized_expr_))) {
     } else if (OB_FAIL(set_input_expr(other.input_expr_))) {
     } else if (OB_FAIL(set_config_expr(other.config_expr_))) {
+    } else if (OB_FAIL(set_system_prompt(other.system_prompt_))) {
     } else if (OB_FAIL(set_dependencies(dependencies))) {
     }
     error_ret_ = ret;
@@ -91,7 +92,7 @@ int AIColumnSchema::assign(const AIColumnSchema &other)
 int64_t AIColumnSchema::get_convert_size() const
 {
   return sizeof(*this) + column_name_.length() + model_name_.length() + original_expr_.length()
-      + normalized_expr_.length() + input_expr_.length() + config_expr_.length() + 6
+      + normalized_expr_.length() + input_expr_.length() + config_expr_.length() + system_prompt_.length() + 7
       + dependency_count_ * sizeof(uint64_t);
 }
 
@@ -100,7 +101,7 @@ OB_DEF_SERIALIZE(AIColumnSchema)
   int ret = OB_SUCCESS;
   LST_DO_CODE(OB_UNIS_ENCODE, column_id_, state_column_id_, request_column_id_, result_spec_column_id_,
       definition_version_, owner_user_id_, max_retries_, embedding_, vector_dimension_, column_name_,
-      model_name_, original_expr_, normalized_expr_, input_expr_, config_expr_, dependency_count_);
+      model_name_, original_expr_, normalized_expr_, input_expr_, config_expr_, system_prompt_, dependency_count_);
   for (int64_t i = 0; OB_SUCC(ret) && i < dependency_count_; ++i) { OB_UNIS_ENCODE(dependencies_[i]); }
   return ret;
 }
@@ -109,11 +110,11 @@ OB_DEF_DESERIALIZE(AIColumnSchema)
 {
   int ret = OB_SUCCESS;
   reset();
-  ObString name, model, original, normalized, input, config;
+  ObString name, model, original, normalized, input, config, system_prompt;
   int64_t count = 0;
   LST_DO_CODE(OB_UNIS_DECODE, column_id_, state_column_id_, request_column_id_, result_spec_column_id_,
       definition_version_, owner_user_id_, max_retries_, embedding_, vector_dimension_, name,
-      model, original, normalized, input, config, count);
+      model, original, normalized, input, config, system_prompt, count);
   ObSEArray<uint64_t, 4> ids;
   if (OB_SUCC(ret) && (count < 0 || count > 4096)) { ret = OB_DESERIALIZE_ERROR; }
   for (int64_t i = 0; OB_SUCC(ret) && i < count; ++i) {
@@ -128,6 +129,7 @@ OB_DEF_DESERIALIZE(AIColumnSchema)
   } else if (OB_FAIL(set_normalized_expr(normalized))) {
   } else if (OB_FAIL(set_input_expr(input))) {
   } else if (OB_FAIL(set_config_expr(config))) {
+  } else if (OB_FAIL(set_system_prompt(system_prompt))) {
   } else if (OB_FAIL(set_dependencies(ids))) {
   }
   error_ret_ = ret;
@@ -139,7 +141,7 @@ OB_DEF_SERIALIZE_SIZE(AIColumnSchema)
   int64_t len = 0;
   LST_DO_CODE(OB_UNIS_ADD_LEN, column_id_, state_column_id_, request_column_id_, result_spec_column_id_,
       definition_version_, owner_user_id_, max_retries_, embedding_, vector_dimension_, column_name_,
-      model_name_, original_expr_, normalized_expr_, input_expr_, config_expr_, dependency_count_);
+      model_name_, original_expr_, normalized_expr_, input_expr_, config_expr_, system_prompt_, dependency_count_);
   for (int64_t i = 0; i < dependency_count_; ++i) { OB_UNIS_ADD_LEN(dependencies_[i]); }
   return len;
 }
