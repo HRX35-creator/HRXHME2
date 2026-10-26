@@ -6146,7 +6146,8 @@ opt_ai_column_options:
 /* EMPTY */ { $$ = NULL; }
 | WITH '(' expr_list ')'
 {
-  merge_nodes($$, result, T_AI_COLUMN_OPTIONS, $3);
+  $$ = $3;
+  $$->type_ = T_AI_COLUMN_OPTIONS;
 }
 ;
 
