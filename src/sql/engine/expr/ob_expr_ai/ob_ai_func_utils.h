@@ -382,6 +382,8 @@ public:
   static constexpr char prompt_template_key[20] = "template";
   static constexpr char prompt_args_key[20] = "args";
 private:
+  static int render_prompt(ObIAllocator &allocator, ObJsonObject *prompt_object,
+                           ObString &result, uint32_t depth);
   DISALLOW_COPY_AND_ASSIGN(ObAIFuncPromptObjectUtils);
 };
 
