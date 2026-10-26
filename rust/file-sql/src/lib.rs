@@ -323,6 +323,9 @@ impl ParquetReader {
     }
     fn convert(&self, column: u32, field: &Field) -> ParquetResult<ffi::Value> {
         let mut value = ffi::Value { column, kind: self.columns[column as usize].kind, integer: 0, real: 0.0, text: String::new() };
+        if value.kind == ffi::Kind::Null && !matches!(field, Field::Null) {
+            return Err(invalid("non-NULL Parquet value in a NULL-typed column"));
+        }
         match field {
             Field::Null => value.kind = ffi::Kind::Null,
             Field::Bool(n) => value.integer = i64::from(*n),
@@ -465,5 +468,22 @@ mod tests {
         std::fs::write(&path, bad).unwrap();
         assert_eq!(-1, open_parquet(File::open(&path).unwrap().into_raw_fd()).status());
         std::fs::remove_file(path).unwrap();
+    }
+    #[test]
+    fn nonnull_payload_in_a_null_column_is_rejected() {
+        use parquet::data_type::Int32Type;
+        let (path, _) = fixture();
+        let column = Type::primitive_type_builder("v", Physical::INT32)
+            .with_repetition(Repetition::OPTIONAL).with_logical_type(Some(LogicalType::Unknown)).build().unwrap();
+        let schema = Arc::new(Type::group_type_builder("s").with_fields(vec![Arc::new(column)]).build().unwrap());
+        let mut writer = SerializedFileWriter::new(File::create(&path).unwrap(), schema, Arc::new(WriterProperties::default())).unwrap();
+        let mut group = writer.next_row_group().unwrap();
+        let mut column = group.next_column().unwrap().unwrap();
+        column.typed::<Int32Type>().write_batch(&[7], Some(&[1]), None).unwrap();
+        column.close().unwrap(); group.close().unwrap(); writer.close().unwrap();
+        let mut reader = open_parquet(File::open(&path).unwrap().into_raw_fd());
+        std::fs::remove_file(path).unwrap();
+        assert_eq!(0, reader.status(), "{}", reader.error());
+        assert_eq!(-1, reader.next());
     }
 }

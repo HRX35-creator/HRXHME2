@@ -185,7 +185,7 @@ int FileSqlWriter::write_field(const ObString &value, bool is_null)
         start = i;
       }
     }
-    if (OB_SUCC(ret)) { ret = append(value.ptr() + start, value.length() - start); }
+    if (OB_SUCC(ret) && start < value.length()) { ret = append(value.ptr() + start, value.length() - start); }
     if (OB_SUCC(ret) && quote) { ret = append(&options_.quote_, 1); }
   }
   return ret;
