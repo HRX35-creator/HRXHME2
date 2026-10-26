@@ -91,7 +91,7 @@ int ObSelectIntoOp::open_file_copy()
   int ret = OB_SUCCESS;
   FileSqlOptions options;
   ObString secure_root;
-  ObObj path;
+  ObObj path = MY_SPEC.outfile_name_;
   bool enabled = false, need_check = false;
   if (OB_FAIL(ctx_.get_my_session()->get_sys_variable(share::SYS_VAR_ENABLE_FILE_SQL, enabled))) {
   } else if (!enabled) { ret = OB_NOT_SUPPORTED; }

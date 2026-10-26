@@ -4023,21 +4023,29 @@ int ObDMLResolver::resolve_file_table_expr(const ParseNode &node, ObRawExpr *&ex
   FileSqlReader reader;
   ObConstRawExpr *constant = nullptr;
   ObSysFunRawExpr *scan = nullptr;
+  const char *phase = "File SQL argument binding";
   if (OB_FAIL(ret)) {
+  } else if (FALSE_IT(phase = "File SQL secure_file_priv lookup")) {
   } else if (OB_FAIL(share::schema::ObSchemaUtils::get_runtime_varchar_variable(
           *GCTX.schema_service_, share::SYS_VAR_SECURE_FILE_PRIV, *allocator_, secure_root))) {
+  } else if (FALSE_IT(phase = "File SQL input open")) {
   } else if (OB_FAIL(reader.open(options, secure_root))) {
+  } else if (FALSE_IT(phase = "File SQL schema inference")) {
   } else if (OB_FAIL(reader.infer_schema())) {
+  } else if (FALSE_IT(phase = "File SQL schema serialization")) {
   } else if (OB_FAIL(reader.make_descriptor(*allocator_, descriptor))) {
+  } else if (FALSE_IT(phase = "File SQL descriptor constant construction")) {
   } else if (OB_FAIL(ObRawExprUtils::build_const_string_expr(*params_.expr_factory_, ObVarcharType,
           descriptor, CS_TYPE_UTF8MB4_BIN, constant))) {
+  } else if (FALSE_IT(phase = "File SQL scan expression construction")) {
   } else if (OB_FAIL(params_.expr_factory_->create_raw_expr(T_FUN_SYS_FILE_SCAN, scan))) {
-  } else if (OB_FAIL(scan->add_param_expr(constant))) {
+  } else if (OB_FAIL(scan->set_param_expr(constant))) {
   } else {
     scan->set_func_name(ObString("__file_sql_scan"));
     expression = scan;
     get_stmt()->get_query_ctx()->get_query_hint_for_update().get_global_hint().plan_cache_policy_ = OB_USE_PLAN_CACHE_NONE;
   }
+  if (ret == OB_NOT_INIT) { FORWARD_USER_ERROR_MSG(ret, "%s: object is not initialized", phase); }
   return ret;
 }
 
@@ -4159,6 +4167,9 @@ int ObDMLResolver::resolve_function_table_item(const ParseNode &parse_tree,
     ObSEArray<ColumnItem, 16> col_items;
     CK (OB_NOT_NULL(item));
     OZ (resolve_function_table_column_item(*item, col_items));
+    if (ret == OB_NOT_INIT && function_table_expr->get_expr_type() == T_FUN_SYS_FILE_SCAN) {
+      FORWARD_USER_ERROR(ret, "File SQL column metadata binding: object is not initialized");
+    }
   }
   OX (tbl_item = item);
   return ret;
@@ -7781,7 +7792,10 @@ int ObDMLResolver::resolve_function_table_column_item_sys_func(const TableItem &
           const FileSqlColumn &column = reader.columns().at(i);
           ObObjMeta meta;
           meta.set_type(FileSqlReader::object_type(column.type_));
-          if (column.type_ == FileSqlType::TEXT) { meta.set_collation_type(CS_TYPE_UTF8MB4_BIN); }
+          if (column.type_ == FileSqlType::TEXT) {
+            meta.set_collation_type(CS_TYPE_UTF8MB4_BIN);
+            meta.set_collation_level(CS_LEVEL_IMPLICIT);
+          }
           ObAccuracy accuracy = ObAccuracy::DDL_DEFAULT_ACCURACY[meta.get_type()];
           if (column.type_ == FileSqlType::TEXT) { accuracy.set_length(std::max<int64_t>(1, column.max_length_)); }
           ObString name;

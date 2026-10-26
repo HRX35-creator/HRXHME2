@@ -56,6 +56,8 @@ public:
   static common::ObObjType object_type(FileSqlType type);
   static const char *type_name(FileSqlType type);
   static bool valid_utf8(const common::ObString &value);
+  static int descriptor_column_names(const common::ObString &descriptor, common::ObIAllocator &allocator,
+                                     common::ObIArray<common::ObString> &names);
   static int check_path(const common::ObString &path, const common::ObString &root,
                         common::ObIAllocator &allocator, common::ObString &canonical);
 private:

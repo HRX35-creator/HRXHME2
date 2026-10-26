@@ -233,6 +233,21 @@ class FileSQLIntegrationTest(unittest.TestCase):
                           "JOIN read_csv(%s) b ON a.id=b.id ORDER BY a.id",(path,right))
         self.assertEqual(((0,"zero"),(1,"one"),(2,"two")),rows)
 
+    def test_file_join_with_an_ordinary_table(self):
+        path=self.write("ordinary-join.csv","id,label\n"+"".join(f'{i},label-{i}\n' for i in range(1500)))
+        self.execute("DROP TABLE IF EXISTS file_sql_join_numbers")
+        self.addCleanup(self.execute,"DROP TABLE IF EXISTS file_sql_join_numbers")
+        self.execute("CREATE TABLE file_sql_join_numbers(id BIGINT PRIMARY KEY)")
+        self.execute("INSERT INTO file_sql_join_numbers VALUES "+','.join(f'({i})' for i in range(1500)))
+        self.execute("ANALYZE TABLE file_sql_join_numbers")
+        self.assertEqual(((1500,1124250),),self.execute(
+            "SELECT COUNT(*),SUM(f.id) FROM file_sql_join_numbers t JOIN read_csv(%s) f ON t.id=f.id",(path,)))
+
+    def test_describe_and_explain_ordinary_queries(self):
+        self.assertTrue(self.execute("EXPLAIN SELECT 1"))
+        self.assertTrue(self.execute("DESCRIBE SELECT 1"))
+        self.assertEqual(((1,),),self.execute("SELECT 1"))
+
     def test_file_change_aborts_an_active_scan(self):
         path=Path(self.write("changing.csv","id\n"+"".join(f'{i}\n' for i in range(5000))))
         self.assertEqual(((5000,),),self.execute("SELECT COUNT(*) FROM read_csv(%s)",(str(path),)))

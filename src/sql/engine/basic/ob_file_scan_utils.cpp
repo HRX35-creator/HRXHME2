@@ -656,7 +656,7 @@ int FileSqlReader::next_row(ObIArray<ObObj> &row)
 {
   int ret = OB_SUCCESS;
   row.reuse();
-  if (!schema_ready_) { ret = OB_NOT_INIT; }
+  if (!schema_ready_) { ret = OB_NOT_INIT; FORWARD_USER_ERROR(ret, "File SQL row requested before schema binding"); }
   else if (glob_ != nullptr) {
     ObString path;
     ObObj value;
@@ -913,6 +913,33 @@ int FileSqlReader::make_descriptor(ObIAllocator &allocator, ObString &descriptor
   return ret;
 }
 
+int FileSqlReader::descriptor_column_names(const ObString &descriptor, ObIAllocator &allocator,
+                                          ObIArray<ObString> &names)
+{
+  int ret = OB_SUCCESS;
+  ObArenaAllocator temporary("FileSqlNames");
+  ObIJsonBase *base = nullptr;
+  if (descriptor.length() > 2 * 1024 * 1024) { ret = OB_INVALID_DATA; }
+  else if (OB_FAIL(ObJsonBaseFactory::get_json_base(&temporary, descriptor, ObJsonInType::JSON_TREE, ObJsonInType::JSON_TREE, base))) {
+  } else if (base == nullptr || base->json_type() != ObJsonNodeType::J_OBJECT) { ret = OB_INVALID_DATA; }
+  else {
+    ObJsonNode *columns = static_cast<ObJsonObject *>(base)->get_value("columns");
+    if (columns == nullptr || columns->json_type() != ObJsonNodeType::J_ARRAY || columns->element_count() > MAX_COLUMNS) { ret = OB_INVALID_DATA; }
+    else {
+      for (uint64_t i = 0; OB_SUCC(ret) && i < columns->element_count(); ++i) {
+        ObJsonNode *column = static_cast<ObJsonArray *>(columns)->get_value(i);
+        ObString name, copy;
+        if (column == nullptr || column->json_type() != ObJsonNodeType::J_OBJECT) { ret = OB_INVALID_DATA; }
+        else if (OB_FAIL(file_sql_json_get_string(*static_cast<ObJsonObject *>(column), "name", name))) {
+        } else if (name.empty() || name.length() > 1024) { ret = OB_INVALID_DATA; }
+        else if (OB_FAIL(ob_write_string(allocator, name, copy))) {
+        } else { ret = names.push_back(copy); }
+      }
+    }
+  }
+  return ret;
+}
+
 int FileSqlReader::open_descriptor(const ObString &descriptor, const ObString &secure_root)
 {
   int ret = OB_SUCCESS;
@@ -1004,6 +1031,7 @@ int FileSqlReader::next_row(ObIArray<ObObj> &) { return OB_NOT_SUPPORTED; }
 int FileSqlReader::project(const ObIArray<int64_t> &) { return OB_NOT_SUPPORTED; }
 int FileSqlReader::rescan() { return OB_NOT_SUPPORTED; }
 bool FileSqlReader::valid_utf8(const ObString &) { return false; }
+int FileSqlReader::descriptor_column_names(const ObString &, ObIAllocator &, ObIArray<ObString> &) { return OB_NOT_SUPPORTED; }
 int FileSqlReader::check_path(const ObString &, const ObString &, ObIAllocator &, ObString &) { return OB_NOT_SUPPORTED; }
 ObObjType FileSqlReader::object_type(FileSqlType type) {
   const ObObjType types[] = {ObNullType, ObIntType, ObDoubleType, ObTinyIntType, ObVarcharType, ObDateType, ObDateTimeType};

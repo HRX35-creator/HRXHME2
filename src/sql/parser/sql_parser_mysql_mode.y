@@ -12349,7 +12349,12 @@ explain_or_desc relation_factor opt_desc_column_option
 
 | explain_or_desc explainable_stmt {
   GEN_EXPLAN_STMT($1, $$, 0, 0, $2, NULL, NULL);
-  $$->value_ = $1 == NULL ? 0 : $1->value_;
+  if ($1 != NULL && $1->value_ == 1) {
+    ParseNode *description = NULL;
+    malloc_terminal_node(description, result->malloc_pool_, T_PRETTY);
+    description->value_ = 1;
+    $$->children_[1] = description;
+  }
 }
 | explain_or_desc PRETTY explainable_stmt { GEN_EXPLAN_STMT($1, $$, 0, T_PRETTY, $3, NULL, NULL);}
 | explain_or_desc PRETTY_COLOR explainable_stmt { GEN_EXPLAN_STMT($1, $$, 0, T_PRETTY_COLOR, $3, NULL, NULL);}

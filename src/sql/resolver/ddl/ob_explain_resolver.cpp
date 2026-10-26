@@ -94,8 +94,10 @@ int ObExplainResolver::resolve_file_description(const ObSelectStmt &query)
   }
   ObParser parser(*allocator_, session_info_->get_sql_mode());
   ParseResult result;
+  ObString owned_sql;
   if (OB_FAIL(ret)) {
-  } else if (OB_FAIL(parser.parse(sql.string(), result))) {
+  } else if (OB_FAIL(ob_write_string(*allocator_, sql.string(), owned_sql, true))) {
+  } else if (OB_FAIL(parser.parse(owned_sql, result))) {
   } else if (result.result_tree_ == nullptr || result.result_tree_->num_child_ != 1) { ret = OB_ERR_UNEXPECTED; }
   else {
     ObSelectResolver resolver(params_);
@@ -142,7 +144,8 @@ int ObExplainResolver::resolve(const ParseNode &parse_tree)
         ret = OB_ERR_UNEXPECTED;
         LOG_WARN("failed to generate stmt for child stmt");
       } else {
-        if (parse_tree.value_ == 1 && child_stmt->is_select_stmt()
+        const ParseNode *description = parse_tree.children_[EXPLAIN_DISPLAY_OPTION];
+        if (description != nullptr && description->type_ == T_PRETTY && description->value_ == 1 && child_stmt->is_select_stmt()
             && file_description_has_scan(*static_cast<ObSelectStmt *>(child_stmt))) {
           return resolve_file_description(*static_cast<ObSelectStmt *>(child_stmt));
         }
