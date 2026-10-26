@@ -31,6 +31,9 @@ class AIServiceHandler(BaseHTTPRequestHandler):
             return
         request = json.loads(self.rfile.read(length))
         self.server.requests.put(request)
+        self.server.request_metadata.put({"path": self.path,
+                                          "authorization": self.headers.get("Authorization"),
+                                          "content_type": self.headers.get("Content-Type")})
         try:
             status, response = self.server.responses.get_nowait()
         except queue.Empty:
@@ -49,6 +52,8 @@ class AIServiceHandler(BaseHTTPRequestHandler):
 class AISQLMockTestCase(unittest.TestCase):
     MODEL_TYPE = "dense_embedding"
     PROVIDER = "openai"
+    ACCESS_KEY = "local-mock-key"
+    ENDPOINT_PATH = "/embeddings"
 
     @classmethod
     def setUpClass(cls):
@@ -66,6 +71,7 @@ class AISQLMockTestCase(unittest.TestCase):
         cls.addClassCleanup(cls.connection.close)
         cls.server = ThreadingHTTPServer(("127.0.0.1", 0), AIServiceHandler)
         cls.server.requests = queue.Queue()
+        cls.server.request_metadata = queue.Queue()
         cls.server.responses = queue.Queue()
         cls.server.default_response = cls.default_response
         cls.addClassCleanup(cls.server.server_close)
@@ -80,8 +86,8 @@ class AISQLMockTestCase(unittest.TestCase):
         cls.execute("CALL DBMS_AI_SERVICE.CREATE_AI_MODEL_ENDPOINT(%s, %s)", (
             cls.endpoint, json.dumps({
                 "ai_model_name": cls.model, "scope": "all", "provider": cls.PROVIDER,
-                "url": f"http://127.0.0.1:{cls.server.server_port}/embeddings",
-                "access_key": "local-mock-key",
+                "url": f"http://127.0.0.1:{cls.server.server_port}{cls.ENDPOINT_PATH}",
+                "access_key": cls.ACCESS_KEY,
             }),
         ))
         cls.addClassCleanup(cls.execute, "CALL DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT(%s)", (cls.endpoint,))
@@ -93,7 +99,7 @@ class AISQLMockTestCase(unittest.TestCase):
             return cursor.fetchall() if cursor.description else ()
 
     def setUp(self):
-        for pending in (self.server.requests, self.server.responses):
+        for pending in (self.server.requests, self.server.responses, self.server.request_metadata):
             while not pending.empty():
                 pending.get_nowait()
 
