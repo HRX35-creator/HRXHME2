@@ -2085,6 +2085,7 @@ int ObDDLResolver::resolve_ai_column_definition(
       ObConstRawExpr *dimension = nullptr;
       if (OB_FAIL(ObRawExprUtils::build_const_int_expr(*params_.expr_factory_, ObIntType,
           definition.vector_dimension_, dimension))) {
+      } else if (OB_FAIL(function->extend_param_exprs(3))) {
       } else if (OB_FAIL(function->add_param_expr(dimension))) {
       }
     }
