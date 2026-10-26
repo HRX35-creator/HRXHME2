@@ -17,6 +17,10 @@
 #define USING_LOG_PREFIX SQL_RESV
 #include "sql/resolver/ddl/ob_explain_resolver.h"
 #include "sql/resolver/ob_resolver.h"
+#include "sql/resolver/dml/ob_select_resolver.h"
+#include "sql/parser/ob_parser.h"
+#include "common/json_type/ob_json_tree.h"
+#include "lib/string/ob_string_buffer.h"
 
 using namespace oceanbase;
 using namespace sql;
@@ -26,6 +30,83 @@ const static int64_t EXPLAIN_DISPLAY_OPTION = 1;
 const static int64_t EXPLAIN_INTO_TABLE = 2;
 const static int64_t EXPLAIN_STMT_ID = 3;
 const static int64_t EXPLAIN_CHILD_STMT = 4;
+namespace {
+bool file_description_has_scan(const ObSelectStmt &query, int depth = 0)
+{
+  bool found = false;
+  if (depth < 64) {
+    for (int64_t i = 0; !found && i < query.get_table_size(); ++i) {
+      const TableItem *table = query.get_table_item(i);
+      if (table != nullptr) {
+        found = table->is_function_table() && table->function_table_expr_ != nullptr
+                && table->function_table_expr_->get_expr_type() == T_FUN_SYS_FILE_SCAN;
+        if (!found && table->is_generated_table() && table->ref_query_ != nullptr) {
+          found = file_description_has_scan(*table->ref_query_, depth + 1);
+        }
+      }
+    }
+  }
+  return found;
+}
+}
+
+int ObExplainResolver::resolve_file_description(const ObSelectStmt &query)
+{
+  int ret = OB_SUCCESS;
+  ObJsonArray metadata(allocator_);
+  for (int64_t i = 0; OB_SUCC(ret) && i < query.get_select_item_size(); ++i) {
+    const SelectItem &item = query.get_select_item(i);
+    const ObExprResType &type = item.expr_->get_result_type();
+    const char *type_name = nullptr;
+    switch (type.get_type()) {
+      case ObNullType: type_name = "NULL"; break;
+      case ObTinyIntType: type_name = "BOOLEAN"; break;
+      case ObIntType: type_name = "BIGINT"; break;
+      case ObDoubleType: type_name = "DOUBLE"; break;
+      case ObDateType: type_name = "DATE"; break;
+      case ObDateTimeType: type_name = "DATETIME"; break;
+      case ObVarcharType: type_name = "VARCHAR"; break;
+      default: type_name = ob_obj_type_str(type.get_type()); break;
+    }
+    ObJsonObject *column = OB_NEWx(ObJsonObject, allocator_, allocator_);
+    ObJsonString *name = OB_NEWx(ObJsonString, allocator_, item.alias_name_);
+    ObJsonString *kind = OB_NEWx(ObJsonString, allocator_, ObString(type_name));
+    ObJsonString *nullable = OB_NEWx(ObJsonString, allocator_, ObString(type.is_not_null_for_read() ? "NO" : "YES"));
+    if (column == nullptr || name == nullptr || kind == nullptr || nullable == nullptr) { ret = OB_ALLOCATE_MEMORY_FAILED; }
+    else if (OB_FAIL(column->add("name", name))) {
+    } else if (OB_FAIL(column->add("type", kind))) {
+    } else if (OB_FAIL(column->add("nullable", nullable))) {
+    } else { ret = metadata.append(column); }
+  }
+  ObStringBuffer json(allocator_);
+  ObSqlString sql;
+  if (OB_FAIL(ret)) {
+  } else if (OB_FAIL(metadata.print(json, 0))) {
+  } else if (OB_FAIL(sql.append("SELECT t.`Field`,t.`Type`,t.`Null`,'' AS `Key`,NULL AS `Default`,'' AS `Extra` "
+                "FROM JSON_TABLE(CONVERT(X'"))) {
+  }
+  // Encode the complete metadata document as a hex literal, including names.
+  // SQL modes and punctuation in column names cannot change the generated SQL.
+  for (int64_t i = 0; OB_SUCC(ret) && i < json.length(); ++i) { ret = sql.append_fmt("%02x", static_cast<unsigned char>(json.ptr()[i])); }
+  if (OB_SUCC(ret)) {
+    ret = sql.append("' USING utf8mb4),'$[*]' COLUMNS (`Field` VARCHAR(1024) PATH '$.name',"
+                     "`Type` VARCHAR(64) PATH '$.type',`Null` VARCHAR(3) PATH '$.nullable')) t");
+  }
+  ObParser parser(*allocator_, session_info_->get_sql_mode());
+  ParseResult result;
+  ObString owned_sql;
+  if (OB_FAIL(ret)) {
+  } else if (OB_FAIL(ob_write_string(*allocator_, sql.string(), owned_sql, true))) {
+  } else if (OB_FAIL(parser.parse(owned_sql, result))) {
+  } else if (result.result_tree_ == nullptr || result.result_tree_->num_child_ != 1) { ret = OB_ERR_UNEXPECTED; }
+  else {
+    ObSelectResolver resolver(params_);
+    if (OB_FAIL(resolver.resolve(*result.result_tree_->children_[0]))) {
+    } else { stmt_ = resolver.get_stmt(); }
+  }
+  return ret;
+}
+
 int ObExplainResolver::resolve(const ParseNode &parse_tree)
 {
   int ret = OB_SUCCESS;
@@ -63,6 +144,11 @@ int ObExplainResolver::resolve(const ParseNode &parse_tree)
         ret = OB_ERR_UNEXPECTED;
         LOG_WARN("failed to generate stmt for child stmt");
       } else {
+        const ParseNode *description = parse_tree.children_[EXPLAIN_DISPLAY_OPTION];
+        if (description != nullptr && description->type_ == T_PRETTY && description->value_ == 1 && child_stmt->is_select_stmt()
+            && file_description_has_scan(*static_cast<ObSelectStmt *>(child_stmt))) {
+          return resolve_file_description(*static_cast<ObSelectStmt *>(child_stmt));
+        }
         explain_stmt->set_explain_query_stmt(static_cast<ObDMLStmt *>(child_stmt));
         ParseNode *format = parse_tree.children_[EXPLAIN_FORMAT];
         if (NULL != format) {

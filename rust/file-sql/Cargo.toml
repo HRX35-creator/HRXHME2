@@ -1,0 +1,16 @@
+[package]
+name = "file-sql"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+
+[lib]
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+cxx = "1"
+bytes = "1"
+parquet = { version = "=60.0.0", default-features = false, features = ["snap", "flate2-zlib-rs", "lz4", "zstd", "brotli"] }
+
+[build-dependencies]
+cxx-build = "1"
