@@ -24,6 +24,8 @@ import json
 import os
 from pathlib import Path
 import tempfile
+import threading
+import time
 import unittest
 
 import pyarrow as pa
@@ -42,6 +44,7 @@ class FileSQLIntegrationTest(unittest.TestCase):
                    "charset": "utf8mb4", "autocommit": True, "read_timeout": 60}
         if os.environ.get("SEEKDB_TEST_SOCKET"):
             options["unix_socket"] = os.environ["SEEKDB_TEST_SOCKET"]
+        cls.connection_options = options
         cls.connection = pymysql.connect(**options)
         cls.addClassCleanup(cls.connection.close)
         cls.directory = tempfile.TemporaryDirectory(prefix="seekdb-file-sql-")
@@ -218,6 +221,81 @@ class FileSQLIntegrationTest(unittest.TestCase):
                 self.assertEqual(((1,),),self.execute("SELECT 1"))
         with self.assertRaises(pymysql.MySQLError):
             self.execute("SELECT * FROM read_csv(%s,sample_size=10)",(str(self.csv_path),))
+
+    def test_many_rows_cross_batch_boundaries_and_nested_loop_rescan(self):
+        path=self.write("many.csv","id,name\n"+"".join(f'{i},row-{i:05d}-世界\n' for i in range(2305)))
+        self.assertEqual(((2305,2655360,0,2304),),self.execute(
+            "SELECT COUNT(*),SUM(id),MIN(id),MAX(id) FROM read_csv(%s)",(path,)))
+        rows=self.execute("SELECT id,name FROM read_csv(%s) ORDER BY id DESC LIMIT 3",(path,))
+        self.assertEqual(tuple((i,f'row-{i:05d}-世界') for i in (2304,2303,2302)),rows)
+        right=self.write("right.csv","id,label\n0,zero\n1,one\n2,two\n")
+        rows=self.execute("SELECT /*+ USE_NL(b) */ a.id,b.label FROM read_csv(%s) a "
+                          "JOIN read_csv(%s) b ON a.id=b.id ORDER BY a.id",(path,right))
+        self.assertEqual(((0,"zero"),(1,"one"),(2,"two")),rows)
+
+    def test_file_change_aborts_an_active_scan(self):
+        path=Path(self.write("changing.csv","id\n"+"".join(f'{i}\n' for i in range(5000))))
+        self.assertEqual(((5000,),),self.execute("SELECT COUNT(*) FROM read_csv(%s)",(str(path),)))
+        ready=threading.Event()
+        result=[]
+        def query():
+            try:
+                with pymysql.connect(**self.connection_options) as connection:
+                    with connection.cursor() as cursor:
+                        cursor.execute("SET SESSION enable_file_sql=ON")
+                        ready.set()
+                        cursor.execute("SELECT SLEEP(0.001),id FROM read_csv(%s)",(str(path),))
+                        result.append(cursor.fetchall())
+            except pymysql.MySQLError as error:
+                result.append(error)
+        worker=threading.Thread(target=query)
+        worker.start()
+        self.assertTrue(ready.wait(5))
+        time.sleep(0.15)
+        with path.open("a") as output: output.write("5000\n")
+        worker.join(10)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(1,len(result))
+        self.assertIsInstance(result[0],pymysql.MySQLError)
+        self.assertEqual(((1,),),self.execute("SELECT 1"))
+
+    def test_copy_table_options_and_null_text_are_reversible(self):
+        self.execute("DROP TABLE IF EXISTS file_copy_values")
+        self.addCleanup(self.execute,"DROP TABLE IF EXISTS file_copy_values")
+        self.execute("CREATE TABLE file_copy_values(id BIGINT, v VARCHAR(100))")
+        self.execute("INSERT INTO file_copy_values VALUES(1,NULL),(2,''),(3,'NULL'),(4,%s),(5,%s)",
+                     ("a;b'c",'line\nnext'))
+        target=self.root/"options-export.csv"
+        target.unlink(missing_ok=True)
+        self.execute("COPY file_copy_values TO %s (FORMAT CSV,HEADER TRUE,DELIMITER ';',QUOTE %s,ESCAPE %s,NULLSTR 'NULL')",
+                     (str(target),"'","\\"))
+        self.assertEqual(((1,None),(2,''),(3,'NULL'),(4,"a;b'c"),(5,'line\nnext')),
+            self.execute("SELECT * FROM read_csv(%s,delimiter=';',quote=%s,escape=%s,nullstr='NULL') ORDER BY id",
+                         (str(target),"'","\\")))
+
+    def test_copy_query_failure_cleans_up_unpublished_output(self):
+        target=self.root/"failed-export.csv"
+        target.unlink(missing_ok=True)
+        before=set(self.root.glob('.seekdb-copy-*.tmp'))
+        with self.assertRaises(pymysql.MySQLError):
+            self.execute("COPY (SELECT id,CAST(JSON_EXTRACT(CASE WHEN id=3 THEN 'invalid' ELSE '{\"v\":1}' END,'$.v') AS CHAR) AS v "
+                         "FROM read_csv(%s) ORDER BY id) TO %s (FORMAT CSV,HEADER)",(str(self.csv_path),str(target)))
+        self.assertFalse(target.exists())
+        self.assertEqual(before,set(self.root.glob('.seekdb-copy-*.tmp')))
+
+    def test_nonregular_inputs_and_invalid_utf8_are_rejected(self):
+        fifo=self.root/'input.fifo'
+        if not fifo.exists(): os.mkfifo(fifo)
+        with self.assertRaises(pymysql.MySQLError):
+            self.execute("SELECT * FROM read_csv(%s)",(str(fifo),))
+        invalid=self.root/'invalid-utf8.csv'
+        invalid.write_bytes(b'v\n\xff\n')
+        with self.assertRaises(pymysql.MySQLError):
+            self.execute("SELECT * FROM read_csv(%s)",(str(invalid),))
+        for content in ('{"v":['+'0,'*10000+'0]}\n','{"v":{"nested":1}}\n'):
+            path=self.write('nested-large.jsonl',content)
+            with self.assertRaises(pymysql.MySQLError):
+                self.execute("SELECT * FROM read_json(%s)",(path,))
 
 
 if __name__ == "__main__":

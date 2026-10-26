@@ -3925,6 +3925,29 @@ int ObDMLResolver::resolve_json_table_item(const ParseNode &parse_tree, TableIte
   return ret;
 }
 
+int ObDMLResolver::resolve_file_constant(const ParseNode &node, ObObj &value)
+{
+  int ret = OB_SUCCESS;
+  if (node.type_ == T_QUESTIONMARK) {
+    if (params_.param_list_ == nullptr || node.value_ < 0 || node.value_ >= params_.param_list_->count()) { ret = OB_INVALID_ARGUMENT; }
+    else { value = params_.param_list_->at(node.value_); }
+  } else if (node.type_ == T_VARCHAR || node.type_ == T_CHAR || node.type_ == T_HEX_STRING) {
+    value.set_varchar(ObString(node.str_len_, node.str_value_));
+    value.set_collation_type(CS_TYPE_UTF8MB4_BIN);
+  } else if (node.type_ == T_INT || node.type_ == T_BOOL) { value.set_int(node.value_); }
+  else {
+    ObRawExpr *raw = nullptr;
+    bool valid = false;
+    if (OB_FAIL(resolve_sql_expr(node, raw))) {
+    } else if (OB_FAIL(ObSQLUtils::calc_const_or_calculable_expr(session_info_->get_cur_exec_ctx(), raw,
+                     value, valid, *allocator_, false))) {
+    } else if (!valid) { ret = OB_INVALID_ARGUMENT; }
+  }
+  if (OB_SUCC(ret) && value.is_null()) { ret = OB_INVALID_ARGUMENT; }
+  if (ret == OB_INVALID_ARGUMENT) { FORWARD_USER_ERROR(ret, "File SQL arguments must be non-NULL constants"); }
+  return ret;
+}
+
 int ObDMLResolver::resolve_file_table_expr(const ParseNode &node, ObRawExpr *&expression)
 {
   int ret = OB_SUCCESS;
@@ -3956,6 +3979,7 @@ int ObDMLResolver::resolve_file_table_expr(const ParseNode &node, ObRawExpr *&ex
         else {
           ParseNode *identifier = argument->children_[0]->children_[2];
           key.assign_ptr(identifier->str_value_, identifier->str_len_);
+          if (key.case_compare("delim") == 0) { key = ObString("delimiter"); }
           value_node = argument->children_[1];
           for (int64_t j = 0; OB_SUCC(ret) && j < seen.count(); ++j) {
             if (seen.at(j).case_compare(key) == 0) { ret = OB_INVALID_ARGUMENT; }
@@ -3963,15 +3987,11 @@ int ObDMLResolver::resolve_file_table_expr(const ParseNode &node, ObRawExpr *&ex
           if (OB_SUCC(ret)) { ret = seen.push_back(key); }
         }
       }
-      ObRawExpr *raw = nullptr;
       ObObj value;
-      bool valid = false;
       if (OB_FAIL(ret)) {
       } else if (value_node == nullptr) { ret = OB_INVALID_ARGUMENT; }
-      else if (OB_FAIL(resolve_sql_expr(*value_node, raw))) {
-      } else if (OB_FAIL(ObSQLUtils::calc_const_or_calculable_expr(
-              session_info_->get_cur_exec_ctx(), raw, value, valid, *allocator_, false))) {
-      } else if (!valid || value.is_null()) { ret = OB_INVALID_ARGUMENT; }
+      else if (OB_FAIL(resolve_file_constant(*value_node, value))) {
+      }
       else if (i == 0) {
         if (!ob_is_string_type(value.get_type())) { ret = OB_INVALID_ARGUMENT; }
         else { options.path_ = value.get_string(); }
@@ -4091,6 +4111,9 @@ int ObDMLResolver::resolve_function_table_item(const ParseNode &parse_tree,
       ret = OB_ALLOCATE_MEMORY_FAILED;
     } else if (NULL != alias_node) {
       alias_name.assign_ptr((char *)(alias_node->str_value_), static_cast<int32_t>(alias_node->str_len_));
+    } else if (function_table_expr->get_expr_type() == T_FUN_SYS_FILE_SCAN) {
+      const ParseNode *name = parse_tree.children_[0]->children_[0];
+      alias_name.assign_ptr(name->str_value_, name->str_len_);
     } else if (NULL == alias_node) {
       if (OB_FAIL(stmt->generate_func_table_name(*allocator_, alias_name))) {
       }

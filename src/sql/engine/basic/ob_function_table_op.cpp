@@ -90,12 +90,14 @@ int ObFunctionTableOp::inner_close()
   col_count_ = 0;
   value_table_ = NULL;
   if (file_reader_ != nullptr) { file_reader_->close(); }
+  batch_allocator_.reset();
   return ret;
 }
 
 void ObFunctionTableOp::destroy()
 {
   if (file_reader_ != nullptr) { file_reader_->~FileSqlReader(); file_reader_ = nullptr; }
+  batch_allocator_.reset();
   ObOperator::destroy();
 }
 
@@ -115,10 +117,56 @@ int ObFunctionTableOp::inner_get_next_row_file()
       if (index < 0 || index >= row.count()) { ret = OB_ERR_UNEXPECTED; }
       else if (row.at(index).is_null()) { datum.set_null(); }
       else if (OB_FAIL(datum.from_obj(row.at(index), expr->obj_datum_map_))) {
-      } else if (OB_FAIL(expr->deep_copy_datum(eval_ctx_, datum))) {
+      } else {
+        // from_obj can borrow a string in the reader's current-row arena.
+        // Restore an owned result buffer even when it fits the reserved frame.
+        const ObDatum source = datum;
+        char *buffer = expr->get_str_res_mem(eval_ctx_, source.len_);
+        if (buffer == nullptr && source.len_ > 0) { ret = OB_ALLOCATE_MEMORY_FAILED; }
+        else { if (source.len_ > 0) { MEMMOVE(buffer, source.ptr_, source.len_); } datum.ptr_ = buffer; }
       }
       if (OB_SUCC(ret)) { expr->set_evaluated_projected(eval_ctx_); }
     }
+  }
+  return ret;
+}
+
+int ObFunctionTableOp::inner_get_next_batch(int64_t max_row_cnt)
+{
+  int ret = OB_SUCCESS;
+  if (file_reader_ == nullptr || MY_SPEC.value_expr_->type_ != T_FUN_SYS_FILE_SCAN) { return OB_NOT_IMPLEMENT; }
+  const int64_t count = std::min<int64_t>(max_row_cnt, MY_SPEC.max_batch_size_);
+  clear_evaluated_flag();
+  batch_allocator_.reuse();
+  brs_.size_ = 0; brs_.end_ = false; brs_.skip_->reset(count);
+  ObEvalCtx::BatchInfoScopeGuard guard(eval_ctx_);
+  guard.set_batch_size(count);
+  int64_t bytes = 0;
+  ObSEArray<ObObj, 16> row;
+  for (int64_t i = 0; OB_SUCC(ret) && i < count && bytes < 8 * 1024 * 1024; ++i) {
+    guard.set_batch_idx(i);
+    if (OB_FAIL(ctx_.check_status())) {
+    } else if (OB_FAIL(file_reader_->next_row(row))) {
+      if (ret == OB_ITER_END) { brs_.end_ = true; ret = OB_SUCCESS; break; }
+    } else {
+      for (int64_t j = 0; OB_SUCC(ret) && j < MY_SPEC.column_exprs_.count(); ++j) {
+        const int64_t index = MY_SPEC.file_column_indices_.at(j);
+        ObExpr *expr = MY_SPEC.column_exprs_.at(j);
+        ObDatum &datum = expr->locate_datum_for_write(eval_ctx_);
+        if (index < 0 || index >= row.count()) { ret = OB_ERR_UNEXPECTED; }
+        else if (row.at(index).is_null()) { datum.set_null(); }
+        else if (OB_FAIL(datum.from_obj(row.at(index), expr->obj_datum_map_))) {
+        } else if (ob_is_string_type(expr->datum_meta_.type_) && datum.len_ > 0) {
+          char *copy = static_cast<char *>(batch_allocator_.alloc(datum.len_));
+          if (copy == nullptr) { ret = OB_ALLOCATE_MEMORY_FAILED; }
+          else { memcpy(copy, datum.ptr_, datum.len_); datum.ptr_ = copy; bytes += datum.len_; }
+        }
+      }
+      if (OB_SUCC(ret)) { ++brs_.size_; }
+    }
+  }
+  if (OB_SUCC(ret)) {
+    for (ObExpr *expr : MY_SPEC.column_exprs_) { expr->set_evaluated_projected(eval_ctx_); }
   }
   return ret;
 }

@@ -6503,6 +6503,9 @@ int ObStaticEngineCG::check_op_vectorization(ObLogicalOperator *op, ObSqlSchemaG
     }
   } else if (log_op_def::LOG_JOIN == op->get_type()) {
     // do nothing
+  } else if (log_op_def::LOG_FUNCTION_TABLE == op->get_type()) {
+    const ObRawExpr *value = static_cast<ObLogFunctionTable *>(op)->get_value_expr();
+    disable_vectorize = value == nullptr || value->get_expr_type() != T_FUN_SYS_FILE_SCAN;
   } else if (log_op_def::LOG_GROUP_BY == op->get_type()) {
 
   }

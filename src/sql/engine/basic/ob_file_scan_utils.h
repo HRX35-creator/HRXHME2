@@ -55,6 +55,7 @@ public:
   const common::ObIArray<FileSqlColumn> &columns() const { return columns_; }
   static common::ObObjType object_type(FileSqlType type);
   static const char *type_name(FileSqlType type);
+  static bool valid_utf8(const common::ObString &value);
   static int check_path(const common::ObString &path, const common::ObString &root,
                         common::ObIAllocator &allocator, common::ObString &canonical);
 private:
@@ -73,7 +74,6 @@ private:
   int error(const char *message) const;
   static FileSqlType infer_type(const common::ObString &value);
   static FileSqlType widen(FileSqlType left, FileSqlType right);
-  static bool valid_utf8(const common::ObString &value);
   static bool parse_integer(const common::ObString &value, int64_t &number);
   static bool parse_datetime(const common::ObString &value, bool date_only, int64_t &number);
   FileSqlOptions options_;

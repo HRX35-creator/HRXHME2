@@ -2,6 +2,7 @@
  * Licensed under the Apache License, Version 2.0.
  */
 #pragma once
+#if !defined(_WIN32)
 #include <dirent.h>
 #include <limits.h>
 #include "sql/engine/basic/ob_file_scan_utils.h"
@@ -33,3 +34,5 @@ private:
   DISALLOW_COPY_AND_ASSIGN(FileSqlGlob);
 };
 } }
+
+#endif

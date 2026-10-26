@@ -3,6 +3,7 @@
  */
 #define USING_LOG_PREFIX SQL_ENG
 #include "sql/engine/basic/ob_file_sql_writer.h"
+#if !defined(_WIN32)
 #include <atomic>
 #include <cerrno>
 #include <fcntl.h>
@@ -109,8 +110,11 @@ int FileSqlWriter::open(const ObString &path, const ObString &secure_root,
   ObString target(path.length() - slash - 1, path.ptr() + slash + 1);
   if (path.empty() || memchr(path.ptr(), '\0', path.length()) != nullptr || target.empty()
       || target.length() > NAME_MAX || target == "." || target == ".."
+      || options.delimiter_ <= 0 || options.quote_ <= 0 || options.escape_ <= 0
       || options.delimiter_ == options.quote_ || options.delimiter_ == '\n' || options.delimiter_ == '\r'
-      || options.null_text_.length() > 4 * 1024 * 1024) { ret = OB_INVALID_ARGUMENT; }
+      || options.quote_ == '\n' || options.quote_ == '\r' || options.escape_ == '\n' || options.escape_ == '\r'
+      || options.null_text_.length() > 4 * 1024 * 1024
+      || !FileSqlReader::valid_utf8(options.null_text_)) { ret = OB_INVALID_ARGUMENT; }
   for (int64_t i = 0; OB_SUCC(ret) && i < options.null_text_.length(); ++i) {
     char c = options.null_text_[i];
     if (c == options.delimiter_ || c == options.quote_ || c == '\n' || c == '\r' || c == '\0') { ret = OB_INVALID_ARGUMENT; }
@@ -144,7 +148,10 @@ int FileSqlWriter::open(const ObString &path, const ObString &secure_root,
       }
     }
   }
-  if (OB_FAIL(ret)) { abort(); }
+  if (OB_FAIL(ret)) {
+    abort();
+    if (ret == OB_INVALID_ARGUMENT) { FORWARD_USER_ERROR(ret, "COPY output path or CSV options are invalid"); }
+  }
   return ret;
 }
 int FileSqlWriter::append(const char *data, int64_t length)
@@ -161,6 +168,7 @@ int FileSqlWriter::write_field(const ObString &value, bool is_null)
   int ret = OB_SUCCESS;
   if (is_null) { ret = append(options_.null_text_.ptr(), options_.null_text_.length()); }
   else if (value.length() > 4 * 1024 * 1024) { ret = OB_SIZE_OVERFLOW; }
+  else if (!FileSqlReader::valid_utf8(value)) { ret = OB_INVALID_DATA; }
   else {
     bool quote = value == options_.null_text_;
     for (int64_t i = 0; !quote && i < value.length(); ++i) {
@@ -244,3 +252,18 @@ void FileSqlWriter::abort()
   temporary_[0] = '\0';
 }
 } }
+
+#else
+namespace oceanbase { namespace sql {
+using namespace common;
+FileSqlWriter::FileSqlWriter() : allocator_("FileSqlCopy"), file_(nullptr), directory_(-1), row_bytes_(0), committed_(false) {}
+FileSqlWriter::~FileSqlWriter() {}
+bool FileSqlWriter::is_copy(const ObString &value) { return value.prefix_match("native_csv_copy:"); }
+int FileSqlWriter::encode_options(ObIAllocator &, const FileSqlOptions &, ObString &) { return OB_NOT_SUPPORTED; }
+int FileSqlWriter::decode_options(const ObString &, ObIAllocator &, FileSqlOptions &) { return OB_NOT_SUPPORTED; }
+int FileSqlWriter::open(const ObString &, const ObString &, const FileSqlOptions &, const ObIArray<ObString> &) { return OB_NOT_SUPPORTED; }
+int FileSqlWriter::write_row(const ObIArray<ObObj> &) { return OB_NOT_SUPPORTED; }
+int FileSqlWriter::commit() { return OB_NOT_SUPPORTED; }
+void FileSqlWriter::abort() {}
+} }
+#endif

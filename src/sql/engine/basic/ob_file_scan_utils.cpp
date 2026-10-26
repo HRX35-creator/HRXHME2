@@ -7,6 +7,7 @@
  */
 #define USING_LOG_PREFIX SQL_ENG
 #include "sql/engine/basic/ob_file_scan_utils.h"
+#if !defined(_WIN32)
 #include "sql/engine/basic/ob_file_sql_glob.h"
 #include "file_sql_bridge.h"
 #include <cerrno>
@@ -175,6 +176,8 @@ int FileSqlReader::open(const FileSqlOptions &options, const ObString &secure_ro
     return ret;
   }
   if (options.delimiter_ == '\0' || options.quote_ == '\0' || options.escape_ == '\0'
+      || options.delimiter_ < 0 || options.quote_ < 0 || options.escape_ < 0
+      || options.quote_ == '\n' || options.quote_ == '\r' || options.escape_ == '\n' || options.escape_ == '\r'
       || options.delimiter_ == options.quote_ || options.delimiter_ == '\n' || options.delimiter_ == '\r') {
     ret = OB_INVALID_ARGUMENT;
   } else if (OB_FAIL(check_path(options.path_, secure_root, meta_allocator_, canonical_path_))) {
@@ -397,7 +400,24 @@ int FileSqlReader::read_jsonl()
       }
       if (!blank) {
         ObIJsonBase *base = nullptr;
-        if (!valid_utf8(buffer.string())) { ret = error("invalid UTF-8"); }
+        bool in_string = false, escaped = false, root_seen = false;
+        int64_t fields = 1, token_bytes = 0, string_bytes = 0;
+        for (int64_t i = 0; OB_SUCC(ret) && i < buffer.length(); ++i) {
+          char c = buffer.ptr()[i];
+          if (in_string) {
+            if (++string_bytes > MAX_CELL_BYTES) { ret = error("JSONL field exceeds the resource limit"); }
+            else if (escaped) { escaped = false; }
+            else if (c == '\\') { escaped = true; }
+            else if (c == '"') { in_string = false; }
+          } else if (c == '"') { in_string = true; string_bytes = 0; token_bytes = 0; }
+          else if (c == '[' || (c == '{' && root_seen)) { ret = error("nested JSONL objects and arrays are not supported"); }
+          else if (c == '{') { root_seen = true; token_bytes = 0; }
+          else if (c == ',') { if (++fields > MAX_COLUMNS) { ret = error("too many JSONL fields"); } token_bytes = 0; }
+          else if (c == ':' || c == '}' || c == ' ' || c == '\t' || c == '\r') { token_bytes = 0; }
+          else if (++token_bytes > 256) { ret = error("JSONL scalar token exceeds the resource limit"); }
+        }
+        if (OB_FAIL(ret)) {
+        } else if (!valid_utf8(buffer.string())) { ret = error("invalid UTF-8"); }
         else if (OB_FAIL(ObJsonBaseFactory::get_json_base(&row_allocator_, buffer.string(),
                          ObJsonInType::JSON_TREE, ObJsonInType::JSON_TREE, base))) {
           ret = error("malformed JSONL object");
@@ -967,3 +987,31 @@ int FileSqlReader::open_descriptor(const ObString &descriptor, const ObString &s
 }
 
 } } // namespace oceanbase::sql
+
+#else
+namespace oceanbase { namespace sql {
+using namespace common;
+FileSqlReader::FileSqlReader()
+  : meta_allocator_("FileSqlMeta"), row_allocator_("FileSqlRow"), file_(nullptr),
+    line_(0), record_line_(1), data_offset_(0), schema_ready_(false), parquet_(nullptr), glob_(nullptr) {}
+FileSqlReader::~FileSqlReader() { close(); }
+void FileSqlReader::close() { cells_.reset(); columns_.reset(); row_allocator_.reset(); meta_allocator_.reset(); }
+int FileSqlReader::open(const FileSqlOptions &, const ObString &) { return OB_NOT_SUPPORTED; }
+int FileSqlReader::infer_schema() { return OB_NOT_SUPPORTED; }
+int FileSqlReader::make_descriptor(ObIAllocator &, ObString &) const { return OB_NOT_SUPPORTED; }
+int FileSqlReader::open_descriptor(const ObString &, const ObString &) { return OB_NOT_SUPPORTED; }
+int FileSqlReader::next_row(ObIArray<ObObj> &) { return OB_NOT_SUPPORTED; }
+int FileSqlReader::project(const ObIArray<int64_t> &) { return OB_NOT_SUPPORTED; }
+int FileSqlReader::rescan() { return OB_NOT_SUPPORTED; }
+bool FileSqlReader::valid_utf8(const ObString &) { return false; }
+int FileSqlReader::check_path(const ObString &, const ObString &, ObIAllocator &, ObString &) { return OB_NOT_SUPPORTED; }
+ObObjType FileSqlReader::object_type(FileSqlType type) {
+  const ObObjType types[] = {ObNullType, ObIntType, ObDoubleType, ObTinyIntType, ObVarcharType, ObDateType, ObDateTimeType};
+  return types[static_cast<int>(type)];
+}
+const char *FileSqlReader::type_name(FileSqlType type) {
+  const char *names[] = {"NULL", "BIGINT", "DOUBLE", "BOOLEAN", "VARCHAR", "DATE", "DATETIME"};
+  return names[static_cast<int>(type)];
+}
+} }
+#endif

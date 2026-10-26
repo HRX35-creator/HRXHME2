@@ -17,7 +17,7 @@ use parquet::{
     record::{reader::{ReaderIter, TreeBuilder}, Field},
     schema::types::{SchemaDescriptor, Type},
 };
-use std::{fs::File, io::{Cursor, Read, Seek, SeekFrom}, sync::Arc};
+use std::{collections::BTreeMap, fs::File, io::{Cursor, Read, Seek, SeekFrom}, sync::{Arc, Mutex}};
 
 const MIB: usize = 1024 * 1024;
 const MAX_FOOTER: usize = 8 * MIB;
@@ -125,7 +125,15 @@ impl<R: Read> Header<R> {
     }
 }
 
-struct GuardedFile { file: File, length: u64, footer_start: u64, footer: [u8; 8] }
+#[derive(Default)]
+struct PageBudget {
+    ranges: Vec<(u64, u64)>,
+    pages: BTreeMap<u64, Vec<u8>>,
+    decoded: usize,
+    headers: usize,
+}
+#[derive(Clone)]
+struct GuardedFile { file: Arc<File>, length: u64, footer_start: u64, footer: [u8; 8], budget: Arc<Mutex<PageBudget>> }
 impl GuardedFile {
     fn new(mut file: File) -> ParquetResult<Self> {
         let length = file.metadata()?.len();
@@ -136,7 +144,8 @@ impl GuardedFile {
         if magic != *b"PAR1" || footer[4..] != *b"PAR1" || size > MAX_FOOTER || size as u64 > length - 12 {
             return Err(invalid("invalid or oversized Parquet footer"));
         }
-        Ok(Self { file, length, footer_start: length - 8 - size as u64, footer })
+        Ok(Self { file: Arc::new(file), length, footer_start: length - 8 - size as u64, footer,
+            budget: Arc::new(Mutex::new(PageBudget::default())) })
     }
 }
 impl Length for GuardedFile { fn len(&self) -> u64 { self.length } }
@@ -145,6 +154,10 @@ impl ChunkReader for GuardedFile {
     fn get_read(&self, start: u64) -> ParquetResult<Self::T> {
         if start == self.length - 8 { return Ok(Cursor::new(self.footer.to_vec())); }
         if start >= self.footer_start { return Err(invalid("Parquet page offset exceeds data section")); }
+        let mut budget = self.budget.lock().map_err(|_| invalid("Parquet page budget is poisoned"))?;
+        if let Some(header) = budget.pages.get(&start) { return Ok(Cursor::new(header.clone())); }
+        let end = budget.ranges.iter().find_map(|&(a, b)| (a <= start && start < b).then_some(b))
+            .ok_or_else(|| invalid("Parquet page is outside projected column chunks"))?;
         let mut file = self.file.try_clone()?; file.seek(SeekFrom::Start(start))?;
         let mut header = Header { input: file.take(MAX_HEADER as u64), bytes: Vec::new() };
         let fields = header.structure(0)?;
@@ -153,9 +166,15 @@ impl ChunkReader for GuardedFile {
             _ => return Err(invalid("incomplete Parquet page header")),
         };
         if !(0..=MAX_PAGE as i64).contains(&uncompressed) || !(0..=MAX_PAGE as i64).contains(&compressed)
-            || start.checked_add(header.bytes.len() as u64).and_then(|n| n.checked_add(compressed as u64)).is_none_or(|n| n > self.footer_start) {
+            || start.checked_add(header.bytes.len() as u64).and_then(|n| n.checked_add(compressed as u64)).is_none_or(|n| n > end) {
             return Err(invalid("Parquet page exceeds resource or file bounds"));
         }
+        budget.decoded += uncompressed as usize;
+        budget.headers += header.bytes.len();
+        if budget.decoded > MAX_GROUP as usize || budget.headers > MAX_FOOTER || budget.pages.len() >= 65536 {
+            return Err(invalid("Parquet group page allocations exceed decode budget"));
+        }
+        budget.pages.insert(start, header.bytes.clone());
         Ok(Cursor::new(header.bytes))
     }
     fn get_bytes(&self, start: u64, length: usize) -> ParquetResult<Bytes> {
@@ -169,6 +188,7 @@ impl ChunkReader for GuardedFile {
 
 pub struct ParquetReader {
     source: Option<SerializedFileReader<GuardedFile>>,
+    guarded: Option<GuardedFile>,
     columns: Vec<ffi::Column>,
     selected: Vec<u32>,
     projection: Option<Type>,
@@ -181,7 +201,7 @@ pub struct ParquetReader {
 
 pub fn open_parquet(fd: i32) -> Box<ParquetReader> {
     let mut reader = Box::new(ParquetReader {
-        source: None, columns: vec![], selected: vec![], projection: None,
+        source: None, guarded: None, columns: vec![], selected: vec![], projection: None,
         iter: None, group: 0, remaining: 0, row: vec![], message: String::new(),
     });
     #[cfg(unix)]
@@ -205,6 +225,7 @@ impl ParquetReader {
         let props = ReaderProperties::builder().set_read_bloom_filter(false).set_read_page_statistics(false).build();
         let guarded = GuardedFile::new(file)?;
         let footer_start = guarded.footer_start;
+        self.guarded = Some(guarded.clone());
         let source = SerializedFileReader::new_with_options(guarded,
             ReadOptionsBuilder::new().with_reader_properties(props).build())?;
         let metadata = source.metadata();
@@ -285,6 +306,14 @@ impl ParquetReader {
             let source = self.source.as_ref().ok_or_else(|| invalid("Parquet reader is not open"))?;
             if self.group >= source.num_row_groups() { return Err(invalid("truncated Parquet rows")); }
             let group = source.get_row_group(self.group)?;
+            let guarded = self.guarded.as_ref().ok_or_else(|| invalid("missing Parquet page guard"))?;
+            let mut budget = guarded.budget.lock().map_err(|_| invalid("Parquet page budget is poisoned"))?;
+            *budget = PageBudget::default();
+            for &index in &self.selected {
+                let (start, length) = group.metadata().column(index as usize).byte_range();
+                budget.ranges.push((start, start + length));
+            }
+            drop(budget);
             // Build one owned group decoder at a time, propagating its errors.
             let projection = self.projection.clone().ok_or_else(|| invalid("missing Parquet projection"))?;
             self.iter = Some(TreeBuilder::new().with_batch_size(64)

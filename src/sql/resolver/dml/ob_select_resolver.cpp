@@ -3089,14 +3089,7 @@ int ObSelectResolver::resolve_file_copy(const ParseNode &node, ObSelectIntoItem 
   FileSqlOptions options;
   options.header_ = false;
   auto constant = [&](const ParseNode &input, ObObj &value) -> int {
-    int ret = OB_SUCCESS;
-    bool valid = false;
-    ObRawExpr *raw = nullptr;
-    if (OB_FAIL(resolve_sql_expr(input, raw))) {
-    } else if (OB_FAIL(ObSQLUtils::calc_const_or_calculable_expr(session_info_->get_cur_exec_ctx(),
-                   raw, value, valid, *allocator_, false))) {
-    } else if (!valid || value.is_null()) { ret = OB_INVALID_ARGUMENT; }
-    return ret;
+    return resolve_file_constant(input, value);
   };
   if (OB_FAIL(session_info_->get_sys_variable(share::SYS_VAR_ENABLE_FILE_SQL, enabled))) {
   } else if (!enabled) { ret = OB_NOT_SUPPORTED; LOG_USER_ERROR(OB_NOT_SUPPORTED, "COPY requires enable_file_sql=ON"); }
@@ -3113,6 +3106,7 @@ int ObSelectResolver::resolve_file_copy(const ParseNode &node, ObSelectIntoItem 
       if (item == nullptr || item->num_child_ != 2 || item->children_[0] == nullptr) { ret = OB_INVALID_ARGUMENT; }
       else {
         key.assign_ptr(item->children_[0]->str_value_, item->children_[0]->str_len_);
+        if (key.case_compare("delim") == 0) { key = ObString("delimiter"); }
         for (int64_t j = 0; OB_SUCC(ret) && j < seen.count(); ++j) { if (seen.at(j).case_compare(key) == 0) { ret = OB_INVALID_ARGUMENT; } }
         if (OB_SUCC(ret)) { ret = seen.push_back(key); }
       }

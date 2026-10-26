@@ -11334,8 +11334,7 @@ relation_factor %prec LOWER_PARENS
 file_table_call:
 NAME_OB '(' expr_list ')'
 {
-  merge_nodes($$, result, T_EXPR_LIST, $3);
-  malloc_non_terminal_node($$, result->malloc_pool_, T_FUN_SYS, 2, $1, $$);
+  malloc_non_terminal_node($$, result->malloc_pool_, T_FUN_SYS, 2, $1, $3);
 }
 | NAME_OB '(' ')'
 {
@@ -12348,7 +12347,10 @@ explain_or_desc relation_factor opt_desc_column_option
   malloc_non_terminal_node($$, result->malloc_pool_, T_SHOW_COLUMNS, 4, $$, $2, NULL, $3);
 }
 
-| explain_or_desc explainable_stmt { GEN_EXPLAN_STMT($1, $$, 0, 0, $2, NULL, NULL);}
+| explain_or_desc explainable_stmt {
+  GEN_EXPLAN_STMT($1, $$, 0, 0, $2, NULL, NULL);
+  $$->value_ = $1 == NULL ? 0 : $1->value_;
+}
 | explain_or_desc PRETTY explainable_stmt { GEN_EXPLAN_STMT($1, $$, 0, T_PRETTY, $3, NULL, NULL);}
 | explain_or_desc PRETTY_COLOR explainable_stmt { GEN_EXPLAN_STMT($1, $$, 0, T_PRETTY_COLOR, $3, NULL, NULL);}
 
@@ -12389,8 +12391,8 @@ explain_or_desc relation_factor opt_desc_column_option
 
 explain_or_desc:
 EXPLAIN {$$ = NULL;}
-| DESCRIBE {$$ = NULL;}
-| DESC  {$$ = NULL;}
+| DESCRIBE { malloc_terminal_node($$, result->malloc_pool_, T_INT); $$->value_ = 1; }
+| DESC { malloc_terminal_node($$, result->malloc_pool_, T_INT); $$->value_ = 1; }
 ;
 
 explainable_stmt:

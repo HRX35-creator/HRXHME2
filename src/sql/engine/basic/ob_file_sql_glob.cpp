@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 OceanBase.
  * Licensed under the Apache License, Version 2.0.
  */
+#if !defined(_WIN32)
 #define USING_LOG_PREFIX SQL_ENG
 #include "sql/engine/basic/ob_file_sql_glob.h"
 #include <cerrno>
@@ -145,3 +146,5 @@ int FileSqlGlob::next(ObString &path)
   return ret;
 }
 } }
+
+#endif
