@@ -5511,6 +5511,9 @@ int ObStaticEngineCG::generate_spec(ObLogFunctionTable &op, ObFunctionTableSpec 
   } else {
     spec.has_correlated_expr_ = value_raw_expr->has_flag(CNT_DYNAMIC_PARAM);
     spec.value_expr_ = value_expr;
+    if (value_raw_expr->get_expr_type() == T_FUN_SYS_FILE_SCAN) {
+      OZ (spec.file_column_indices_.init(op.get_stmt()->get_column_size()));
+    }
     for (int64_t i = 0; OB_SUCC(ret) && i < op.get_output_exprs().count(); ++i) {
       if (OB_FAIL(mark_expr_self_produced(op.get_output_exprs().at(i)))) {
       }
@@ -5526,6 +5529,9 @@ int ObStaticEngineCG::generate_spec(ObLogFunctionTable &op, ObFunctionTableSpec 
         OZ (mark_expr_self_produced(col_item->expr_));
         OZ (generate_rt_expr(*col_item->expr_, rt_expr));
         OZ (spec.column_exprs_.push_back(rt_expr));
+        if (value_raw_expr->get_expr_type() == T_FUN_SYS_FILE_SCAN) {
+          OZ (spec.file_column_indices_.push_back(col_item->column_id_ - OB_APP_MIN_COLUMN_ID));
+        }
       }
     }
   }

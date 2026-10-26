@@ -17,6 +17,9 @@
 #define USING_LOG_PREFIX SQL_ENG
 
 #include "sql/engine/basic/ob_function_table_op.h"
+#include "sql/engine/basic/ob_file_scan_utils.h"
+#include "share/schema/ob_schema_utils.h"
+#include "share/rc/ob_server_runtime.h"
 #include "sql/engine/ob_exec_context.h"
 #include "sql/engine/expr/ob_expr_lob_utils.h"
 
@@ -27,7 +30,7 @@ using namespace common;
 namespace sql
 {
 
-OB_SERIALIZE_MEMBER((ObFunctionTableSpec, ObOpSpec), value_expr_, column_exprs_, has_correlated_expr_);
+OB_SERIALIZE_MEMBER((ObFunctionTableSpec, ObOpSpec), value_expr_, column_exprs_, has_correlated_expr_, file_column_indices_);
 
 int ObFunctionTableOp::inner_open()
 {
@@ -36,6 +39,23 @@ int ObFunctionTableOp::inner_open()
   already_calc_ = false;
   if (OB_ISNULL(MY_SPEC.value_expr_)) {
     ret = OB_ERR_UNEXPECTED;
+  } else if (MY_SPEC.value_expr_->type_ == T_FUN_SYS_FILE_SCAN) {
+    next_row_func_ = &ObFunctionTableOp::inner_get_next_row_file;
+    ObString secure_root;
+    ObDatum *descriptor = nullptr;
+    bool enabled = false;
+    if (OB_FAIL(ctx_.get_my_session()->get_sys_variable(share::SYS_VAR_ENABLE_FILE_SQL, enabled))) {
+    } else if (!enabled) { ret = OB_NOT_SUPPORTED; }
+    else if (MY_SPEC.value_expr_->arg_cnt_ != 1
+             || MY_SPEC.file_column_indices_.count() != MY_SPEC.column_exprs_.count()) { ret = OB_ERR_UNEXPECTED; }
+    else if (OB_FAIL(MY_SPEC.value_expr_->args_[0]->eval(eval_ctx_, descriptor))) {
+    } else if (descriptor == nullptr || descriptor->is_null()) { ret = OB_ERR_UNEXPECTED; }
+    else if (OB_FAIL(share::schema::ObSchemaUtils::get_runtime_varchar_variable(
+            *GCTX.schema_service_, share::SYS_VAR_SECURE_FILE_PRIV, ctx_.get_allocator(), secure_root))) {
+    } else if ((file_reader_ = OB_NEWx(FileSqlReader, &ctx_.get_allocator())) == nullptr) {
+      ret = OB_ALLOCATE_MEMORY_FAILED;
+    } else if (OB_FAIL(file_reader_->open_descriptor(descriptor->get_string(), secure_root))) {
+    }
   } else if (ObExtendType == MY_SPEC.value_expr_->datum_meta_.type_) {
     next_row_func_ = &ObFunctionTableOp::inner_get_next_row_udf;
   } else {
@@ -50,6 +70,7 @@ int ObFunctionTableOp::inner_rescan()
   if (OB_FAIL(ObOperator::inner_rescan())) {
   } else {
     node_idx_ = 0;
+    if (file_reader_ != nullptr) { ret = file_reader_->rescan(); }
     if (MY_SPEC.has_correlated_expr_) {
       row_count_ = 0;
       col_count_ = 0;
@@ -67,12 +88,38 @@ int ObFunctionTableOp::inner_close()
   row_count_ = 0;
   col_count_ = 0;
   value_table_ = NULL;
+  if (file_reader_ != nullptr) { file_reader_->close(); }
   return ret;
 }
 
 void ObFunctionTableOp::destroy()
 {
+  if (file_reader_ != nullptr) { file_reader_->~FileSqlReader(); file_reader_ = nullptr; }
   ObOperator::destroy();
+}
+
+int ObFunctionTableOp::inner_get_next_row_file()
+{
+  int ret = OB_SUCCESS;
+  clear_evaluated_flag();
+  ObSEArray<ObObj, 16> row;
+  if (file_reader_ == nullptr) { ret = OB_NOT_INIT; }
+  else if (OB_FAIL(ctx_.check_status())) {
+  } else if (OB_FAIL(file_reader_->next_row(row))) {
+  } else {
+    for (int64_t i = 0; OB_SUCC(ret) && i < MY_SPEC.column_exprs_.count(); ++i) {
+      int64_t index = MY_SPEC.file_column_indices_.at(i);
+      ObExpr *expr = MY_SPEC.column_exprs_.at(i);
+      ObDatum &datum = expr->locate_datum_for_write(eval_ctx_);
+      if (index < 0 || index >= row.count()) { ret = OB_ERR_UNEXPECTED; }
+      else if (row.at(index).is_null()) { datum.set_null(); }
+      else if (OB_FAIL(datum.from_obj(row.at(index), expr->obj_datum_map_))) {
+      } else if (OB_FAIL(expr->deep_copy_datum(eval_ctx_, datum))) {
+      }
+      if (OB_SUCC(ret)) { expr->set_evaluated_projected(eval_ctx_); }
+    }
+  }
+  return ret;
 }
 
 

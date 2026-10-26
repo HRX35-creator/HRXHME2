@@ -406,6 +406,7 @@ END_P SET_VAR DELIMITER
 %type <node> sort_list sort_key opt_asc_desc sort_list_for_group_by sort_key_for_group_by opt_asc_desc_for_group_by sort_list_opt_null sort_key_opt_null opt_asc_desc_null
 %type <node> opt_query_expression_option_list query_expression_option_list query_expression_option opt_distinct opt_distinct_or_all opt_separator projection
 %type <node> from_list table_references table_reference table_factor normal_relation_factor dot_relation_factor relation_factor
+%type <node> file_table_call
 %type <node> relation_factor_in_hint relation_factor_in_hint_list relation_factor_in_pq_hint opt_relation_factor_in_hint_list relation_factor_in_use_join_hint_list
 %type <node> relation_factor_in_leading_hint_list joined_table tbl_name table_subquery table_subquery_alias
 %type <node> relation_factor_with_star relation_with_star_list opt_with_star
@@ -10792,6 +10793,18 @@ tbl_name
 {
   $$ = $1;
 }
+| file_table_call %prec LOWER_PARENS
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_TABLE_COLLECTION_EXPRESSION, 2, $1, NULL);
+}
+| file_table_call relation_name
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_TABLE_COLLECTION_EXPRESSION, 2, $1, $2);
+}
+| file_table_call AS relation_name
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_TABLE_COLLECTION_EXPRESSION, 2, $1, $3);
+}
 | table_subquery
 {
   $$ = $1;
@@ -11257,6 +11270,18 @@ relation_factor %prec LOWER_PARENS
 | TABLE '(' simple_expr ')' AS relation_name
 {
   malloc_non_terminal_node($$, result->malloc_pool_, T_TABLE_COLLECTION_EXPRESSION, 2, $3, $6);
+}
+;
+
+file_table_call:
+NAME_OB '(' expr_list ')'
+{
+  merge_nodes($$, result, T_EXPR_LIST, $3);
+  malloc_non_terminal_node($$, result->malloc_pool_, T_FUN_SYS, 2, $1, $$);
+}
+| NAME_OB '(' ')'
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_FUN_SYS, 2, $1, NULL);
 }
 ;
 
