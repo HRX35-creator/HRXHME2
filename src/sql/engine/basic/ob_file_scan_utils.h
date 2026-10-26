@@ -14,6 +14,7 @@
 #include "common/object/ob_object.h"
 
 namespace oceanbase { namespace sql {
+class FileSqlGlob;
 
 enum class FileSqlFormat { CSV, JSONL, PARQUET, GLOB };
 enum class FileSqlType { NIL, I64, F64, BOOL, TEXT, DATE, DATETIME };
@@ -48,6 +49,7 @@ public:
   int make_descriptor(common::ObIAllocator &allocator, common::ObString &descriptor) const;
   int open_descriptor(const common::ObString &descriptor, const common::ObString &secure_root);
   int next_row(common::ObIArray<common::ObObj> &row);
+  int project(const common::ObIArray<int64_t> &indices);
   int rescan();
   void close();
   const common::ObIArray<FileSqlColumn> &columns() const { return columns_; }
@@ -86,6 +88,8 @@ private:
   int64_t record_line_;
   int64_t data_offset_;
   bool schema_ready_;
+  void *parquet_;
+  FileSqlGlob *glob_;
   static constexpr int64_t MAX_COLUMNS = 1024;
   static constexpr int64_t MAX_RECORD_BYTES = 16 * 1024 * 1024;
   static constexpr int64_t MAX_CELL_BYTES = 4 * 1024 * 1024;

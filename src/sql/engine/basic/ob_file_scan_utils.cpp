@@ -7,6 +7,8 @@
  */
 #define USING_LOG_PREFIX SQL_ENG
 #include "sql/engine/basic/ob_file_scan_utils.h"
+#include "sql/engine/basic/ob_file_sql_glob.h"
+#include "file_sql_bridge.h"
 #include <cerrno>
 #include <algorithm>
 #include <cmath>
@@ -106,7 +108,7 @@ bool file_sql_parse_double(const ObString &text, double &number)
 
 FileSqlReader::FileSqlReader()
     : meta_allocator_("FileSqlMeta"), row_allocator_("FileSqlRow"), file_(nullptr),
-      line_(0), record_line_(1), data_offset_(0), schema_ready_(false)
+      line_(0), record_line_(1), data_offset_(0), schema_ready_(false), parquet_(nullptr), glob_(nullptr)
 {
   memset(&snapshot_, 0, sizeof(snapshot_));
 }
@@ -165,6 +167,13 @@ int FileSqlReader::open(const FileSqlOptions &options, const ObString &secure_ro
   int ret = OB_SUCCESS;
   close();
   options_ = options;
+  if (options_.format_ == FileSqlFormat::GLOB) {
+    if ((glob_ = OB_NEWx(FileSqlGlob, &meta_allocator_)) == nullptr) { ret = OB_ALLOCATE_MEMORY_FAILED; }
+    else if (OB_FAIL(glob_->open(options.path_, secure_root))) {
+    } else if (OB_FAIL(ob_write_string(meta_allocator_, glob_->pattern(), canonical_path_, true))) {
+    } else { snapshot_ = glob_->snapshot(); }
+    return ret;
+  }
   if (options.delimiter_ == '\0' || options.quote_ == '\0' || options.escape_ == '\0'
       || options.delimiter_ == options.quote_ || options.delimiter_ == '\n' || options.delimiter_ == '\r') {
     ret = OB_INVALID_ARGUMENT;
@@ -206,11 +215,25 @@ int FileSqlReader::open(const FileSqlOptions &options, const ObString &secure_ro
     if (allowed_fd >= 0) { ::close(allowed_fd); }
     if (input_fd >= 0) { ::close(input_fd); }
   }
+  if (OB_SUCC(ret) && options_.format_ == FileSqlFormat::PARQUET) {
+    int fd = ::dup(::fileno(file_));
+    if (fd < 0) { ret = OB_IO_ERROR; }
+    else {
+      auto reader = file_sql::open_parquet(fd);
+      if (reader->status() != 0) {
+        char message[384];
+        snprintf(message, sizeof(message), "%.*s", static_cast<int>(reader->error().size()), reader->error().data());
+        ret = error(message);
+      }
+      else { parquet_ = reader.into_raw(); }
+    }
+  }
   return ret;
 }
 
 int FileSqlReader::check_unchanged() const
 {
+  if (glob_ != nullptr) { return glob_->check_unchanged(); }
   int ret = OB_SUCCESS;
   struct stat current;
   struct stat named;
@@ -224,6 +247,11 @@ int FileSqlReader::check_unchanged() const
 
 void FileSqlReader::close()
 {
+  if (parquet_ != nullptr) {
+    auto reader = rust::Box<file_sql::ParquetReader>::from_raw(static_cast<file_sql::ParquetReader *>(parquet_));
+    parquet_ = nullptr;
+  }
+  if (glob_ != nullptr) { glob_->~FileSqlGlob(); glob_ = nullptr; }
   if (file_ != nullptr) { ::fclose(file_); file_ = nullptr; }
   cells_.reset();
   columns_.reset();
@@ -473,6 +501,25 @@ int FileSqlReader::add_column(const ObString &name, bool deduplicate, bool nulla
 int FileSqlReader::infer_schema()
 {
   int ret = OB_SUCCESS;
+  if (options_.format_ == FileSqlFormat::GLOB) {
+    if (OB_FAIL(add_column(ObString("file"), false, false))) {
+    } else { columns_.at(0).type_ = FileSqlType::TEXT; columns_.at(0).max_length_ = PATH_MAX; schema_ready_ = true; }
+    return ret;
+  } else if (options_.format_ == FileSqlFormat::PARQUET) {
+    if (parquet_ == nullptr) { ret = OB_NOT_INIT; }
+    else {
+      auto &reader = *static_cast<file_sql::ParquetReader *>(parquet_);
+      for (const auto &column : reader.columns()) {
+        if (OB_SUCC(ret) && OB_FAIL(add_column(ObString(column.name.size(), column.name.data()), false, column.nullable))) {
+        } else if (OB_SUCC(ret)) {
+          columns_.at(columns_.count() - 1).type_ = static_cast<FileSqlType>(column.kind);
+          columns_.at(columns_.count() - 1).max_length_ = column.kind == file_sql::Kind::Text ? MAX_CELL_BYTES : 0;
+        }
+      }
+      if (OB_SUCC(ret)) { schema_ready_ = true; }
+    }
+    return ret;
+  }
   int64_t rows = 0;
   bool first = true;
   while (OB_SUCC(ret)) {
@@ -540,6 +587,10 @@ int FileSqlReader::rescan()
 {
   int ret = check_unchanged();
   if (OB_FAIL(ret)) {
+  } else if (glob_ != nullptr) { ret = glob_->rescan(); }
+  else if (parquet_ != nullptr) {
+    auto &reader = *static_cast<file_sql::ParquetReader *>(parquet_);
+    if (reader.rewind() != 0) { ret = error("could not rewind Parquet reader"); }
   } else if (::fseeko(file_, data_offset_, SEEK_SET) != 0) { ret = OB_IO_ERROR; }
   else {
     ::clearerr(file_);
@@ -586,6 +637,48 @@ int FileSqlReader::next_row(ObIArray<ObObj> &row)
   int ret = OB_SUCCESS;
   row.reuse();
   if (!schema_ready_) { ret = OB_NOT_INIT; }
+  else if (glob_ != nullptr) {
+    ObString path;
+    ObObj value;
+    if (OB_FAIL(glob_->next(path))) {
+    } else {
+      value.set_varchar(path); value.set_collation_type(CS_TYPE_UTF8MB4_BIN);
+      ret = row.push_back(value);
+    }
+  } else if (parquet_ != nullptr) {
+    auto &reader = *static_cast<file_sql::ParquetReader *>(parquet_);
+    if (OB_FAIL(check_unchanged())) {
+    } else {
+      int status = reader.next();
+      if (status == 1) { ret = OB_ITER_END; }
+      else if (status != 0) {
+        char message[384];
+        snprintf(message, sizeof(message), "%.*s", static_cast<int>(reader.error().size()), reader.error().data());
+        ret = error(message);
+      } else {
+        for (int64_t i = 0; OB_SUCC(ret) && i < columns_.count(); ++i) { ObObj value; value.set_null(); ret = row.push_back(value); }
+        for (const auto &cell : reader.values()) {
+          if (OB_SUCC(ret) && cell.column >= row.count()) { ret = OB_ERR_UNEXPECTED; }
+          else if (OB_SUCC(ret)) {
+            ObObj &value = row.at(cell.column);
+            switch (cell.kind) {
+              case file_sql::Kind::Null: value.set_null(); break;
+              case file_sql::Kind::Integer: value.set_int(cell.integer); break;
+              case file_sql::Kind::Double: value.set_double(cell.real); break;
+              case file_sql::Kind::Boolean: value.set_tinyint(cell.integer); break;
+              case file_sql::Kind::Date: value.set_date(cell.integer); break;
+              case file_sql::Kind::DateTime: value.set_datetime(cell.integer); break;
+              case file_sql::Kind::Text:
+                value.set_varchar(ObString(cell.text.size(), cell.text.data())); value.set_collation_type(CS_TYPE_UTF8MB4_BIN); break;
+              default: ret = OB_INVALID_DATA; break;
+            }
+          }
+        }
+      }
+      int changed = check_unchanged();
+      if (changed != OB_SUCCESS) { ret = changed; }
+    }
+  }
   else if (OB_FAIL(read_record())) {
   } else if (options_.format_ == FileSqlFormat::CSV && cells_.count() != columns_.count()) {
     ret = error("CSV record has an inconsistent field count");
@@ -605,6 +698,21 @@ int FileSqlReader::next_row(ObIArray<ObObj> &row)
       } else if (OB_FAIL(row.push_back(value))) {
       }
     }
+  }
+  return ret;
+}
+
+int FileSqlReader::project(const ObIArray<int64_t> &indices)
+{
+  int ret = OB_SUCCESS;
+  if (parquet_ != nullptr) {
+    ObSEArray<uint32_t, 16> columns;
+    for (int64_t i = 0; OB_SUCC(ret) && i < indices.count(); ++i) {
+      if (indices.at(i) < 0 || indices.at(i) >= columns_.count()) { ret = OB_INVALID_ARGUMENT; }
+      else { ret = columns.push_back(static_cast<uint32_t>(indices.at(i))); }
+    }
+    if (OB_SUCC(ret) && static_cast<file_sql::ParquetReader *>(parquet_)->project(
+        rust::Slice<const uint32_t>(columns.get_data(), columns.count())) != 0) { ret = error("invalid Parquet projection"); }
   }
   return ret;
 }

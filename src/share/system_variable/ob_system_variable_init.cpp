@@ -9912,9 +9912,6 @@ static struct VarsInit{
     ObSysVars[718].alias_ = "OB_SV_SPARSE_DROP_RATIO_SEARCH" ;
     }();
 
-    if (cur_max_var_id >= ObSysVarMeta::OB_MAX_SYS_VAR_ID) {
-      HasInvalidSysVar = true;
-    }
     [&] (){
       ObSysVars[719].id_ = SYS_VAR_ENABLE_FILE_SQL ;
       cur_max_var_id = MAX(cur_max_var_id, static_cast<int64_t>(SYS_VAR_ENABLE_FILE_SQL)) ;
@@ -9928,10 +9925,14 @@ static struct VarsInit{
     ObSysVars[719].alias_ = "OB_SV_ENABLE_FILE_SQL" ;
     }();
 
+    if (cur_max_var_id >= ObSysVarMeta::OB_MAX_SYS_VAR_ID) {
+      HasInvalidSysVar = true;
+    }
+
   }
 }vars_init;
 
-static int64_t var_amount = 719;
+static int64_t var_amount = ObSysVarMeta::ALL_SYS_VARS_COUNT;
 
 int64_t ObSysVariables::get_all_sys_var_count(){ return ObSysVarMeta::ALL_SYS_VARS_COUNT;}
 ObSysVarClassType ObSysVariables::get_sys_var_id(int64_t i){ return ObSysVars[i].id_;}

@@ -373,6 +373,7 @@ END_P SET_VAR DELIMITER
 //-----------------------------non_reserved keyword end---------------------------------------------
 %type <node> sql_stmt stmt_list stmt opt_end_p
 %type <node> select_stmt update_stmt delete_stmt
+%type <node> file_copy_stmt file_copy_source opt_file_copy_options file_copy_options file_copy_option file_copy_value
 %type <node> insert_stmt single_table_insert values_clause dml_table_name
 %type <node> create_table_stmt create_table_like_stmt fork_table_stmt fork_database_stmt diff_table_stmt merge_table_stmt opt_table_option_list table_option_list table_option table_option_list_space_seperated parallel_option lob_storage_clause lob_storage_parameter lob_storage_parameters lob_chunk_size
 %type <node> index_or_heap
@@ -557,6 +558,7 @@ opt_end_p:
 /* only preparable statement will set question mark size */
 stmt:
     select_stmt             { $$ = $1; question_mark_issue($$, result); }
+  | file_copy_stmt          { $$ = $1; question_mark_issue($$, result); }
   | insert_stmt             { $$ = $1; question_mark_issue($$, result); }
   | create_table_stmt       {
     $$ = $1;
@@ -8452,6 +8454,62 @@ select_no_parens opt_when
 {
   $$ = $1;
 }
+;
+
+// COPY is a native SELECT plan with an atomic CSV sink.
+file_copy_stmt:
+COPY file_copy_source TO STRING_VALUE opt_file_copy_options
+{
+  $$ = $2;
+  if ($$->children_[PARSE_SELECT_INTO] != NULL || $$->children_[PARSE_SELECT_INTO_EXTRA] != NULL
+      || $$->children_[PARSE_SELECT_FOR_UPD] != NULL) {
+    yyerror(&@2, result, "COPY source cannot contain INTO or FOR UPDATE");
+    YYERROR;
+  }
+  ParseNode *sink = NULL;
+  malloc_non_terminal_node(sink, result->malloc_pool_, T_INTO_OUTFILE, 2, $4, $5);
+  sink->value_ = 1;
+  $$->children_[PARSE_SELECT_INTO_EXTRA] = sink;
+}
+;
+
+file_copy_source:
+select_with_parens { $$ = $1; }
+| relation_factor
+{
+  ParseNode *star = NULL, *project = NULL, *projects = NULL, *table = NULL, *tables = NULL;
+  malloc_terminal_node(star, result->malloc_pool_, T_STAR);
+  malloc_non_terminal_node(project, result->malloc_pool_, T_PROJECT_STRING, 1, star);
+  dup_string_to_node(project, result->malloc_pool_, "*");
+  merge_nodes(projects, result, T_PROJECT_LIST, project);
+  malloc_non_terminal_node(table, result->malloc_pool_, T_ORG, 3, $1, NULL, NULL);
+  merge_nodes(tables, result, T_FROM_LIST, table);
+  malloc_select_node($$, result->malloc_pool_);
+  $$->children_[PARSE_SELECT_SELECT] = projects;
+  $$->children_[PARSE_SELECT_FROM] = tables;
+}
+;
+
+opt_file_copy_options:
+/* EMPTY */ { $$ = NULL; }
+| '(' file_copy_options ')' { merge_nodes($$, result, T_EXPR_LIST, $2); }
+;
+
+file_copy_options:
+file_copy_option { $$ = $1; }
+| file_copy_options ',' file_copy_option { malloc_non_terminal_node($$, result->malloc_pool_, T_LINK_NODE, 2, $1, $3); }
+;
+
+file_copy_option:
+relation_name { malloc_non_terminal_node($$, result->malloc_pool_, T_ALIAS, 2, $1, NULL); }
+| relation_name opt_equal_mark file_copy_value { (void)($2); malloc_non_terminal_node($$, result->malloc_pool_, T_ALIAS, 2, $1, $3); }
+;
+
+file_copy_value:
+STRING_VALUE { $$ = $1; }
+| BOOL_VALUE { $$ = $1; }
+| INTNUM { $$ = $1; }
+| relation_name { $$ = $1; }
 ;
 
 // for select_into

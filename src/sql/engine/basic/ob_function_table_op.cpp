@@ -55,6 +55,7 @@ int ObFunctionTableOp::inner_open()
     } else if ((file_reader_ = OB_NEWx(FileSqlReader, &ctx_.get_allocator())) == nullptr) {
       ret = OB_ALLOCATE_MEMORY_FAILED;
     } else if (OB_FAIL(file_reader_->open_descriptor(descriptor->get_string(), secure_root))) {
+    } else if (OB_FAIL(file_reader_->project(MY_SPEC.file_column_indices_))) {
     }
   } else if (ObExtendType == MY_SPEC.value_expr_->datum_meta_.type_) {
     next_row_func_ = &ObFunctionTableOp::inner_get_next_row_udf;
