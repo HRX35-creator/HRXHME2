@@ -23,6 +23,7 @@
 #include "share/ob_sys_time_zone_util.h"
 
 #include "ob_ddl_service.h"
+#include "share/schema/ai_column_schema.h"
 #include "rootserver/ob_runtime_ddl_service.h"
 #include "query/session/ob_inner_sql_connection_access.h"
 #include "share/ob_ddl_common.h"
@@ -7834,6 +7835,44 @@ int ObDDLService::add_new_column_to_table_schema(
   return ret;
 }
 
+static int append_ai_columns_after_alter(const ObTableSchema &origin,
+    const AlterTableSchema &argument, ObTableSchema &table)
+{
+  int ret = OB_SUCCESS;
+  for (int64_t i = 0; OB_SUCC(ret) && i < argument.get_ai_column_count(); ++i) {
+    AIColumnSchema definition;
+    const AIColumnSchema &provisional = *argument.get_ai_column_by_idx(i);
+    ObSEArray<uint64_t, 4> dependencies;
+    const ObColumnSchemaV2 *result = table.get_column_schema(provisional.get_column_name());
+    if (OB_FAIL(definition.assign(provisional))) {
+    } else if (result == nullptr) { ret = OB_ERR_UNEXPECTED; }
+    else { definition.column_id_ = result->get_column_id(); }
+    uint64_t *ids[] = {&definition.state_column_id_, &definition.request_column_id_, &definition.result_spec_column_id_};
+    const char *prefix[] = {"__ai_state_", "__ai_request_", "__ai_spec_"};
+    for (int64_t j = 0; OB_SUCC(ret) && j < 3; ++j) {
+      ObSqlString name;
+      const ObColumnSchemaV2 *hidden = nullptr;
+      if (OB_FAIL(name.append_fmt("%s%lu", prefix[j], provisional.column_id_))) {
+      } else if ((hidden = table.get_column_schema(name.string())) == nullptr) { ret = OB_ERR_UNEXPECTED; }
+      else { *ids[j] = hidden->get_column_id(); }
+    }
+    for (int64_t j = 0; OB_SUCC(ret) && j < definition.get_dependency_count(); ++j) {
+      const uint64_t old_id = definition.get_dependencies()[j];
+      const ObColumnSchemaV2 *source = old_id <= origin.get_max_used_column_id()
+          ? origin.get_column_schema(old_id)
+          : argument.get_column_schema_by_idx(old_id - origin.get_max_used_column_id() - 1);
+      const ObColumnSchemaV2 *current = source == nullptr ? nullptr : table.get_column_schema(source->get_column_name_str());
+      if (current == nullptr || current->is_ai_column()) { ret = OB_INVALID_ARGUMENT; }
+      else { ret = dependencies.push_back(current->get_column_id()); }
+    }
+    if (OB_FAIL(ret)) {
+    } else if (OB_FAIL(definition.set_dependencies(dependencies))) {
+    } else if (OB_FAIL(table.add_ai_column(definition))) {
+    }
+  }
+  return ret;
+}
+
 int ObDDLService::gen_alter_column_new_table_schema_offline(
     const ObTableSchema &origin_table_schema,
     AlterTableSchema &alter_table_schema,
@@ -8105,6 +8144,7 @@ int ObDDLService::gen_alter_column_new_table_schema_offline(
         }
       }
     }
+    if (OB_SUCC(ret)) { ret = append_ai_columns_after_alter(origin_table_schema, alter_table_schema, new_table_schema); }
     if (OB_SUCC(ret) && OB_FAIL(check_has_multi_autoinc(new_table_schema))) {
     }
     if (OB_SUCC(ret) && need_redistribute_column_id) {
@@ -8588,6 +8628,7 @@ int ObDDLService::alter_table_column(const ObTableSchema &origin_table_schema,
       }
     }
 
+    if (OB_SUCC(ret)) { ret = append_ai_columns_after_alter(origin_table_schema, alter_table_schema, new_table_schema); }
     bool is_add_lob = false;
     if(OB_FAIL(ret)) {
     } else if (OB_FAIL(blocksstable::check_skip_index_valid(new_table_schema))) {

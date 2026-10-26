@@ -1371,6 +1371,9 @@ int ObSchemaServiceSQLImpl::fetch_all_column_info(
       }
     }
   }
+  for (int64_t i = 0; OB_SUCC(ret) && i < table_schema_array.count(); ++i) {
+    ret = fetch_ai_column_info(schema_status, schema_version, sql_client, *table_schema_array.at(i));
+  }
   return ret;
 }
 
@@ -4141,6 +4144,31 @@ int ObSchemaServiceSQLImpl::fetch_table_info(
   return ret;
 }
 
+int ObSchemaServiceSQLImpl::fetch_ai_column_info(
+    const ObRefreshSchemaStatus &schema_status, const int64_t schema_version,
+    ObISQLClient &sql_client, ObTableSchema &table_schema)
+{
+  int ret = OB_SUCCESS;
+  if (!table_schema.has_ai_column_history() || is_inner_table(table_schema.get_table_id())) { return ret; }
+  ObSqlString sql;
+  const int64_t snapshot_timestamp = schema_status.snapshot_timestamp_;
+  DEFINE_SQL_CLIENT_RETRY_WEAK_WITH_SNAPSHOT(sql_client, snapshot_timestamp);
+  SMART_VAR(ObMySQLProxy::MySQLResult, res) {
+    ObMySQLResult *result = nullptr;
+    ObString metadata;
+    if (OB_FAIL(sql.append_fmt("SELECT metadata FROM oceanbase.__all_ai_column_history "
+          "WHERE table_id=%lu AND schema_version<=%ld ORDER BY schema_version DESC LIMIT 1",
+          table_schema.get_table_id(), schema_version))) {
+    } else if (OB_FAIL(sql_client_retry_weak.read(res, sql.ptr()))) {
+    } else if ((result = res.get_result()) == nullptr) { ret = OB_ERR_UNEXPECTED; }
+    else if (OB_FAIL(result->next())) {
+    } else if (OB_FAIL(result->get_varchar("metadata", metadata))) {
+    } else if (OB_FAIL(table_schema.deserialize_ai_column_metadata(metadata))) {
+    }
+  }
+  return ret;
+}
+
 int ObSchemaServiceSQLImpl::fetch_column_info(const ObRefreshSchemaStatus &schema_status,
                                               const uint64_t table_id,
                                               const int64_t schema_version,
@@ -4168,6 +4196,9 @@ int ObSchemaServiceSQLImpl::fetch_column_info(const ObRefreshSchemaStatus &schem
       } else if (OB_FAIL(ObSchemaRetrieveUtils::retrieve_column_schema(check_deleted, *result, table_schema))) {
       }
     }
+  }
+  if (OB_SUCC(ret) && table_schema != nullptr) {
+    ret = fetch_ai_column_info(schema_status, schema_version, sql_client, *table_schema);
   }
   return ret;
 }

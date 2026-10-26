@@ -69,6 +69,7 @@ namespace schema
 class ObSchemaGetterGuard;
 class ObColDesc;
 class ObConstraint;
+class AIColumnSchema;
 class ObColumnSchemaV2;
 class ObColumnParam;
 struct ObColumnIdKey
@@ -1077,6 +1078,17 @@ public:
   int set_simple_index_infos(const common::ObIArray<ObAuxTableMetaInfo> &simple_index_infos);
   // constraint related
   int add_constraint(const ObConstraint &constraint);
+  int add_ai_column(const AIColumnSchema &column);
+  int remove_ai_column(uint64_t column_id);
+  int64_t get_ai_column_count() const { return ai_column_count_; }
+  bool has_ai_columns() const { return ai_column_count_ > 0; }
+  static constexpr uint64_t AI_COLUMN_HISTORY_FLAG = UINT64_C(1);
+  bool has_ai_column_history() const { return has_table_flag(AI_COLUMN_HISTORY_FLAG); }
+  int serialize_ai_column_metadata(common::ObIAllocator &allocator, common::ObString &data) const;
+  int deserialize_ai_column_metadata(const common::ObString &data);
+  const AIColumnSchema *get_ai_column(uint64_t column_id) const;
+  const AIColumnSchema *get_ai_column_by_idx(int64_t index) const
+  { return index >= 0 && index < ai_column_count_ ? ai_columns_[index] : nullptr; }
   int delete_constraint(const common::ObString &constraint_name);
   // Copy all constraint information in src_schema
   int assign_constraint(const ObTableSchema &other);
@@ -1443,6 +1455,7 @@ public:
   int is_need_padding_for_generated_column(bool &need_padding) const;
   int has_generated_column_using_udf_expr(bool &ans) const;
   int generate_new_column_id_map(common::hash::ObHashMap<uint64_t, uint64_t> &column_id_map) const;
+  int convert_ai_column_ids(const common::hash::ObHashMap<uint64_t, uint64_t> &column_id_map);
   int convert_column_ids_for_ddl(const hash::ObHashMap<uint64_t, uint64_t> &column_id_map);
   int sort_column_array_by_column_id();
   int check_column_array_sorted_by_column_id(const bool skip_rowkey) const;
@@ -1625,6 +1638,9 @@ protected:
   int64_t virtual_column_cnt_;
 
   // constraint related
+  AIColumnSchema **ai_columns_;
+  int64_t ai_column_count_;
+  int64_t ai_column_capacity_;
   ObConstraint **cst_array_;
   int64_t cst_array_capacity_;
   int64_t cst_cnt_;

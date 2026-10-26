@@ -17,6 +17,7 @@
 #define USING_LOG_PREFIX SQL_RESV
 #include "config_bridge.h"
 #include "sql/resolver/ddl/ob_alter_table_resolver.h"
+#include "share/schema/ai_column_schema.h"
 #include "sql/resolver/expr/ob_raw_expr_part_expr_checker.h"
 #include "sql/resolver/dml/ob_delete_resolver.h"
 #include "sql/resolver/ddl/ob_index_builder_util.h"
@@ -3457,6 +3458,49 @@ int ObAlterTableResolver::resolve_add_column(const ParseNode &node, ObColumnName
         if (OB_SUCC(ret)) {
           if (OB_FAIL(alter_table_stmt->add_column(alter_column_schema))) {
           } else if (FALSE_IT(alter_table_stmt->set_sql_mode(session_info_->get_sql_mode()))) {
+          }
+          if (OB_SUCC(ret) && alter_column_schema.is_ai_column()) {
+            ObTableSchema combined;
+            AlterTableSchema &argument = alter_table_stmt->get_alter_table_arg().alter_table_schema_;
+            uint64_t next_id = table_schema_->get_max_used_column_id();
+            if (OB_FAIL(combined.assign(*table_schema_))) {
+            }
+            for (int64_t j = 0; OB_SUCC(ret) && j < argument.get_column_count(); ++j) {
+              const AlterColumnSchema &added = *static_cast<const AlterColumnSchema *>(argument.get_column_schema_by_idx(j));
+              ObColumnSchemaV2 column;
+              if (added.alter_type_ != OB_DDL_ADD_COLUMN) {
+                ret = OB_NOT_SUPPORTED;
+                LOG_USER_ERROR(OB_NOT_SUPPORTED, "combining AI ADD COLUMN with other column alterations");
+              } else if (OB_FAIL(column.assign(added))) {
+              } else {
+                column.set_column_id(++next_id);
+                column.set_table_id(combined.get_table_id());
+                ret = combined.add_column(column);
+              }
+            }
+            ObColumnSchemaV2 *result_column = combined.get_column_schema(alter_column_schema.get_column_name_str());
+            const ParseNode *attributes = node.children_[i]->children_[2];
+            for (int64_t j = 0; OB_SUCC(ret) && attributes != nullptr && j < attributes->num_child_; ++j) {
+              if (attributes->children_[j]->type_ == T_AI_COLUMN) {
+                if (result_column == nullptr) { ret = OB_ERR_UNEXPECTED; }
+                else { ret = resolve_ai_column_definition(*attributes->children_[j], combined, *result_column, next_id); }
+              }
+            }
+            const AIColumnSchema *definition = result_column == nullptr ? nullptr : combined.get_ai_column(result_column->get_column_id());
+            if (OB_SUCC(ret) && definition == nullptr) { ret = OB_ERR_UNEXPECTED; }
+            const uint64_t hidden_ids[] = {definition == nullptr ? OB_INVALID_ID : definition->state_column_id_,
+                definition == nullptr ? OB_INVALID_ID : definition->request_column_id_,
+                definition == nullptr ? OB_INVALID_ID : definition->result_spec_column_id_};
+            for (int64_t j = 0; OB_SUCC(ret) && j < 3; ++j) {
+              AlterColumnSchema hidden;
+              if (OB_FAIL(hidden.assign(*combined.get_column_schema(hidden_ids[j])))) {
+              } else if (OB_FAIL(hidden.set_origin_column_name(hidden.get_column_name_str()))) {
+              } else {
+                hidden.alter_type_ = OB_DDL_ADD_COLUMN;
+                ret = alter_table_stmt->add_column(hidden);
+              }
+            }
+            if (OB_SUCC(ret)) { ret = argument.add_ai_column(*definition); }
           }
         }
       }
