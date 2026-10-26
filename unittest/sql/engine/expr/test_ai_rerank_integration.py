@@ -125,6 +125,17 @@ class AIRerankIntegrationTest(AISQLMockTestCase):
                     self.rerank(documents,key,explicit)
                 self.assertTrue(self.server.requests.empty())
 
+    def test_null_arguments_and_json_key_fail_before_http(self):
+        for args in ((None,"query",'["one"]'),(self.model,None,'["one"]'),(self.model,"query",None)):
+            with self.subTest(args=args):
+                with self.assertRaises(pymysql.MySQLError):
+                    self.execute("SELECT ai_rerank(%s,%s,%s)",args)
+                self.assertTrue(self.server.requests.empty())
+        with self.assertRaises(pymysql.MySQLError):
+            self.execute("SELECT ai_rerank(%s,'query','[{\"body\":\"one\"}]',json_object('key','body'))",
+                         (self.model,))
+        self.assertTrue(self.server.requests.empty())
+
     def test_response_count_must_match(self):
         for results in ([],[{"index":0,"relevance_score":0}],
                         [{"index":i,"relevance_score":0} for i in range(3)]):
@@ -132,7 +143,7 @@ class AIRerankIntegrationTest(AISQLMockTestCase):
                 self.assert_response_error(self.response(results))
 
     def test_duplicate_and_invalid_indices(self):
-        for index in (-1,2,0,"1",True,None,0.5):
+        for index in (-1,2,18446744073709551615,0,"1",True,None,0.5):
             with self.subTest(index=index):
                 self.assert_response_error(self.response([{"index":0,"relevance_score":1},
                                                           {"index":index,"relevance_score":2}]))
@@ -147,7 +158,8 @@ class AIRerankIntegrationTest(AISQLMockTestCase):
         self.assert_response_error(response.encode())
 
     def test_wrong_response_shapes(self):
-        for response in ([],None,{},self.response(None),self.response({}),self.response([None,None]),
+        for response in ([],None,{}, {"output":None}, {"output":[]}, {"output":"bad"},
+                         self.response(None),self.response({}),self.response([None,None]),
                          self.response([{"index":0},{"index":1}])):
             with self.subTest(response=response):
                 self.assert_response_error(response)
