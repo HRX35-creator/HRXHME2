@@ -115,7 +115,10 @@ class AIEmbedIntegrationTest(AISQLMockTestCase):
             rows = self.execute(f"SELECT id, ai_embed(%s,s) FROM `{table}` ORDER BY id", (self.model,))
             self.assertEqual([(1, self.vector('a',5)), (2,None), (3,self.vector('世界',5))],
                              [(i,json.loads(value) if value is not None else None) for i,value in rows])
-            self.assertEqual(2, self.server.requests.qsize())
+            requested = []
+            while not self.server.requests.empty():
+                requested.extend(self.server.requests.get_nowait()["input"])
+            self.assertEqual(["a", "世界"], requested)
         finally:
             self.execute(f"DROP TABLE `{table}`")
 
