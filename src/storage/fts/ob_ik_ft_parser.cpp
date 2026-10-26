@@ -138,9 +138,7 @@ int ObIKFTParser::process_one_char(TokenizeContext &ctx,
   for (ObList<ObIIKProcessor *, ObIAllocator>::iterator iter = segmenters_.begin();
        OB_SUCC(ret) && iter != segmenters_.end();
        iter++) {
-    // The outer loop already fetched this character. Processors add tokens and
-    // hits without advancing the shared cursor.
-    if (OB_FAIL((*iter)->do_process(ctx, ch, char_len, type))) {
+    if (OB_FAIL((*iter)->process(ctx))) {
     }
   }
   return ret;

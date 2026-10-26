@@ -1,4 +1,4 @@
-"""Semantic references for the IK character-decoding hot path.
+"""Semantic references for the IK dictionary-range hot path.
 
 Run against an isolated native instance using SEEKDB_TEST_SOCKET or
 SEEKDB_TEST_HOST/SEEKDB_TEST_PORT. References were captured before optimization;
@@ -24,6 +24,15 @@ TEXTS = [
     '数据库😀𠀀向量🚀 café CAFÉ naïve Straße İSTANBUL',
     '\u00a0attached\u00a0 data\u2003search\u3000全文\u200b索引',
     'database database 数据库 数据库 ' * 40,
+    # Words adjacent to all six main-dictionary range boundaries (50,000-word
+    # target ranges extend to the end of their first-character group).
+    '一一列举 一一对应 单鹄寡凫 单齿额定升降能力 卖不出去 卖不掉',
+    '应领 应验 底下 底下人',
+    '榫子 榫眼 榱崩栋折 榱栋崩折',
+    '粘附分子 粘骨膜分离器 粜风卖雨 粝食粗衣',
+    '醉马草 醉鬼 醋劲 醋劲儿',
+    '龟龙片甲 龟龙麟凤 龠龡',
+    '榫榫眼 榫榬榭榮榯榰榱榲 醉醊醋 abc AZaz09',
 ]
 
 
