@@ -186,19 +186,28 @@ int ObOpenAIUtils::ObOpenAIComplete::parse_output(common::ObIAllocator &allocato
                                                   common::ObIJsonBase *&result) 
 {
   int ret = OB_SUCCESS;
+  UNUSED(allocator);
   if (OB_ISNULL(http_response)) {
     ret = OB_INVALID_ARGUMENT;
   } else {
-    ObIJsonBase *j_tree = http_response;
-    common::ObString path_text("$.choices[0].message.content");
-    ObJsonPath j_path(path_text, &allocator);
-    ObJsonSeekResult hit;
-    if (OB_FAIL(j_path.parse_path())) {
-    } else if (OB_FAIL(j_tree->seek(j_path, j_path.path_node_cnt(), false, false, hit))) {
-    } else if (hit.size() == 0) {
+    ObJsonNode *choices = http_response->get_value("choices");
+    ObJsonNode *choice = nullptr;
+    ObJsonNode *message = nullptr;
+    ObJsonNode *content = nullptr;
+    if (OB_ISNULL(choices) || choices->json_type() != ObJsonNodeType::J_ARRAY
+        || choices->element_count() == 0) {
+      ret = OB_INVALID_DATA;
+    } else if (OB_ISNULL(choice = static_cast<ObJsonArray *>(choices)->get_value(0))
+               || choice->json_type() != ObJsonNodeType::J_OBJECT) {
+      ret = OB_INVALID_DATA;
+    } else if (OB_ISNULL(message = static_cast<ObJsonObject *>(choice)->get_value("message"))
+               || message->json_type() != ObJsonNodeType::J_OBJECT) {
+      ret = OB_INVALID_DATA;
+    } else if (OB_ISNULL(content = static_cast<ObJsonObject *>(message)->get_value("content"))
+               || content->json_type() != ObJsonNodeType::J_STRING || content->get_data_length() == 0) {
       ret = OB_INVALID_DATA;
     } else {
-      result = hit[0];
+      result = content;
     }
   }
   return ret;
@@ -1360,20 +1369,15 @@ int ObAIFuncModel::call_completion(ObString &prompt, ObJsonObject *config, ObStr
   } else if (OB_FAIL(complete_provider->get_body(*allocator_, request_model_name, prompt_str, prompt, config, body))) {
   } else if (OB_FAIL(client.send_post(*allocator_, endpoint_info_.get_url(), headers, body, response))) {
   } else if (OB_FAIL(complete_provider->parse_output(*allocator_, response, result_base))) {
+  } else if (OB_ISNULL(result_base) || result_base->json_type() != ObJsonNodeType::J_STRING
+             || result_base->get_data_length() == 0) {
+    ret = OB_INVALID_DATA;
   } else if (OB_FAIL(ObAIFuncJsonUtils::print_json_to_str(*allocator_, result_base, result_str))) {
   } else {
     result = result_str;
   }
   if (ret == OB_INVALID_DATA) {
-    ObString response_str;
-    if (OB_SUCCESS == ObAIFuncJsonUtils::print_json_to_str(*allocator_, response, response_str)) {
-      char http_message_str[1024];
-      snprintf(http_message_str, sizeof(http_message_str), "unexpected http message: %s", response_str.ptr());
-      ObString ob_http_message_str(http_message_str);
-      FORWARD_USER_ERROR(ret, ob_http_message_str.ptr());
-    } else {
-      FORWARD_USER_ERROR(ret, "unexpected http message");
-    }
+    FORWARD_USER_ERROR(ret, "ai_complete, malformed or empty completion response");
   } 
   return ret;
 }
