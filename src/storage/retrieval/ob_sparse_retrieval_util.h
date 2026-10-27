@@ -25,16 +25,35 @@ namespace oceanbase
 namespace storage
 {
 
+// Binary document ids order by their bytes, a shorter id first when one is a prefix of the other.
+// This is what the binary-collation comparator computes for non-null values, without its
+// charset dispatch and end-space handling.
+inline int compare_binary_domain_id(const ObDatum &lhs, const ObDatum &rhs)
+{
+  const int64_t length = MIN(lhs.len_, rhs.len_);
+  int cmp_ret = length > 0 ? MEMCMP(lhs.ptr_, rhs.ptr_, length) : 0;
+  if (0 == cmp_ret) {
+    cmp_ret = (lhs.len_ > rhs.len_) - (lhs.len_ < rhs.len_);
+  }
+  return cmp_ret;
+}
+
+inline bool is_binary_domain_id(const ObObjType type, const ObCollationType cs_type)
+{
+  return (ObVarcharType == type || ObCharType == type) && CS_TYPE_BINARY == cs_type;
+}
+
 class ObDomainIdCmp
 {
 public:
-  ObDomainIdCmp() : cmp_func_(nullptr) {}
+  ObDomainIdCmp() : cmp_func_(nullptr), binary_id_(false) {}
   ~ObDomainIdCmp() {}
   inline int init(const ObObjMeta &obj_meta);
   inline int compare(const ObDatum &lhs, const ObDatum &rhs, int &cmp_ret) const;
-  inline void reset() { cmp_func_ = nullptr; }
+  inline void reset() { cmp_func_ = nullptr; binary_id_ = false; }
 private:
   common::ObDatumCmpFuncType cmp_func_;
+  bool binary_id_;
   DISALLOW_COPY_AND_ASSIGN(ObDomainIdCmp);
 };
 
@@ -52,6 +71,7 @@ int ObDomainIdCmp::init(const ObObjMeta &obj_meta)
       STORAGE_LOG(WARN,"failed to get basic functions", K(ret), K(obj_meta));
     } else {
       cmp_func_ = id_basic_funcs->null_first_cmp_;
+      binary_id_ = is_binary_domain_id(obj_meta.get_type(), obj_meta.get_collation_type());
     }
   }
   return ret;
@@ -78,6 +98,8 @@ int ObDomainIdCmp::compare(const ObDatum &lhs, const ObDatum &rhs, int &cmp_ret)
     } else {
       ret = OB_ERR_UNEXPECTED;
     }
+  } else if (binary_id_ && !lhs.is_null() && !rhs.is_null()) {
+    cmp_ret = compare_binary_domain_id(lhs, rhs);
   } else {
     ret = cmp_func_(lhs, rhs, cmp_ret, nullptr);
   }

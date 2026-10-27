@@ -474,6 +474,9 @@ int ObDASLegacyTRMergeIter::init_daat_iter_param(ObTextDaaTParam &iter_param)
   iter_param.allocator_ = &myself_allocator_;
   iter_param.mode_flag_ = ir_ctdef_->mode_flag_;
   iter_param.function_lookup_mode_ = function_lookup_mode_;
+  iter_param.union_only_ = BOOLEAN_MODE != ir_ctdef_->mode_flag_
+      && ir_rtdef_->minimum_should_match_ <= 1
+      && !ir_ctdef_->need_calc_relevance();
   iter_param.bm25_param_est_ctx_.total_doc_cnt_expr_
       = ir_ctdef_->need_calc_relevance()
           ? ir_ctdef_->get_doc_agg_ctdef()->pd_expr_spec_.pd_storage_aggregate_output_.at(0)

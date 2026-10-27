@@ -1,0 +1,108 @@
+DROP TABLE IF EXISTS fts_union_t;
+CREATE TABLE fts_union_t (
+id INT PRIMARY KEY,
+cat INT NOT NULL,
+zh VARCHAR(200),
+en VARCHAR(200),
+FULLTEXT INDEX ft_zh(zh) WITH PARSER ik,
+FULLTEXT INDEX ft_en(en) WITH PARSER beng
+);
+INSERT INTO fts_union_t VALUES
+(1, 1, '全文索引的分词器热路径优化', 'full text index tokenizer hot path'),
+(2, 2, '倒排索引与检索系统设计', 'inverted index and retrieval design'),
+(3, 1, '数据库性能优化实践', 'database performance tuning practice'),
+(4, 3, '中文分词词典加载机制', 'dictionary loading for chinese tokenizer'),
+(5, 2, 'OceanBase 是一款非常稳定的数据库', 'oceanbase is a very stable database'),
+(6, 1, '分词器与倒排索引', 'tokenizer and inverted index'),
+(7, 3, '搜索引擎召回率调优', 'search engine recall tuning'),
+(8, 2, '全文检索 全文检索 全文检索', 'retrieval retrieval retrieval'),
+(9, 1, '没有任何匹配的句子', 'nothing here matches'),
+(10, 3, '索引 索引 分词', 'index index tokenizer');
+SELECT COUNT(*) FROM fts_union_t WHERE MATCH(zh) AGAINST('全文索引 分词器');
+COUNT(*)
+2
+SELECT COUNT(*) FROM fts_union_t WHERE MATCH(en) AGAINST('index tokenizer database');
+COUNT(*)
+7
+SELECT COUNT(*) FROM fts_union_t WHERE MATCH(en) AGAINST('index index index');
+COUNT(*)
+4
+SELECT COUNT(*) FROM fts_union_t WHERE MATCH(en) AGAINST('nosuchword anothermissingword');
+COUNT(*)
+0
+SELECT COUNT(*), MIN(id), MAX(id), SUM(id) FROM fts_union_t WHERE MATCH(zh) AGAINST('索引 数据库 召回率');
+COUNT(*)	MIN(id)	MAX(id)	SUM(id)
+6	2	10	33
+SELECT cat, COUNT(*) FROM fts_union_t WHERE MATCH(en) AGAINST('index tokenizer') GROUP BY cat ORDER BY cat;
+cat	COUNT(*)
+1	2
+2	1
+3	2
+SELECT COUNT(*) FROM fts_union_t WHERE MATCH(en) AGAINST('index tokenizer') AND cat = 1;
+COUNT(*)
+2
+SELECT COUNT(*) FROM (SELECT id FROM fts_union_t WHERE MATCH(en) AGAINST('index tokenizer database') LIMIT 3) t;
+COUNT(*)
+3
+SELECT COUNT(*) FROM (SELECT id FROM fts_union_t WHERE MATCH(en) AGAINST('index tokenizer database') LIMIT 2 OFFSET 4) t;
+COUNT(*)
+2
+SELECT id, ROUND(MATCH(en) AGAINST('index tokenizer'), 6) AS s FROM fts_union_t
+WHERE MATCH(en) AGAINST('index tokenizer') ORDER BY s DESC, id LIMIT 3;
+id	s
+10	1.144851
+6	0.974692
+1	0.879342
+SELECT id FROM fts_union_t WHERE MATCH(zh) AGAINST('倒排索引 分词器') ORDER BY MATCH(zh) AGAINST('倒排索引 分词器') DESC, id LIMIT 4;
+id
+6
+2
+1
+10
+SELECT id, ROUND(MATCH(zh) AGAINST('全文检索 索引'), 6) FROM fts_union_t WHERE MATCH(zh) AGAINST('全文检索 索引')
+ORDER BY MATCH(zh) AGAINST('全文检索 索引') DESC LIMIT 2;
+id	ROUND(MATCH(zh) AGAINST('全文检索 索引'), 6)
+8	6.345029
+10	1.304831
+SELECT id, ROUND(MATCH(en) AGAINST('retrieval index database'), 6) FROM fts_union_t
+WHERE MATCH(en) AGAINST('retrieval index database') ORDER BY 2 DESC, 1 LIMIT 5 OFFSET 1;
+id	ROUND(MATCH(en) AGAINST('retrieval index database'), 6)
+2	2.000743
+3	1.621871
+5	1.621871
+10	0.629568
+6	0.487346
+SELECT id FROM fts_union_t WHERE MATCH(en) AGAINST('+index -inverted' IN BOOLEAN MODE) ORDER BY id;
+id
+1
+10
+SELECT COUNT(*) FROM fts_union_t WHERE MATCH(en) AGAINST('+index +tokenizer' IN BOOLEAN MODE);
+COUNT(*)
+3
+INSERT INTO fts_union_t VALUES (11, 1, '新增的倒排索引文档', 'freshly inserted index document');
+UPDATE fts_union_t SET en = 'no longer about that' WHERE id = 6;
+DELETE FROM fts_union_t WHERE id = 10;
+SELECT COUNT(*) FROM fts_union_t WHERE MATCH(en) AGAINST('index tokenizer');
+COUNT(*)
+4
+SELECT id FROM fts_union_t WHERE MATCH(en) AGAINST('index tokenizer') ORDER BY MATCH(en) AGAINST('index tokenizer') DESC, id LIMIT 3;
+id
+1
+4
+11
+SELECT COUNT(*) FROM fts_union_t WHERE MATCH(zh) AGAINST('倒排索引');
+COUNT(*)
+3
+SELECT tokenize('中华人民共和国人民大会堂是著名地标', 'ik');
+tokenize('中华人民共和国人民大会堂是著名地标', 'ik')
+["著名", "人民大会堂", "地标", "是", "中华人民共和国"]
+SELECT tokenize('中华人民共和国人民大会堂是著名地标', 'ik', '[{"additional_args":[{"ik_mode": "max_word"}]}]');
+tokenize('中华人民共和国人民大会堂是著名地标', 'ik', '[{"additional_args":[{"ik_mode": "max_word"}]}]')
+["大会", "著名", "人民大会堂", "大会堂", "共和国", "人民大会", "人民共和国", "中华人民", "共和", "地标", "是", "会堂", "中华", "中华人民共和国", "名地", "国人", "华人", "人民"]
+SELECT tokenize('一二三四五六七八九十 2026年10月28日 三百五十元 ABC123def 。，、', 'ik');
+tokenize('一二三四五六七八九十 2026年10月28日 三百五十元 ABC123def 。，、', 'ik')
+["abc123def", "28日", "2026年", "10月", "一二三四五六七八九十", "三百五十元"]
+SELECT tokenize('全文索引的分词器热路径优化包括解析器实例复用、停用词全局单例', 'ik', '[{"additional_args":[{"ik_mode": "max_word"}]}]');
+tokenize('全文索引的分词器热路径优化包括解析器实例复用、停用词全局单例', 'ik', '[{"additional_args":[{"ik_mode": "max_word"}]}]')
+["器", "停用", "包括", "例", "解析", "用词", "复用", "索引", "分词器", "单", "优化", "全文", "路径", "全局", "分词", "解析器", "全文索引", "实例", "的", "热"]
+DROP TABLE fts_union_t;

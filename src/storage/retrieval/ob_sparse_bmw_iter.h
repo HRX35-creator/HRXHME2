@@ -42,6 +42,10 @@ public:
 protected:
   virtual int process_collected_row(const ObDatum &id_datum, const double relevance) override;
   virtual int init_before_wand_process() { return OB_SUCCESS; }
+  // Block-max pruning pays for itself only on long posting lists. When this returns true after
+  // the heap is first filled, every remaining document is scored instead.
+  virtual bool prefer_exhaustive_search() { return false; }
+  int exhaustive_top_k_search();
 
   int top_k_search();
   int build_top_k_heap();

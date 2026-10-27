@@ -117,6 +117,11 @@ int ObSRBMWIterImpl::top_k_search()
     } else {
       status_ = BMWStatus::FINISHED;
     }
+  } else if (prefer_exhaustive_search()) {
+    if (OB_FAIL(exhaustive_top_k_search())) {
+    } else {
+      status_ = BMWStatus::FINISHED;
+    }
   } else if (OB_FAIL(init_before_wand_process())) {
   } else {
     status_ = BMWStatus::FIND_NEXT_PIVOT;
@@ -213,6 +218,26 @@ int ObSRBMWIterImpl::build_top_k_heap()
   return ret;
 }
 
+
+// Scores the documents left after build_top_k_heap() in id order. Pruning only skips documents
+// whose score cannot exceed the current threshold and a document replaces a heap entry only when
+// it scores strictly higher, so this keeps the same top k as the block-max search.
+int ObSRBMWIterImpl::exhaustive_top_k_search()
+{
+  int ret = OB_SUCCESS;
+  bool need_project = true;
+  double relevance = 0.0;
+  const ObDatum *id_datum = nullptr;
+  while (OB_SUCC(ret)) {
+    if (OB_FAIL(collect_dims_by_id(id_datum, relevance, need_project))) {
+    } else if (OB_FAIL(fill_merge_heap())) {
+    }
+  }
+  if (OB_ITER_END == ret) {
+    ret = OB_SUCCESS;
+  }
+  return ret;
+}
 
 int ObSRBMWIterImpl::process_collected_row(const ObDatum &id_datum, const double relevance)
 {

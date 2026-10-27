@@ -258,9 +258,7 @@ int ObFTDATReader<DATA_TYPE>::match_with_hit(const ObString &ft_char,
   int32_t *base = reinterpret_cast<int32_t *>(dat_->buff + dat_->base_offset_);
   int32_t *check = reinterpret_cast<int32_t *>(dat_->buff + dat_->check_offset_);
 
-  ObFTSingleWord word;
-  word.set_word(ft_char.ptr(), ft_char.length());
-  if (OB_FAIL(dat_->get_map()->find(word, code)) && OB_ENTRY_NOT_EXIST != ret) {
+  if (OB_FAIL(map->find(ft_char.ptr(), ft_char.length(), code)) && OB_ENTRY_NOT_EXIST != ret) {
   } else if (OB_ENTRY_NOT_EXIST == ret) {
     ret = OB_SUCCESS;
     hit.set_unmatch();
@@ -301,16 +299,24 @@ ObArrayHashMap *ObFTDAT::get_map() { return reinterpret_cast<ObArrayHashMap *>(b
 
 int ObArrayHashMap::find(const ObFTSingleWord &word, ObFTWordCode &code) const
 {
+  return find(word.word, word.word_len, code);
+}
+
+int ObArrayHashMap::find(const char *word, const int64_t word_len, ObFTWordCode &code) const
+{
   int ret = OB_ENTRY_NOT_EXIST;
-  uint64_t hash = word.get_word().hash();
-  uint64_t index = hash % header_.capacity_;
-  while (header_.data[index].used) {
-    if (header_.data[index].word == word) {
-      code = header_.data[index].code;
-      ret = OB_SUCCESS;
-      break;
-    } else {
-      index = (index + 3) % header_.capacity_;
+  if (OB_LIKELY(nullptr != word && word_len > 0 && word_len <= ObCharset::MAX_MB_LEN)) {
+    // same hash as ObString::hash(), which insert() uses
+    uint64_t index = murmurhash(word, word_len, 0) % header_.capacity_;
+    while (header_.data[index].used) {
+      const ObFTSingleWord &entry = header_.data[index].word;
+      if (entry.word_len == word_len && 0 == MEMCMP(entry.word, word, word_len)) {
+        code = header_.data[index].code;
+        ret = OB_SUCCESS;
+        break;
+      } else {
+        index = (index + 3) % header_.capacity_;
+      }
     }
   }
   return ret;
