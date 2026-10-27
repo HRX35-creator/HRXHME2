@@ -27,14 +27,14 @@
 #else
 #include <sys/ioctl.h>
 #include <net/if.h>
+#include <fcntl.h>
+#include <unistd.h>
 #ifdef __APPLE__
 #include <ifaddrs.h>
 #include <net/if_dl.h>
 #elif defined(__ANDROID__)
 #include <ifaddrs.h>
 #include <linux/if_packet.h>
-#include <fcntl.h>
-#include <unistd.h>
 #endif
 #endif
 #include "sql/engine/expr/ob_expr_uuid.h"
@@ -81,6 +81,76 @@ ObUUIDNode::ObUUIDNode()
   (void)init();
 }
 
+
+namespace
+{
+// RFC 4122 section 4.5 requires a node ID that is not a real hardware address
+// to be random and to have the multicast bit set. Restricted environments may
+// deny access to the network interface information, so no MAC address can be
+// obtained. Derive the node ID from a stable host identifier when one is
+// readable and fall back to /dev/urandom otherwise.
+int read_host_id_file(const char *path, char *buffer, int64_t buffer_size)
+{
+  int ret = OB_SUCCESS;
+  int fd = open(path, O_RDONLY);
+  if (fd < 0) {
+    ret = OB_ERR_UNEXPECTED;
+  } else {
+    ssize_t read_bytes = read(fd, buffer, buffer_size - 1);
+    if (read_bytes < 0) {
+      ret = OB_ERR_UNEXPECTED;
+    } else {
+      buffer[read_bytes] = '\0';
+    }
+    close(fd);
+  }
+  return ret;
+}
+
+int generate_node_id_without_mac(unsigned char *node_id)
+{
+  int ret = OB_SUCCESS;
+  bool node_id_generated = false;
+  char buffer[256];
+  const char *const machine_id_paths[] = {"/etc/machine-id", "/var/lib/dbus/machine-id"};
+  const int machine_id_path_count = sizeof(machine_id_paths) / sizeof(machine_id_paths[0]);
+  for (int i = 0; i < machine_id_path_count && !node_id_generated; ++i) {
+    if (OB_SUCC(read_host_id_file(machine_id_paths[i], buffer, sizeof(buffer)))) {
+      // Mix the machine identifier so the node ID does not expose its content.
+      uint64_t hash = 14695981039346656037ULL;
+      for (int j = 0; buffer[j] != '\0'; ++j) {
+        hash ^= static_cast<unsigned char>(buffer[j]);
+        hash *= 1099511628211ULL;
+      }
+      for (int k = 0; k < 6; ++k) {
+        node_id[k] = static_cast<unsigned char>((hash >> (k * 8)) & 0xFF);
+      }
+      node_id_generated = true;
+    }
+  }
+  if (!node_id_generated) {
+    int fd = open("/dev/urandom", O_RDONLY);
+    if (fd < 0) {
+      ret = OB_ERR_UNEXPECTED;
+      LOG_WARN("failed to open /dev/urandom for the UUID node ID", K(errno));
+    } else {
+      ssize_t read_bytes = read(fd, node_id, 6);
+      close(fd);
+      if (read_bytes != 6) {
+        ret = OB_ERR_UNEXPECTED;
+        LOG_WARN("failed to read a random UUID node ID", K(read_bytes));
+      } else {
+        node_id_generated = true;
+      }
+    }
+  }
+  if (OB_SUCC(ret) && node_id_generated) {
+    // Set the multicast bit to mark the node ID as not being a hardware address.
+    node_id[0] |= 0x01;
+  }
+  return ret;
+}
+} // namespace
 
 /*
  * get and set mac address
@@ -212,6 +282,7 @@ int ObUUIDNode::init()
     ifc.ifc_buf = buf;
     if (ioctl(sock, SIOCGIFCONF, &ifc) < 0) {
       ret = OB_ERR_UNEXPECTED;
+      LOG_WARN("failed to enumerate network interfaces, SIOCGIFCONF", K(errno));
     } else {
       ifreq *it = ifc.ifc_req;
       ifreq *end = it + (ifc.ifc_len / sizeof(ifreq));
@@ -239,11 +310,22 @@ int ObUUIDNode::init()
       if (OB_FAIL(ret)) {
       } else if (!mac_addr_found) {
         ret = OB_ERR_UNEXPECTED;
+        LOG_WARN("no usable MAC address found on any network interface");
       } else {
         is_inited_ = true;
       }
     }
     close(sock);
+  }
+  if (OB_FAIL(ret) && !is_inited_) {
+    // Restricted Linux environments may deny access to the network interface
+    // information, so no MAC address can be obtained. Fall back to a node ID
+    // that does not claim to be a hardware address instead of failing to start.
+    if (OB_SUCC(generate_node_id_without_mac(mac_addr_))) {
+      is_inited_ = true;
+      ret = OB_SUCCESS;
+      LOG_INFO("using a UUID node ID that is not a hardware address (no MAC available)");
+    }
   }
 #endif
   return ret;
