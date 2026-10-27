@@ -1,0 +1,427 @@
+#pragma once
+
+#include <cstdint>
+#include <cstdlib>
+#include <fstream>
+#include <sstream>
+#include <string>
+#include <vector>
+
+#include "lib/allocator/ob_allocator.h"
+#include "lib/container/ob_array.h"
+#include "lib/ob_errno.h"
+#include "lib/string/ob_string.h"
+#include "lib/utility/ob_macro_utils.h"
+#include "common/object/ob_object.h"
+
+#include "rapidjson/document.h"
+
+namespace oceanbase
+{
+namespace sql
+{
+
+enum class ObFileSqlFormat : int8_t
+{
+  CSV = 0,
+  JSONL = 1,
+  NDJSON = 2,
+  PARQUET = 3,
+  GLOB = 4,
+};
+
+struct ObFileSqlColumn
+{
+  common::ObString name_;
+  common::ObObjType type_;
+  bool nullable_;
+  int32_t precision_;
+  int8_t scale_;
+};
+
+struct ObFileSqlOptions
+{
+  ObFileSqlOptions()
+      : header_(true),
+        delimiter_(','),
+        quote_('"'),
+        sample_size_(-1),
+        null_text_()
+  {
+  }
+  bool header_;
+  char delimiter_;
+  char quote_;
+  int64_t sample_size_;
+  common::ObString null_text_;
+};
+
+class ObFileSqlUtils
+{
+public:
+  static int infer_schema(common::ObIAllocator &allocator,
+                          const common::ObString &path,
+                          ObFileSqlFormat format,
+                          const ObFileSqlOptions &options,
+                          common::ObArray<ObFileSqlColumn> &columns,
+                          common::ObString &error_msg)
+  {
+    int ret = common::OB_SUCCESS;
+    if (format == ObFileSqlFormat::CSV) {
+      ret = infer_csv_schema_(allocator, path, options, columns, error_msg);
+    } else if (format == ObFileSqlFormat::JSONL || format == ObFileSqlFormat::NDJSON) {
+      ret = infer_jsonl_schema_(allocator, path, columns, error_msg);
+    } else {
+      ret = common::OB_NOT_SUPPORTED;
+      error_msg = common::ObString("parquet/glob schema inference is not implemented yet");
+    }
+    return ret;
+  }
+
+private:
+  enum class InferType : int8_t
+  {
+    UNKNOWN,
+    BIGINT,
+    DOUBLE,
+    BOOLEAN,
+    VARCHAR,
+    DATE,
+    DATETIME,
+  };
+
+  static bool is_null_value_(const std::string &value, const common::ObString &null_text)
+  {
+    return !null_text.empty() && null_text.length() == static_cast<int32_t>(value.size()) &&
+           memcmp(null_text.ptr(), value.data(), value.size()) == 0;
+  }
+
+  static bool is_integer_(const std::string &value)
+  {
+    if (value.empty()) {
+      return false;
+    }
+    size_t pos = (value[0] == '-' || value[0] == '+') ? 1 : 0;
+    if (pos >= value.size()) {
+      return false;
+    }
+    for (size_t i = pos; i < value.size(); ++i) {
+      if (value[i] < '0' || value[i] > '9') {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  static bool is_double_(const std::string &value)
+  {
+    if (value.empty()) {
+      return false;
+    }
+    char *end = nullptr;
+    strtod(value.c_str(), &end);
+    return end != value.c_str() && *end == '\0';
+  }
+
+  static bool is_boolean_(const std::string &value)
+  {
+    return value == "true" || value == "false" || value == "TRUE" || value == "FALSE";
+  }
+
+  static bool is_date_(const std::string &value)
+  {
+    if (value.size() != 10 || value[4] != '-' || value[7] != '-') {
+      return false;
+    }
+    for (int i = 0; i < 10; ++i) {
+      if (i == 4 || i == 7) {
+        continue;
+      }
+      if (value[i] < '0' || value[i] > '9') {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  static bool is_datetime_(const std::string &value)
+  {
+    if (value.size() != 19 || value[4] != '-' || value[7] != '-' ||
+        value[10] != ' ' || value[13] != ':' || value[16] != ':') {
+      return false;
+    }
+    for (int i = 0; i < 19; ++i) {
+      if (i == 4 || i == 7 || i == 10 || i == 13 || i == 16) {
+        continue;
+      }
+      if (value[i] < '0' || value[i] > '9') {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  static InferType infer_type_(const std::string &value, const common::ObString &null_text)
+  {
+    if (is_null_value_(value, null_text)) {
+      return InferType::UNKNOWN;
+    } else if (is_boolean_(value)) {
+      return InferType::BOOLEAN;
+    } else if (is_integer_(value)) {
+      return InferType::BIGINT;
+    } else if (is_double_(value)) {
+      return InferType::DOUBLE;
+    } else if (is_date_(value)) {
+      return InferType::DATE;
+    } else if (is_datetime_(value)) {
+      return InferType::DATETIME;
+    } else {
+      return InferType::VARCHAR;
+    }
+  }
+
+  static InferType merge_type_(InferType lhs, InferType rhs)
+  {
+    if (lhs == InferType::UNKNOWN) {
+      return rhs;
+    }
+    if (rhs == InferType::UNKNOWN) {
+      return lhs;
+    }
+    if (lhs == rhs) {
+      return lhs;
+    }
+    if (lhs == InferType::BIGINT && rhs == InferType::DOUBLE) {
+      return InferType::DOUBLE;
+    }
+    if (lhs == InferType::DOUBLE && rhs == InferType::BIGINT) {
+      return InferType::DOUBLE;
+    }
+    return InferType::VARCHAR;
+  }
+
+  static common::ObObjType to_obj_type_(InferType type)
+  {
+    switch (type) {
+      case InferType::BIGINT:
+        return common::ObIntType;
+      case InferType::DOUBLE:
+        return common::ObDoubleType;
+      case InferType::BOOLEAN:
+        return common::ObTinyIntType;
+      case InferType::DATE:
+        return common::ObDateType;
+      case InferType::DATETIME:
+        return common::ObDateTimeType;
+      case InferType::VARCHAR:
+      case InferType::UNKNOWN:
+      default:
+        return common::ObVarcharType;
+    }
+  }
+
+  static int infer_csv_schema_(common::ObIAllocator &allocator,
+                               const common::ObString &path,
+                               const ObFileSqlOptions &options,
+                               common::ObArray<ObFileSqlColumn> &columns,
+                               common::ObString &error_msg)
+  {
+    int ret = common::OB_SUCCESS;
+    std::ifstream in(std::string(path.ptr(), path.length()), std::ios::binary);
+    if (!in.is_open()) {
+      ret = common::OB_FILE_NOT_EXIST;
+      error_msg = common::ObString("failed to open csv file");
+      return ret;
+    }
+
+    std::string content((std::istreambuf_iterator<char>(in)),
+                        std::istreambuf_iterator<char>());
+    in.close();
+
+    std::vector<std::vector<std::string>> records;
+    if (OB_FAIL(parse_csv_records_(content, options, records))) {
+      error_msg = common::ObString("malformed csv record");
+      return ret;
+    }
+    if (records.empty()) {
+      ret = common::OB_INVALID_DATA;
+      error_msg = common::ObString("csv file is empty");
+      return ret;
+    }
+
+    const int64_t column_count = records[0].size();
+    if (column_count == 0) {
+      ret = common::OB_INVALID_DATA;
+      error_msg = common::ObString("csv header is empty");
+      return ret;
+    }
+
+    std::vector<InferType> types(column_count, InferType::UNKNOWN);
+    std::vector<std::string> names(column_count);
+    for (int64_t i = 0; i < column_count; ++i) {
+      names[i] = options.header_ ? records[0][i] : "c" + std::to_string(i + 1);
+    }
+
+    const int64_t first_data_row = options.header_ ? 1 : 0;
+    for (int64_t r = first_data_row; OB_SUCC(ret) && r < static_cast<int64_t>(records.size()); ++r) {
+      if (records[r].size() != static_cast<size_t>(column_count)) {
+        ret = common::OB_INVALID_DATA;
+        error_msg = common::ObString("csv row has a different number of fields");
+        break;
+      }
+      for (int64_t c = 0; c < column_count; ++c) {
+        types[c] = merge_type_(types[c], infer_type_(records[r][c], options.null_text_));
+      }
+    }
+
+    for (int64_t c = 0; OB_SUCC(ret) && c < column_count; ++c) {
+      ObFileSqlColumn column;
+      common::ObString name;
+      if (OB_FAIL(ob_write_string(allocator, common::ObString(names[c].size(), names[c].data()), name))) {
+      } else {
+        column.name_ = name;
+        column.type_ = to_obj_type_(types[c]);
+        column.nullable_ = true;
+        column.precision_ = -1;
+        column.scale_ = -1;
+        if (OB_FAIL(columns.push_back(column))) {
+        }
+      }
+    }
+    return ret;
+  }
+
+  static int infer_jsonl_schema_(common::ObIAllocator &allocator,
+                                 const common::ObString &path,
+                                 common::ObArray<ObFileSqlColumn> &columns,
+                                 common::ObString &error_msg)
+  {
+    int ret = common::OB_SUCCESS;
+    std::ifstream in(std::string(path.ptr(), path.length()), std::ios::binary);
+    if (!in.is_open()) {
+      ret = common::OB_FILE_NOT_EXIST;
+      error_msg = common::ObString("failed to open jsonl file");
+      return ret;
+    }
+
+    std::vector<std::string> names;
+    std::vector<InferType> types;
+    std::string line;
+    int64_t row_no = 0;
+    while (OB_SUCC(ret) && std::getline(in, line)) {
+      ++row_no;
+      if (line.empty()) {
+        continue;
+      }
+      rapidjson::Document doc;
+      doc.Parse(line.c_str());
+      if (doc.HasParseError() || !doc.IsObject()) {
+        ret = common::OB_INVALID_DATA;
+        error_msg = common::ObString("jsonl row is not a flat object");
+        break;
+      }
+      for (rapidjson::Value::ConstMemberIterator it = doc.MemberBegin();
+           it != doc.MemberEnd(); ++it) {
+        std::string key = it->name.GetString();
+        const rapidjson::Value &value = it->value;
+        if (value.IsObject() || value.IsArray()) {
+          ret = common::OB_NOT_SUPPORTED;
+          error_msg = common::ObString("nested json objects/arrays are not supported");
+          break;
+        }
+        int64_t idx = -1;
+        for (int64_t i = 0; i < static_cast<int64_t>(names.size()); ++i) {
+          if (names[i] == key) {
+            idx = i;
+            break;
+          }
+        }
+        if (idx < 0) {
+          idx = names.size();
+          names.push_back(key);
+          types.push_back(InferType::UNKNOWN);
+        }
+        InferType next = InferType::VARCHAR;
+        if (value.IsNull()) {
+          next = InferType::UNKNOWN;
+        } else if (value.IsInt64()) {
+          next = InferType::BIGINT;
+        } else if (value.IsDouble()) {
+          next = InferType::DOUBLE;
+        } else if (value.IsBool()) {
+          next = InferType::BOOLEAN;
+        } else if (value.IsString()) {
+          next = InferType::VARCHAR;
+        }
+        types[idx] = merge_type_(types[idx], next);
+      }
+    }
+    in.close();
+
+    for (int64_t i = 0; OB_SUCC(ret) && i < static_cast<int64_t>(names.size()); ++i) {
+      ObFileSqlColumn column;
+      common::ObString name;
+      if (OB_FAIL(ob_write_string(allocator, common::ObString(names[i].size(), names[i].data()), name))) {
+      } else {
+        column.name_ = name;
+        column.type_ = to_obj_type_(types[i]);
+        column.nullable_ = true;
+        column.precision_ = -1;
+        column.scale_ = -1;
+        if (OB_FAIL(columns.push_back(column))) {
+        }
+      }
+    }
+    return ret;
+  }
+
+  static int parse_csv_records_(const std::string &content,
+                                const ObFileSqlOptions &options,
+                                std::vector<std::vector<std::string>> &records)
+  {
+    int ret = common::OB_SUCCESS;
+    std::vector<std::string> record;
+    std::string field;
+    bool in_quotes = false;
+    const int64_t len = content.size();
+    for (int64_t i = 0; i < len; ++i) {
+      char ch = content[i];
+      if (in_quotes) {
+        if (ch == options.quote_) {
+          if (i + 1 < len && content[i + 1] == options.quote_) {
+            field.push_back(options.quote_);
+            ++i;
+          } else {
+            in_quotes = false;
+          }
+        } else {
+          field.push_back(ch);
+        }
+      } else if (ch == options.quote_) {
+        in_quotes = true;
+      } else if (ch == options.delimiter_) {
+        record.push_back(field);
+        field.clear();
+      } else if (ch == '\n') {
+        record.push_back(field);
+        field.clear();
+        records.push_back(record);
+        record.clear();
+      } else if (ch == '\r') {
+        if (i + 1 < len && content[i + 1] == '\n') {
+          continue;
+        }
+      } else {
+        field.push_back(ch);
+      }
+    }
+    if (!field.empty() || !record.empty()) {
+      record.push_back(field);
+      records.push_back(record);
+    }
+    return ret;
+  }
+};
+
+} // namespace sql
+} // namespace oceanbase
