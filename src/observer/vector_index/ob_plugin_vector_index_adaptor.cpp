@@ -1690,7 +1690,36 @@ int ObPluginVectorIndexAdaptor::add_snap_index(float *vectors, int64_t *vids, Ob
   } else if (OB_FALSE_IT(dim = param->dim_)) {
   } else if (OB_FAIL(get_extra_info_actual_size(extra_info_actual_size))) {
   } else {
-    if (param->type_ == ObVectorIndexAlgorithmType::VIAT_HNSW ||
+    if (param->type_ == ObVectorIndexAlgorithmType::VIAT_HNSW && obvsag::hipvs_hnsw_build_requested()
+        && !snap_data_->has_build_sq_) {
+      // Stage the full snapshot once. Ordinary HNSW otherwise builds through
+      // incremental Add(), which cannot use a whole-dataset GPU graph build.
+      char *extra_info_buf = nullptr;
+      if (num < 0) {
+        ret = OB_INVALID_ARGUMENT;
+      } else if (num == 0 || OB_ISNULL(vectors)) {
+      } else if (OB_ISNULL(vids)) {
+        ret = OB_ERR_UNEXPECTED;
+      } else if (OB_NOT_NULL(extra_objs) && extra_column_count > 0 && param->extra_info_actual_size_ > 0
+          && OB_FAIL(ObVecExtraInfo::extra_infos_to_buf(tmp_allocator, extra_objs, extra_column_count,
+            param->extra_info_actual_size_, num, extra_info_buf))) {
+      } else if (OB_FAIL(init_hnswsq_mem_data())) {
+      } else {
+        TCWLockGuard lock_guard(snap_data_->mem_data_rwlock_);
+        if (OB_NOT_NULL(snap_data_->index_)) {
+          ret = OB_STATE_NOT_MATCH;
+        }
+        for (int i = 0; OB_SUCC(ret) && i < num; ++i) {
+          if (OB_FAIL(snap_data_->vid_array_->push_back(vids[i]))) {}
+        }
+        for (int64_t i = 0; OB_SUCC(ret) && i < int64_t(num) * dim; ++i) {
+          if (OB_FAIL(snap_data_->vec_array_->push_back(vectors[i]))) {}
+        }
+        if (OB_SUCC(ret) && OB_NOT_NULL(extra_info_buf)) {
+          ret = snap_data_->extra_info_buf_->append(extra_info_buf, int64_t(num) * param->extra_info_actual_size_);
+        }
+      }
+    } else if (param->type_ == ObVectorIndexAlgorithmType::VIAT_HNSW ||
         param->type_ == ObVectorIndexAlgorithmType::VIAT_HGRAPH ||
         param->type_ == ObVectorIndexAlgorithmType::VIAT_IPIVF) {
       if (OB_FAIL(try_init_mem_data(VIRT_SNAP))) {
@@ -1808,7 +1837,7 @@ int ObPluginVectorIndexAdaptor::build_hnswsq_index(ObVectorIndexParam *param)
       // do nothing
     } else if (OB_FAIL(snap_data_->mem_ctx_->init(parent_mem_ctx_, all_vsag_use_mem_))) {
     } else {
-      LOG_INFO("HgraphIndex build hnswsq index success", K(ret), K(param->dim_), K(vid_array->count()));
+      LOG_INFO("start cached snapshot index build", K(ret), K(param->dim_), K(vid_array->count()));
       lib::ObMallocHookAttrGuard malloc_guard(lib::ObMemAttr("VIndexVsagADP"));
       lib::ObLightBacktraceGuard light_backtrace_guard(false);
       if (OB_FAIL(ret)) {
@@ -2011,6 +2040,15 @@ int ObPluginVectorIndexAdaptor::check_snap_hnswsq_index()
     ret = OB_ERR_UNEXPECTED;
   } else if (OB_ISNULL(param = static_cast<ObVectorIndexParam*>(algo_data_))) {
     ret = OB_ERR_UNEXPECTED;
+  } else if (param->type_ == VIAT_HNSW && obvsag::hipvs_hnsw_build_requested()
+      && !snap_data_->has_build_sq_ && OB_NOT_NULL(vid_array)) {
+    TCWLockGuard lock_guard(snap_data_->mem_data_rwlock_);
+    if (OB_ISNULL(vid_array) || OB_ISNULL(vec_array) || OB_ISNULL(extra_info_buf)) {
+      ret = OB_ERR_UNEXPECTED;
+    } else if (vid_array->empty()) {
+      // Empty input has no GPU build to report.
+    } else if (OB_FAIL(build_hnswsq_index(param))) {
+    }
   } else if (param->type_ == VIAT_HNSW || param->type_ == VIAT_HGRAPH || snap_data_->has_build_sq_ || param->type_ == VIAT_IPIVF) {
     // do nothing
   } else if (OB_ISNULL(snap_data_->index_)) {
