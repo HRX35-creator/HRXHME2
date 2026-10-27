@@ -17,6 +17,9 @@
 #define USING_LOG_PREFIX LIB
 
 #include "ob_vsag_adaptor.h"
+#include "hipvs_hnsw_builder.h"
+#include <chrono>
+#include <cstring>
 #include <map>
 #include "vsag/vsag.h"
 #include "vsag/errors.h"
@@ -215,10 +218,75 @@ private:
   int window_size_;
 };
 
+bool hipvs_hnsw_build_requested()
+{
+  return hipvs_build_mode() != HipvsBuildMode::DISABLED;
+}
+
 int HnswIndexHandler::build_index(const vsag::DatasetPtr &base)
 {
   int ret = OB_SUCCESS;
   try {
+    const HipvsBuildMode mode = hipvs_build_mode();
+    if (index_type_ == HNSW_TYPE && mode != HipvsBuildMode::DISABLED) {
+      const auto start = std::chrono::steady_clock::now();
+      HipvsBuildReport report;
+      const auto import = [&]() -> int {
+        if (mode == HipvsBuildMode::INVALID) {
+          report.error = "SEEKDB_HIPVS_BUILD must be off, auto or required";
+          return OB_INVALID_ARGUMENT;
+        }
+        if (extra_info_size_ != 0 || std::strcmp(dtype_, "float32") != 0
+            || std::strcmp(metric_, "l2") != 0 || base->GetNumElements() <= 0
+            || base->GetDim() != dim_ || base->GetFloat32Vectors() == nullptr || base->GetIds() == nullptr
+            || index_->GetNumElements() != 0) {
+          report.error = "hipVS bulk build supports only an empty float32 L2 HNSW without extra columns";
+          return OB_NOT_SUPPORTED;
+        }
+        // The importer is verified against this packaged VSAG layout. A new
+        // backend version must pass the native interoperability test first.
+        if (vsag::version().rfind("129b82c", 0) != 0) {
+          report.error = "VSAG version has not been verified for hipVS HNSW import";
+          return OB_NOT_SUPPORTED;
+        }
+        HipvsHnswSource source{base->GetFloat32Vectors(), base->GetIds(), uint64_t(base->GetNumElements()),
+          uint32_t(dim_), uint32_t(max_degree_), uint32_t(ef_construction_)};
+        vsag::BinarySet binaries;
+        if (!build_hipvs_hnsw(source, uint32_t(vsag::Options::Instance().num_threads_building()), binaries, report)) {
+          return OB_ERR_VSAG_RETURN_ERROR;
+        }
+        char parameters[1024] = {0};
+        int candidate_ret = construct_vsag_create_param(uint8_t(index_type_), dtype_, metric_, dim_, max_degree_,
+          ef_construction_, ef_search_, allocator_, 0, refine_type_, bq_bits_query_, bq_use_fht_, parameters);
+        if (OB_SUCCESS != candidate_ret) { report.error = "cannot construct native HNSW import parameters"; return candidate_ret; }
+        auto candidate = vsag::Factory::CreateIndex(get_index_type_str(index_type_), parameters, allocator_);
+        if (!candidate.has_value()) { report.error = candidate.error().message; return vsag_errcode2ob(candidate.error().type); }
+        auto loaded = candidate.value()->Deserialize(binaries);
+        if (!loaded.has_value()) { report.error = loaded.error().message; return vsag_errcode2ob(loaded.error().type); }
+        if (candidate.value()->GetNumElements() != base->GetNumElements()) {
+          report.error = "native HNSW import did not retain every source vector";
+          return OB_ERR_UNEXPECTED;
+        }
+        // Publish only the complete native index; a failed import leaves the
+        // original empty CPU index untouched for an explicitly logged fallback.
+        index_ = std::move(candidate.value());
+        return OB_SUCCESS;
+      };
+      const int import_ret = import();
+      if (OB_SUCCESS == import_ret) {
+        const double total_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+        LOG_INFO("HIPVS_BUILD_COMPLETE", "rows", base->GetNumElements(), "dimension", dim_, "M", max_degree_,
+          "ef_construction", ef_construction_, "cpu_threads", vsag::Options::Instance().num_threads_building(),
+          "device", report.device.c_str(), "architecture", report.architecture.c_str(),
+          "cagra_build_wall_ms", report.cagra_build_ms, "hierarchy_serialize_wall_ms", report.hierarchy_serialize_ms,
+          "adapter_build_total_ms", total_ms, "serialized_bytes", report.bytes,
+          "nn_descent_iterations", report.nn_descent_iterations, "cpu_fallback", false);
+        return OB_SUCCESS;
+      }
+      LOG_WARN("HIPVS_BUILD_NOT_USED", K(import_ret), "reason", report.error.c_str(),
+        "cpu_fallback", mode == HipvsBuildMode::PREFER, "rows", base->GetNumElements());
+      if (mode != HipvsBuildMode::PREFER) { return import_ret; }
+    }
     tl::expected<std::vector<int64_t>, Error> result = index_->Build(base);
     if (result.has_value()) {
     } else {
