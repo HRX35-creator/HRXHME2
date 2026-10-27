@@ -6,6 +6,7 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include <sys/stat.h>
 
 #include "lib/allocator/ob_allocator.h"
 #include "lib/container/ob_array.h"
@@ -430,7 +431,9 @@ public:
       : in_(),
         options_(),
         peek_(-1),
-        eof_(true)
+        eof_(true),
+        stat_valid_(false),
+        stat_info_()
   {
   }
 
@@ -447,11 +450,16 @@ public:
     options_ = options;
     peek_ = -1;
     eof_ = false;
+    stat_valid_ = false;
     in_.clear();
-    in_.open(std::string(path.ptr(), path.length()), std::ios::binary);
+    std::string path_str(path.ptr(), path.length());
+    path_ = path_str;
+    in_.open(path_str, std::ios::binary);
     if (!in_.is_open()) {
       ret = common::OB_FILE_NOT_EXIST;
       eof_ = true;
+    } else if (0 == stat(path_str.c_str(), &stat_info_)) {
+      stat_valid_ = true;
     }
     return ret;
   }
@@ -472,6 +480,7 @@ public:
     record.clear();
     if (eof_) {
       ret = common::OB_ITER_END;
+    } else if (stat_valid_ && OB_FAIL(check_unchanged_())) {
     } else {
       std::string field;
       bool in_quotes = false;
@@ -550,10 +559,27 @@ private:
   }
 
 private:
+  int check_unchanged_()
+  {
+    int ret = common::OB_SUCCESS;
+    struct stat current;
+    if (0 != stat(path_.c_str(), &current)) {
+      ret = common::OB_FILE_NOT_EXIST;
+    } else if (current.st_size != stat_info_.st_size ||
+               current.st_mtime != stat_info_.st_mtime) {
+      ret = common::OB_IO_ERROR;
+    }
+    return ret;
+  }
+
+private:
   std::ifstream in_;
   ObFileSqlOptions options_;
   int peek_;
   bool eof_;
+  bool stat_valid_;
+  struct stat stat_info_;
+  std::string path_;
 };
 
 class ObFileJsonlReader
@@ -562,7 +588,10 @@ public:
   ObFileJsonlReader()
       : in_(),
         columns_(),
-        eof_(true)
+        eof_(true),
+        stat_valid_(false),
+        stat_info_(),
+        path_()
   {
   }
 
@@ -578,11 +607,16 @@ public:
     int ret = common::OB_SUCCESS;
     columns_.clear();
     eof_ = false;
+    stat_valid_ = false;
     in_.clear();
-    in_.open(std::string(path.ptr(), path.length()), std::ios::binary);
+    std::string path_str(path.ptr(), path.length());
+    path_ = path_str;
+    in_.open(path_str, std::ios::binary);
     if (!in_.is_open()) {
       ret = common::OB_FILE_NOT_EXIST;
       eof_ = true;
+    } else if (0 == stat(path_str.c_str(), &stat_info_)) {
+      stat_valid_ = true;
     } else if (OB_FAIL(collect_columns_())) {
     } else if (OB_FAIL(reset())) {
     }
@@ -610,6 +644,7 @@ public:
     nulls.assign(columns_.size(), true);
     if (eof_) {
       ret = common::OB_ITER_END;
+    } else if (stat_valid_ && OB_FAIL(check_unchanged_())) {
     } else {
       std::string line;
       while (OB_SUCC(ret) && std::getline(in_, line)) {
@@ -690,9 +725,26 @@ private:
   }
 
 private:
+  int check_unchanged_()
+  {
+    int ret = common::OB_SUCCESS;
+    struct stat current;
+    if (0 != stat(path_.c_str(), &current)) {
+      ret = common::OB_FILE_NOT_EXIST;
+    } else if (current.st_size != stat_info_.st_size ||
+               current.st_mtime != stat_info_.st_mtime) {
+      ret = common::OB_IO_ERROR;
+    }
+    return ret;
+  }
+
+private:
   std::ifstream in_;
   std::vector<std::string> columns_;
   bool eof_;
+  bool stat_valid_;
+  struct stat stat_info_;
+  std::string path_;
 };
 
 } // namespace sql
