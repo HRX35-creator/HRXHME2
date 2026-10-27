@@ -318,6 +318,14 @@ static constexpr double DEFAULT_PRE_RATE_FILTER_WITH_ROWKEY = 0.35;
 static constexpr double DEFAULT_PRE_RATE_FILTER_WITH_IDX = 0.15;
 static constexpr double DEFAULT_SINDI_SELECTIVITY_RATE = 0.1;
 static const uint64_t MAX_HNSW_BRUTE_FORCE_SIZE = 20000;
+// A pre-filter has to evaluate the predicate on every scanned row before the
+// vector search may start, so its cost follows the number of scanned rows
+// instead of the number of rows that survive the predicate.  Once the
+// predicate keeps at least this fraction of the table the pre-filter
+// degenerates into a full table scan whose eligible VID set is nearly as
+// large as the table itself, and searching the vector index directly while
+// evaluating the predicate on the visited candidates is the cheaper strategy.
+static constexpr double MAX_HNSW_PRE_FILTER_SELECTIVITY = 0.9;
 static const uint64_t MAX_HNSW_PRE_ROW_CNT_WITH_ROWKEY = 1000000;
 static const uint64_t MAX_HNSW_PRE_ROW_CNT_WITH_IDX = 300000;
 static constexpr double DEFAULT_IVFPQ_SELECTIVITY_RATE = 0.9;
@@ -331,11 +339,19 @@ static constexpr double DEFAULT_IVFPQ_SELECTIVITY_RATE = 0.9;
       is_multi_value_index_(false),
       is_spatial_index_(false),
       can_extract_range_(false),
-      with_extra_info_(false) {}
+      with_extra_info_(false),
+      selectivity_from_stat_(true) {}
   inline void set_vec_idx_type(ObVecIndexType vec_idx_type) { vec_idx_type_ = vec_idx_type;}
   ObVecIndexType get_vec_idx_type() const { return vec_idx_type_; }
   inline double get_selectivity() const { return selectivity_; }
   inline void set_selectivity(double selectivity) { selectivity_ = selectivity;}
+  // Tells whether the selectivity was derived from the collected statistics of
+  // the filtered column.  A selectivity that is not backed by statistics is a
+  // fixed default constant (see ObOptSelectivity::calc_column_range_selectivity)
+  // and says nothing about the number of rows that really survive the
+  // predicate, so it must not be used to select the scan strategy.
+  inline void set_selectivity_from_stat(bool from_stat) { selectivity_from_stat_ = from_stat; }
+  inline bool selectivity_from_stat() const { return selectivity_from_stat_; }
   inline void set_row_count(int64_t row_count) { row_count_ = row_count;}
   inline void set_can_use_vec_pri_opt(bool can_use_vec_pri_opt) {can_use_vec_pri_opt_ = can_use_vec_pri_opt;}
   bool can_use_vec_pri_opt() const { return can_use_vec_pri_opt_; }
@@ -364,7 +380,8 @@ static constexpr double DEFAULT_IVFPQ_SELECTIVITY_RATE = 0.9;
   }
   TO_STRING_KV(K_(vec_idx_type), K_(adaptive_try_path), K_(selectivity), K_(row_count),
   K_(can_use_vec_pri_opt), K_(is_multi_value_index), K_(is_spatial_index),
-  K_(can_extract_range), K_(with_extra_info), K_(vector_index_param));
+  K_(can_extract_range), K_(with_extra_info), K_(vector_index_param),
+  K_(selectivity_from_stat));
   ObVecIndexType vec_idx_type_;                // pre & post & adaptive
   ObVecIdxAdaTryPath adaptive_try_path_;
   double selectivity_;
@@ -375,6 +392,7 @@ static constexpr double DEFAULT_IVFPQ_SELECTIVITY_RATE = 0.9;
   bool is_spatial_index_;
   bool can_extract_range_;
   bool with_extra_info_;
+  bool selectivity_from_stat_;                 // whether selectivity_ comes from the collected statistics
 };
 
 struct VecIndexAccessInfo
