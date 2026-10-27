@@ -32,6 +32,8 @@ namespace sql
 class ObAlterTableStmt : public ObTableStmt
 {
 public:
+  uint64_t ai_retry_column_id_ = common::OB_INVALID_ID;
+  common::ObString ai_retry_predicate_;
   explicit ObAlterTableStmt(common::ObIAllocator *name_pool);
   ObAlterTableStmt();
   virtual ~ObAlterTableStmt();

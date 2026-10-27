@@ -30,6 +30,7 @@
 #include "sql/monitor/ob_sql_stat_record.h"
 #include "query/optimizer/ob_optimizer_location_defs.h"
 #include "query/optimizer/stat/ob_opt_ds_stat.h"
+#include "share/schema/ai_column_definition.h"
 
 namespace oceanbase
 {
@@ -550,6 +551,7 @@ public:
 struct ObQueryCtx
 {
 public:
+  common::ObSEArray<share::schema::AiColumnReference, 4> ai_column_references_;
   ObQueryCtx()
     : question_marks_count_(0),
       calculable_items_(),

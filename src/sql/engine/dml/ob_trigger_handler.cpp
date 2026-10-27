@@ -17,6 +17,7 @@
 #define USING_LOG_PREFIX SQL_ENG
 
 #include "sql/engine/dml/ob_trigger_handler.h"
+#include "share/schema/ai_column_definition.h"
 #include "sql/engine/expr/ob_expr_lob_utils.h"
 #include "sql/engine/dml/ob_table_update_op.h"
 #include "sql/ob_spi.h"
@@ -427,6 +428,9 @@ int TriggerHandle::calc_trigger_routine(
   ParamStore &params,
   ObObj &result)
 {
+  if (share::schema::AiColumnExecutionGuard::active() || share::schema::AiColumnRetryGuard::active()) {
+    return OB_SUCCESS;
+  }
   int ret = OB_SUCCESS;
   ObArray<int64_t> path;
   trigger_id = ObTriggerInfo::get_trigger_spec_package_id(trigger_id);

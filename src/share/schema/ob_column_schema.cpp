@@ -27,6 +27,96 @@ namespace share
 namespace schema
 {
 
+thread_local int64_t AiColumnExecutionGuard::depth_ = 0;
+thread_local const ObString *AiColumnExecutionGuard::prompt_ = nullptr;
+thread_local uint64_t AiColumnRetryGuard::table_ = OB_INVALID_ID;
+thread_local uint64_t AiColumnRetryGuard::column_ = OB_INVALID_ID;
+OB_SERIALIZE_MEMBER(AiColumnReference, table_id_, column_id_);
+
+OB_SERIALIZE_MEMBER(AiColumnDefinition, expression_, normalized_expression_, type_prompt_,
+                    dependency_ids_, dependency_names_, max_retries_, vector_dimension_, definition_version_,
+                    state_column_id_, request_column_id_, result_spec_column_id_);
+
+int AiColumnDefinition::remap_column_ids(const hash::ObHashMap<uint64_t, uint64_t> &ids)
+{
+  int ret = OB_SUCCESS;
+  // Validate every mapping before changing the definition.
+  ObSEArray<uint64_t, 4> dependencies;
+  uint64_t state = OB_INVALID_ID;
+  uint64_t request = OB_INVALID_ID;
+  uint64_t spec = OB_INVALID_ID;
+  for (int64_t i = 0; OB_SUCC(ret) && i < dependency_ids_.count(); ++i) {
+    uint64_t mapped = OB_INVALID_ID;
+    if (OB_FAIL(ids.get_refactored(dependency_ids_.at(i), mapped))) {
+    } else if (OB_FAIL(dependencies.push_back(mapped))) {
+    }
+  }
+  if (OB_SUCC(ret)) {
+    if (OB_FAIL(ids.get_refactored(state_column_id_, state))) {
+    } else if (OB_FAIL(ids.get_refactored(request_column_id_, request))) {
+    } else if (OB_FAIL(ids.get_refactored(result_spec_column_id_, spec))) {
+    } else if (OB_FAIL(dependency_ids_.assign(dependencies))) {
+    } else {
+      state_column_id_ = state;
+      request_column_id_ = request;
+      result_spec_column_id_ = spec;
+    }
+  }
+  return ret;
+}
+
+int ObColumnSchemaV2::get_ai_column_definition(AiColumnDefinition &definition) const
+{
+  int ret = OB_SUCCESS;
+  int64_t pos = 0;
+  definition.reset();
+  if (!is_ai_column()) {
+    ret = OB_ENTRY_NOT_EXIST;
+  } else if (OB_FAIL(definition.deserialize(ai_column_info_.ptr(), ai_column_info_.length(), pos))) {
+  } else if (pos != ai_column_info_.length() || definition.expression_.empty()
+             || definition.max_retries_ < 0 || definition.definition_version_ <= 0) {
+    ret = OB_INVALID_ARGUMENT;
+  }
+  return ret;
+}
+
+int ObColumnSchemaV2::set_ai_column_info(const ObString &info)
+{
+  int ret = OB_SUCCESS;
+  if (!info.empty()) {
+    AiColumnDefinition definition;
+    int64_t pos = 0;
+    if (OB_FAIL(definition.deserialize(info.ptr(), info.length(), pos))) {
+    } else if (pos != info.length() || definition.expression_.empty()
+               || definition.max_retries_ < 0 || definition.definition_version_ <= 0) {
+      ret = OB_INVALID_ARGUMENT;
+    }
+  }
+  if (OB_SUCC(ret)) {
+    ret = deep_copy_str(info, ai_column_info_);
+  }
+  return ret;
+}
+
+int ObColumnSchemaV2::set_ai_column_definition(const AiColumnDefinition &definition)
+{
+  int ret = OB_SUCCESS;
+  const int64_t size = definition.get_serialize_size();
+  int64_t pos = 0;
+  char *buf = nullptr;
+  if (definition.expression_.empty() || definition.max_retries_ < 0
+      || definition.definition_version_ <= 0 || size > INT32_MAX) {
+    ret = OB_INVALID_ARGUMENT;
+  } else if (OB_ISNULL(buf = static_cast<char *>(get_allocator()->alloc(size)))) {
+    ret = OB_ALLOCATE_MEMORY_FAILED;
+  } else if (OB_FAIL(definition.serialize(buf, size, pos))) {
+    get_allocator()->free(buf);
+  } else {
+    ai_column_info_.assign_ptr(buf, static_cast<int32_t>(pos));
+  }
+  return ret;
+}
+
 
 ObColumnSchemaV2::ObColumnSchemaV2()
     : ObSchema(),
@@ -82,6 +172,7 @@ int ObColumnSchemaV2::assign(const ObColumnSchemaV2 &src_schema)
     } else if (OB_FAIL(deep_copy_obj(src_schema.cur_default_value_, cur_default_value_))) {
     } else if (OB_FAIL(deep_copy_str(src_schema.column_name_, column_name_))) {
     } else if (OB_FAIL(deep_copy_str(src_schema.comment_, comment_))) {
+    } else if (OB_FAIL(deep_copy_str(src_schema.ai_column_info_, ai_column_info_))) {
     } else if (OB_FAIL(set_extended_type_info(src_schema.extended_type_info_))) {
     } else if (src_schema.column_ref_idxs_ != NULL) {
       if (OB_FAIL(alloc_column_ref_set())) {
@@ -120,6 +211,7 @@ int64_t ObColumnSchemaV2::get_convert_size() const
   convert_size += cur_default_value_.get_deep_copy_size();
   convert_size += column_name_.length() + 1;
   convert_size += comment_.length() + 1;
+  convert_size += ai_column_info_.length() + 1;
   if (column_ref_idxs_ != NULL) {
     convert_size += sizeof(ColumnReferenceSet);
   }
@@ -176,6 +268,7 @@ void ObColumnSchemaV2::reset()
   cur_default_value_.reset();
   column_name_.reset();
   comment_.reset();
+  ai_column_info_.reset();
   column_flags_ = NON_CASCADE_FLAG;
   column_ref_idxs_ = NULL;
   prev_column_id_ = UINT64_MAX;
@@ -235,7 +328,7 @@ OB_DEF_SERIALIZE(ObColumnSchemaV2)
                 sub_type_,
                 skip_index_attr_,
                 lob_chunk_size_,
-                local_session_vars_);
+                local_session_vars_, ai_column_info_);
   }
 
   return ret;
@@ -248,6 +341,7 @@ OB_DEF_DESERIALIZE(ObColumnSchemaV2)
   ObObj cur_default_value;
   ObString column_name;
   ObString comment;
+  ObString ai_column_info;
   bool has_column_ref = false;
 
   LST_DO_CODE(OB_UNIS_DECODE,
@@ -295,7 +389,10 @@ OB_DEF_DESERIALIZE(ObColumnSchemaV2)
                 sub_type_,
                 skip_index_attr_,
                 lob_chunk_size_,
-                local_session_vars_);
+                local_session_vars_, ai_column_info);
+    if (OB_SUCC(ret)) {
+      ret = set_ai_column_info(ai_column_info);
+    }
   }
   return ret;
 }
@@ -340,7 +437,7 @@ OB_DEF_SERIALIZE_SIZE(ObColumnSchemaV2)
               sub_type_,
               skip_index_attr_,
               lob_chunk_size_,
-              local_session_vars_);
+              local_session_vars_, ai_column_info_);
   return len;
 }
 
@@ -522,7 +619,15 @@ int ObColumnSchemaV2::convert_column_id(const hash::ObHashMap<uint64_t, uint64_t
 {
   int ret = OB_SUCCESS;
   ObSEArray<uint64_t, 1> old_column_ids;
-  if (OB_FAIL(get_cascaded_column_ids(old_column_ids))) {
+  if (is_ai_column()) {
+    AiColumnDefinition definition;
+    if (OB_FAIL(get_ai_column_definition(definition))) {
+    } else if (OB_FAIL(definition.remap_column_ids(column_id_map))) {
+    } else if (OB_FAIL(set_ai_column_definition(definition))) {
+    }
+  }
+  if (OB_FAIL(ret)) {
+  } else if (OB_FAIL(get_cascaded_column_ids(old_column_ids))) {
   } else {
     for (int64_t i = 0; OB_SUCC(ret) && i < old_column_ids.count(); i++) {
       const uint64_t old_column_id = old_column_ids.at(i);

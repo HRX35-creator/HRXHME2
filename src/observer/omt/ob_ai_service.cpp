@@ -61,6 +61,8 @@ int ObAiService::init()
 
 void ObAiService::destroy()
 {
+  worker_.stop();
+  worker_.wait();
   is_inited_ = false;
 }
 

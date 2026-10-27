@@ -342,7 +342,16 @@ all_column_def = dict(
       ('sub_data_type', 'int', 'false', '0'),
       ('skip_index_attr', 'int', 'false', '0'),
       ('lob_chunk_size', 'int', 'false', 'OB_DEFAULT_LOB_CHUNK_SIZE'),
-      ('local_session_vars', 'longtext', 'true')
+      ('local_session_vars', 'longtext', 'true'),
+      # Serialized schema bytes are binary; storing them in LONGTEXT lets the
+      # client charset reject valid definitions containing non-UTF8 bytes.
+      ('ai_column_info', 'varbinary:OB_MAX_VARBINARY_LENGTH', 'true'),
+      ('ai_normalized_expr', 'longtext', 'true'),
+      ('ai_max_retries', 'int', 'true'),
+      ('ai_definition_version', 'int', 'true'),
+      ('ai_state_column_id', 'int', 'true'),
+      ('ai_request_column_id', 'int', 'true'),
+      ('ai_result_spec_column_id', 'int', 'true')
   ]
   )
 
@@ -2466,6 +2475,24 @@ all_objauth_mysql_def = dict(
   )
 def_table_schema(**all_objauth_mysql_def)
 def_table_schema(**gen_history_table_def(1134, all_objauth_mysql_def))
+
+def_table_schema(
+    owner = 'seekdb', table_name = '__all_ai_column_task', table_id = '1135',
+    table_type = 'SYSTEM_TABLE', gm_columns = ['gmt_create', 'gmt_modified'],
+    is_cluster_private = False, meta_record_in_sys = False,
+    rowkey_columns = [('table_id', 'int'), ('column_id', 'int'), ('request_id', 'varchar:128')],
+    normal_columns = [
+      ('rowkey_predicate', 'longtext', 'false'),
+      ('definition_version', 'int', 'false'),
+      ('state', 'int', 'false', '0'),
+      ('retry_count', 'int', 'false', '0'),
+      ('max_retries', 'int', 'false', '2'),
+      ('eligible_ts', 'timestamp', 'true'),
+      ('lease_owner', 'varchar:128', 'true'),
+      ('lease_expiry', 'timestamp', 'true'),
+      ('result_value', 'longtext', 'true'),
+      ('last_error', 'int', 'true')
+    ])
 
 
 # Reserved position (placeholder before this line)
@@ -13822,6 +13849,23 @@ def_table_schema(
       RESPONSE_TRANSFORM_FN
     FROM oceanbase.__all_ai_model_endpoint WHERE ENDPOINT_ID != -1;
   """.replace("\n", " ")
+)
+
+# The authoritative metadata lives in __all_column and its history. A view
+# follows table/column DROP and RENAME without a second catalog to synchronize.
+def_table_schema(
+    owner = 'seekdb',
+    table_name = '__all_ai_column',
+    table_id = '21665',
+    table_type = 'SYSTEM_VIEW',
+    rowkey_columns = [], normal_columns = [], gm_columns = [],
+    view_definition = '''SELECT table_id, column_id, column_name,
+      ai_normalized_expr AS normalized_expr, ai_max_retries AS max_retries,
+      ai_definition_version AS definition_version,
+      ai_state_column_id AS state_column_id,
+      ai_request_column_id AS request_column_id,
+      ai_result_spec_column_id AS result_spec_column_id
+      FROM oceanbase.__all_column WHERE length(ai_column_info) > 0'''.replace('\n', ' ')
 )
 
 def_table_schema(

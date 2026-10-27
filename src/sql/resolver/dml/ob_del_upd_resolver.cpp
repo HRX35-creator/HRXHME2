@@ -127,9 +127,18 @@ int ObDelUpdResolver::resolve_assignments(const ParseNode &parse_node,
       if (OB_SUCC(ret)) {
         assignment.column_expr_ = column->expr_;
         ObRawExpr *expr = value_list.at(i);
+        if (!share::schema::AiColumnExecutionGuard::active() && (!session_info_->is_inner() || session_info_->is_user_session())) {
+          const share::schema::ObColumnSchemaV2 *target = nullptr;
+          if (OB_FAIL(schema_checker_->get_column_schema(column->base_tid_, column->base_cid_, target, true))) {
+          } else if (target != nullptr && target->is_ai_column()) {
+            ret = OB_NOT_SUPPORTED;
+            LOG_USER_ERROR(OB_NOT_SUPPORTED, "direct assignment to an AI column");
+          }
+        }
         bool is_generated_column = true;
         // Mysql only allows updating generated columns to their default value
-        if (OB_FAIL(check_basic_column_generated(ref_expr, stmt, is_generated_column))) {
+        if (OB_FAIL(ret)) {
+        } else if (OB_FAIL(check_basic_column_generated(ref_expr, stmt, is_generated_column))) {
         } else {
           if (T_DEFAULT == expr->get_expr_type()) {
             ObDefaultValueUtils utils(stmt, &params_, this);
@@ -2170,6 +2179,14 @@ int ObDelUpdResolver::resolve_insert_columns(const ParseNode *node,
       } else if (!session_info_->get_ddl_info().is_ddl() && OB_HIDDEN_SESS_CREATE_TIME_COLUMN_ID == column_expr->get_column_id()) {
         ret = OB_NOT_SUPPORTED;
         LOG_USER_ERROR(OB_NOT_SUPPORTED, "specify __sess_create_time value");
+      } else if (!share::schema::AiColumnExecutionGuard::active() && (!session_info_->is_inner() || session_info_->is_user_session())) {
+        const share::schema::ObColumnSchemaV2 *target = nullptr;
+        if (OB_FAIL(schema_checker_->get_column_schema(table_item->get_base_table_item().ref_id_,
+                                                       column_expr->get_column_id(), target, true))) {
+        } else if (target != nullptr && target->is_ai_column()) {
+          ret = OB_NOT_SUPPORTED;
+          LOG_USER_ERROR(OB_NOT_SUPPORTED, "direct insertion into an AI column");
+        } else { ret = mock_values_column_ref(column_expr); }
       } else if (OB_FAIL(mock_values_column_ref(column_expr))) {
       }
     }//end for
@@ -2194,7 +2211,13 @@ int ObDelUpdResolver::resolve_insert_columns(const ParseNode *node,
       for (int64_t i = 0; OB_SUCC(ret) && i < N; i++) {
         uint64_t column_id = column_items.at(i).column_id_;
         bool is_duplicate = false;
-        if (OB_FAIL(check_insert_column_duplicate(column_id, is_duplicate))) {
+        const share::schema::ObColumnSchemaV2 *target = nullptr;
+        if (!share::schema::AiColumnExecutionGuard::active() && (!session_info_->is_inner() || session_info_->is_user_session())
+            && OB_FAIL(schema_checker_->get_column_schema(table_item->get_base_table_item().ref_id_, column_id, target, true))) {
+        } else if (target != nullptr && target->is_ai_column()) {
+          ret = OB_NOT_SUPPORTED;
+          LOG_USER_ERROR(OB_NOT_SUPPORTED, "positional insertion into an AI column; specify the business columns");
+        } else if (OB_FAIL(check_insert_column_duplicate(column_id, is_duplicate))) {
         } else if (is_duplicate) {
           ret = OB_ERR_FIELD_SPECIFIED_TWICE;
           ObCStringHelper helper;
