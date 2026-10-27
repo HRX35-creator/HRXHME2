@@ -103,6 +103,7 @@ class AIColumnWorkerIntegrationTest(AISQLMockTestCase):
             self.fail("typed request group did not publish")
         self.assertEqual((), self.tasks(table))
         requests = [self.server.requests.get_nowait(), self.server.requests.get_nowait()]
+        self.assertTrue(self.server.requests.empty())
         for request in requests:
             user = request["messages"][-1]["content"]
             system = request["messages"][0]["content"]
@@ -180,6 +181,16 @@ class AIColumnWorkerIntegrationTest(AISQLMockTestCase):
         self.assertEqual(content, request["messages"][-1]["content"])
         self.assertEqual(config["user"], request["user"])
         self.assertEqual(17, request["max_tokens"])
+        self.assertTrue(self.server.requests.empty())
+
+    def test_session_timestamp_override_does_not_delay_durable_work(self):
+        table = self.create("clock")
+        self.addCleanup(self.execute, "SET timestamp=0")
+        self.execute("SET timestamp=2000000000")
+        self.execute(f"INSERT INTO `{table}`(id,content) VALUES(1,'future SQL clock')")
+        self.wait_value(table, "reply:future SQL clock")
+        self.assertEqual((), self.tasks(table))
+        self.assertEqual(1, self.server.requests.qsize())
 
 
 if __name__ == "__main__":

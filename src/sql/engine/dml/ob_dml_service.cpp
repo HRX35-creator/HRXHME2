@@ -2201,7 +2201,8 @@ int ObDMLService::enqueue_ai_column_tasks(ObDMLModifyRowNode &modify)
   const share::schema::ObDatabaseSchema *database = nullptr;
   const bool deleting = modify.dml_event_ == ObDmlEventType::DE_DELETING;
   const bool inserting = modify.dml_event_ == ObDmlEventType::DE_INSERTING;
-  ObSqlString qualified, predicate;
+  ObSqlString qualified, predicate, eligible;
+  const int64_t queue_time = ObTimeUtility::current_time();
   ObArenaAllocator alloc;
   if (!ctdef.is_primary_index_ || !ctdef.has_ai_columns_) { return ret; }
   if (OB_ISNULL(guard)) { ret = OB_ERR_UNEXPECTED;
@@ -2213,6 +2214,8 @@ int ObDMLService::enqueue_ai_column_tasks(ObDMLModifyRowNode &modify)
   } else if (OB_FAIL(qualified.append("."))) {
   } else if (OB_FAIL(append_ai_identifier(qualified, schema->get_table_name_str()))) {
   } else if (OB_FAIL(build_ai_rowkey(*schema, ctdef, deleting ? ctdef.old_row_ : ctdef.new_row_, op, predicate))) {
+  } else if (OB_FAIL(eligible.append_fmt("TIMESTAMPADD(MICROSECOND,%ld,FROM_UNIXTIME(%ld))",
+          queue_time % 1000000, queue_time / 1000000))) {
   } else if (OB_FAIL(op.open_inner_conn())) {
   }
   for (int64_t a = 0; OB_SUCC(ret) && a < schema->get_ai_column_count(); ++a) {
@@ -2264,14 +2267,14 @@ int ObDMLService::enqueue_ai_column_tasks(ObDMLModifyRowNode &modify)
           } else if (OB_FAIL(append_ai_hex(group, request))) {
           } else if (OB_FAIL(group.append(","))) {
           } else if (OB_FAIL(append_ai_hex(group, predicate.string()))) {
-          } else if (OB_FAIL(group.append(",NOW(6))"))) {
+          } else if (OB_FAIL(group.append_fmt(",%s)", eligible.ptr()))) {
           } else if (OB_FAIL(op.execute_write(group.ptr()))) {
           } else if (OB_FAIL(task.append_fmt("INSERT IGNORE INTO oceanbase.__all_ai_column_task "
                   "(table_id,request_id,column_id,rowkey_predicate,eligible_ts,definition_version) VALUES(%lu,", table_id))) {
           } else if (OB_FAIL(append_ai_hex(task, request))) {
           } else if (OB_FAIL(task.append_fmt(",%lu,", ai.column_id_))) {
           } else if (OB_FAIL(append_ai_hex(task, predicate.string()))) {
-          } else if (OB_FAIL(task.append_fmt(",NOW(6),%ld)", ai.definition_version_))) {
+          } else if (OB_FAIL(task.append_fmt(",%s,%ld)", eligible.ptr(), ai.definition_version_))) {
           } else { ret = op.execute_write(task.ptr()); }
         }
         if (OB_SUCC(ret) && persisted && !old_request.empty()) {

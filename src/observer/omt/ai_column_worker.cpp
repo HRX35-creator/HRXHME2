@@ -25,6 +25,14 @@ constexpr int64_t INPUT_LIMIT = 1024 * 1024;
 constexpr int64_t OUTPUT_LIMIT = 4 * 1024 * 1024;
 constexpr int64_t LEASE_SECONDS = 90;
 
+int wall_time(ObSqlString &sql, int64_t microseconds)
+{
+  // Queue deadlines are server times. SQL NOW() can be overridden by a
+  // session's timestamp variable and must not control durable work.
+  return sql.append_fmt("TIMESTAMPADD(MICROSECOND,%ld,FROM_UNIXTIME(%ld))",
+      microseconds % 1000000, microseconds / 1000000);
+}
+
 int identifier(ObSqlString &sql, const ObString &name)
 {
   int ret = sql.append("`");
@@ -94,10 +102,11 @@ int lock_request_group(ObMySQLTransaction &transaction, const ObString &qualifie
     }
   }
   if (OB_SUCC(ret)) {
-    ObSqlString query;
-    if (OB_FAIL(query.append_fmt("SELECT lease_epoch FROM oceanbase.__all_ai_column_group WHERE table_id=%lu AND request_id=", table_id))) {
+    ObSqlString query, now;
+    if (OB_FAIL(wall_time(now, ObTimeUtility::current_time()))) {
+    } else if (OB_FAIL(query.append_fmt("SELECT lease_epoch FROM oceanbase.__all_ai_column_group WHERE table_id=%lu AND request_id=", table_id))) {
     } else if (OB_FAIL(hex_literal(query, request))) {
-    } else if (OB_FAIL(query.append_fmt(" AND lease_epoch=%ld AND lease_until>NOW(6) AND lease_owner=", epoch))) {
+    } else if (OB_FAIL(query.append_fmt(" AND lease_epoch=%ld AND lease_until>%s AND lease_owner=", epoch, now.ptr()))) {
     } else if (OB_FAIL(hex_literal(query, owner))) {
     } else if (OB_FAIL(query.append(" FOR UPDATE"))) {
     } else {
@@ -278,13 +287,18 @@ int AIColumnWorker::process_one()
   int ret = OB_SUCCESS;
   ObArenaAllocator allocator;
   Group group;
+  ObSqlString now, until, query;
+  const int64_t clock = ObTimeUtility::current_time();
+  if (OB_FAIL(wall_time(now, clock))) {
+  } else if (OB_FAIL(wall_time(until, clock + LEASE_SECONDS * 1000000))) {
+  } else { ret = query.append_fmt("SELECT table_id,request_id,rowkey_predicate,lease_epoch "
+      "FROM oceanbase.__all_ai_column_group WHERE eligible_ts<=%s AND state=0 "
+      "AND (lease_until IS NULL OR lease_until<=%s) ORDER BY eligible_ts,table_id,request_id LIMIT 1", now.ptr(), now.ptr()); }
   {
     SMART_VAR(ObMySQLProxy::MySQLResult, result) {
       ObMySQLResult *row = nullptr;
-      if (OB_FAIL(sql_->read(result, "SELECT table_id,request_id,rowkey_predicate,lease_epoch "
-              "FROM oceanbase.__all_ai_column_group WHERE eligible_ts<=NOW(6) AND state=0 "
-              "AND (lease_until IS NULL OR lease_until<=NOW(6)) "
-              "ORDER BY eligible_ts,table_id,request_id LIMIT 1"))) {
+      if (OB_FAIL(ret)) {
+      } else if (OB_FAIL(sql_->read(result, query.ptr()))) {
       } else if ((row = result.get_result()) == nullptr) { ret = OB_ERR_UNEXPECTED;
       } else if (OB_FAIL(row->next())) {
       } else if (OB_FAIL(nonnegative_integer(*row, "table_id", group.table_id_))) {
@@ -298,10 +312,10 @@ int AIColumnWorker::process_one()
     int64_t affected = 0;
     if (OB_FAIL(claim.append("UPDATE oceanbase.__all_ai_column_group SET lease_owner="))) {
     } else if (OB_FAIL(hex_literal(claim, owner_))) {
-    } else if (OB_FAIL(claim.append_fmt(",lease_epoch=lease_epoch+1,lease_until=TIMESTAMPADD(SECOND,%ld,NOW(6)) "
-            "WHERE table_id=%lu AND request_id=", LEASE_SECONDS, group.table_id_))) {
+    } else if (OB_FAIL(claim.append_fmt(",lease_epoch=lease_epoch+1,lease_until=%s "
+            "WHERE table_id=%lu AND request_id=", until.ptr(), group.table_id_))) {
     } else if (OB_FAIL(hex_literal(claim, group.request_))) {
-    } else if (OB_FAIL(claim.append_fmt(" AND lease_epoch=%ld AND (lease_until IS NULL OR lease_until<=NOW(6))", group.epoch_))) {
+    } else if (OB_FAIL(claim.append_fmt(" AND lease_epoch=%ld AND (lease_until IS NULL OR lease_until<=%s)", group.epoch_, now.ptr()))) {
     } else if (OB_FAIL(sql_->write(claim.ptr(), affected))) {
     } else if (affected != 1) { ret = OB_EAGAIN;
     } else {
@@ -316,13 +330,14 @@ int AIColumnWorker::process_one()
 int AIColumnWorker::release_group(const Group &group)
 {
   int ret = OB_SUCCESS;
-  ObSqlString sql;
+  ObSqlString sql, now;
   int64_t affected = 0;
-  if (OB_FAIL(sql.append_fmt("UPDATE oceanbase.__all_ai_column_group SET lease_owner='',lease_until=NULL,"
+  if (OB_FAIL(wall_time(now, ObTimeUtility::current_time()))) {
+  } else if (OB_FAIL(sql.append_fmt("UPDATE oceanbase.__all_ai_column_group SET lease_owner='',lease_until=NULL,"
           "eligible_ts=COALESCE((SELECT MIN(eligible_ts) FROM oceanbase.__all_ai_column_task "
           "WHERE table_id=%lu AND request_id=", group.table_id_))) {
   } else if (OB_FAIL(hex_literal(sql, group.request_))) {
-  } else if (OB_FAIL(sql.append_fmt(" AND state IN(0,3)),NOW(6)) WHERE table_id=%lu AND request_id=", group.table_id_))) {
+  } else if (OB_FAIL(sql.append_fmt(" AND state IN(0,3)),%s) WHERE table_id=%lu AND request_id=", now.ptr(), group.table_id_))) {
   } else if (OB_FAIL(hex_literal(sql, group.request_))) {
   } else if (OB_FAIL(sql.append_fmt(" AND lease_epoch=%ld AND lease_owner=", group.epoch_))) {
   } else if (OB_FAIL(hex_literal(sql, owner_))) {
@@ -354,11 +369,12 @@ int AIColumnWorker::save_outcome(const Group &group, const Task &task, int error
   const bool retry = error != OB_SUCCESS && task.retries_ < max_retries;
   const int64_t retries = task.retries_ + (retry ? 1 : 0);
   const int64_t delay = retry ? (1LL << std::min<int64_t>(retries - 1, 5)) : 0;
-  ObSqlString sql;
+  ObSqlString sql, eligible;
   int64_t affected = 0;
   if (OB_FAIL(ret)) {
+  } else if (OB_FAIL(wall_time(eligible, ObTimeUtility::current_time() + delay * 1000000))) {
   } else if (OB_FAIL(sql.append_fmt("UPDATE oceanbase.__all_ai_column_task SET state=%d,retry_count=%ld,error_code=%d,"
-          "eligible_ts=TIMESTAMPADD(SECOND,%ld,NOW(6)),outcome=", error == OB_SUCCESS ? 1 : (retry ? 3 : 2), retries, error, delay))) {
+          "eligible_ts=%s,outcome=", error == OB_SUCCESS ? 1 : (retry ? 3 : 2), retries, error, eligible.ptr()))) {
   } else if (error == OB_SUCCESS ? OB_FAIL(hex_literal(sql, outcome)) : OB_FAIL(sql.append("NULL"))) {
   } else if (OB_FAIL(sql.append_fmt(" WHERE table_id=%lu AND column_id=%lu AND definition_version=%ld AND request_id=",
           group.table_id_, task.column_id_, task.definition_))) {
@@ -381,9 +397,10 @@ int AIColumnWorker::process_group(const Group &group)
 {
   int ret = OB_SUCCESS;
   ObSEArray<Task, 4> tasks;
-  ObSqlString query;
-  if (OB_FAIL(query.append_fmt("SELECT column_id,definition_version,state,retry_count,eligible_ts<=NOW(6) AS eligible "
-          "FROM oceanbase.__all_ai_column_task WHERE table_id=%lu AND request_id=", group.table_id_))) {
+  ObSqlString query, now;
+  if (OB_FAIL(wall_time(now, ObTimeUtility::current_time()))) {
+  } else if (OB_FAIL(query.append_fmt("SELECT column_id,definition_version,state,retry_count,eligible_ts<=%s AS eligible "
+          "FROM oceanbase.__all_ai_column_task WHERE table_id=%lu AND request_id=", now.ptr(), group.table_id_))) {
   } else if (OB_FAIL(hex_literal(query, group.request_))) {
   } else { ret = query.append(" ORDER BY column_id"); }
   {
@@ -409,10 +426,11 @@ int AIColumnWorker::process_group(const Group &group)
   }
   for (int64_t i = 0; OB_SUCC(ret) && i < tasks.count() && !cancellation_.load(); ++i) {
     if ((tasks.at(i).state_ == 0 || tasks.at(i).state_ == 3) && tasks.at(i).eligible_) {
-      ObSqlString renew;
+      ObSqlString renew, until;
       int64_t affected = 0;
-      if (OB_FAIL(renew.append_fmt("UPDATE oceanbase.__all_ai_column_group SET lease_until=TIMESTAMPADD(SECOND,%ld,NOW(6)) "
-              "WHERE table_id=%lu AND request_id=", LEASE_SECONDS, group.table_id_))) {
+      if (OB_FAIL(wall_time(until, ObTimeUtility::current_time() + LEASE_SECONDS * 1000000))) {
+      } else if (OB_FAIL(renew.append_fmt("UPDATE oceanbase.__all_ai_column_group SET lease_until=%s "
+              "WHERE table_id=%lu AND request_id=", until.ptr(), group.table_id_))) {
       } else if (OB_FAIL(hex_literal(renew, group.request_))) {
       } else if (OB_FAIL(renew.append_fmt(" AND lease_epoch=%ld AND lease_owner=", group.epoch_))) {
       } else if (OB_FAIL(hex_literal(renew, owner_))) {
