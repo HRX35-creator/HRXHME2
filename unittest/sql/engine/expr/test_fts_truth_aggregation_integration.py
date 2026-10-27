@@ -69,7 +69,8 @@ class FTSTruthAggregationIntegrationTest(unittest.TestCase):
         return direct[0][0]
 
     def test_scalar_truth_plan_omits_scores_but_numeric_comparison_keeps_them(self):
-        direct = 'SELECT COUNT(*) FROM docs WHERE MATCH(body) AGAINST(%s)'
+        direct = ('SELECT /*+ INDEX(docs ft_body) */ COUNT(*) FROM docs WHERE '
+                  'MATCH(body) AGAINST(%s)')
         self.assertIn('calc_relevance=false', self.plan(direct, ('quasar',)))
         self.assertIn('calc_relevance=true', self.plan(direct + ' > 0', ('quasar',)))
         self.assertIn('calc_relevance=true', self.plan(direct + ' > 0.001', ('quasar',)))

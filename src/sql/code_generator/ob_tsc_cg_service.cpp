@@ -1888,7 +1888,9 @@ int ObTscCgService::generate_text_ir_ctdef(const ObLogTableScan &op,
       ret = OB_ALLOCATE_MEMORY_FAILED;
     } else {
       ir_scan_ctdef->children_cnt_ = 1;
-      ir_scan_ctdef->children_[0] = &scan_ctdef;
+      // Functional lookup builds its own inverted scan; scan_ctdef is the
+      // outer normal-index scan in that case and has no posting columns.
+      ir_scan_ctdef->children_[0] = inv_idx_scan_ctdef;
     }
   }
 
