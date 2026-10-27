@@ -39,6 +39,9 @@ public:
       english_analyzer_(),
       doc_(),
       token_stream_(nullptr),
+      token_buffer_(nullptr),
+      token_buffer_size_(0),
+      token_buffer_used_(0),
       is_inited_(false)
   {}
   ~ObBEngFTParser() { reset(); }
@@ -56,12 +59,16 @@ private:
   int segment(
       const common::ObDatum &doc,
       share::ObITokenStream *&token_stream);
+  int ensure_token_buffer(int64_t additional_size);
 private:
   common::ObIAllocator &allocator_;
   share::ObTextAnalysisCtx analysis_ctx_;
   share::ObEnglishTextAnalyzer english_analyzer_;
   common::ObDatum doc_;
   share::ObITokenStream *token_stream_;
+  char *token_buffer_;
+  int64_t token_buffer_size_;
+  int64_t token_buffer_used_;
   bool is_inited_;
 
   DISALLOW_COPY_AND_ASSIGN(ObBEngFTParser);

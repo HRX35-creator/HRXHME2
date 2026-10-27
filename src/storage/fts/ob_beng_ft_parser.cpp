@@ -49,15 +49,45 @@ int ObBEngFTParser::get_next_token(
     }
   } else if (OB_ISNULL(token.ptr_) || OB_UNLIKELY(0 >= token.len_ || 0 >= token_freq)) {
     ret = OB_INVALID_ARGUMENT;
-  } else if (OB_ISNULL(buf = static_cast<char *>(allocator_.alloc(token.len_)))) {
-    ret = OB_ALLOCATE_MEMORY_FAILED;
+  } else if (OB_FAIL(ensure_token_buffer(token.len_))) {
   } else {
+    buf = token_buffer_ + token_buffer_used_;
     MEMCPY(buf, token.ptr_, token.len_);
+    token_buffer_used_ += token.len_;
     word = buf;
     word_len = token.len_;
     char_len = token.len_;
     word_freq = token_freq;
     LOG_DEBUG("succeed to add word", K(ObString(word_len, word)), K(word_freq));
+  }
+  return ret;
+}
+
+int ObBEngFTParser::ensure_token_buffer(int64_t additional_size)
+{
+  int ret = OB_SUCCESS;
+  const int64_t initial_buffer_size = 4096;
+  if (token_buffer_ == nullptr) {
+    token_buffer_size_ = initial_buffer_size;
+    if (OB_ISNULL(token_buffer_ = static_cast<char *>(allocator_.alloc(token_buffer_size_)))) {
+      ret = OB_ALLOCATE_MEMORY_FAILED;
+    } else {
+      token_buffer_used_ = 0;
+    }
+  } else if (token_buffer_used_ + additional_size > token_buffer_size_) {
+    // Need to grow the buffer
+    int64_t new_size = token_buffer_size_ * 2;
+    while (new_size < token_buffer_used_ + additional_size) {
+      new_size *= 2;
+    }
+    char *new_buffer = static_cast<char *>(allocator_.alloc(new_size));
+    if (OB_ISNULL(new_buffer)) {
+      ret = OB_ALLOCATE_MEMORY_FAILED;
+    } else {
+      MEMCPY(new_buffer, token_buffer_, token_buffer_used_);
+      token_buffer_ = new_buffer;
+      token_buffer_size_ = new_size;
+    }
   }
   return ret;
 }
@@ -110,6 +140,9 @@ void ObBEngFTParser::reset()
   english_analyzer_.reset();
   doc_.reset();
   token_stream_ = nullptr;
+  token_buffer_ = nullptr;
+  token_buffer_size_ = 0;
+  token_buffer_used_ = 0;
   is_inited_ = false;
 }
 

@@ -71,12 +71,9 @@ void ObStopWordChecker::destroy()
   }
 }
 
-int ObStopWordChecker::check_stopword(const ObFTWord &word, bool &is_stopword)
+int ObStopWordChecker::check_stopword(const ObFTWord &word, bool &is_stopword, common::ObIAllocator &allocator)
 {
   int ret = OB_SUCCESS;
-  
-  
-  common::ObArenaAllocator allocator(lib::ObMemAttr("ChkStopWord"));
   if (OB_UNLIKELY(!inited_)) {
     ret = OB_NOT_INIT;
   } else if (OB_UNLIKELY(word.empty())) {
@@ -118,6 +115,7 @@ ObAddWord::ObAddWord(
     ObFTWordMap &word_map)
   : word_meta_(meta),
     allocator_(allocator),
+    stopword_allocator_(lib::ObMemAttr("ChkStopWord")),
     word_map_(word_map),
     min_max_word_cnt_(0),
     non_stopword_cnt_(0),
@@ -126,6 +124,11 @@ ObAddWord::ObAddWord(
     max_token_size_(property.max_token_size_),
     flag_(flag)
 {
+}
+
+ObAddWord::~ObAddWord()
+{
+  stopword_allocator_.reset();
 }
 
 int ObAddWord::process_word(
@@ -189,7 +192,7 @@ int ObAddWord::check_stopword(const ObFTWord &ft_word, bool &is_stopword)
     ObStopWordChecker *stop_word_checker = ObFTParseData::instance().stop_word_checker();
     if (OB_ISNULL(stop_word_checker)) {
       ret = OB_ERR_UNEXPECTED;
-    } else if (OB_FAIL(stop_word_checker->check_stopword(ft_word, is_stopword))) {
+    } else if (OB_FAIL(stop_word_checker->check_stopword(ft_word, is_stopword, stopword_allocator_))) {
     }
   }
   return ret;
