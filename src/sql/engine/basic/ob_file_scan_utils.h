@@ -1,7 +1,9 @@
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -72,9 +74,11 @@ public:
       ret = infer_csv_schema_(allocator, path, options, columns, error_msg);
     } else if (format == ObFileSqlFormat::JSONL || format == ObFileSqlFormat::NDJSON) {
       ret = infer_jsonl_schema_(allocator, path, columns, error_msg);
+    } else if (format == ObFileSqlFormat::PARQUET) {
+      ret = infer_parquet_schema_(allocator, path, columns, error_msg);
     } else {
       ret = common::OB_NOT_SUPPORTED;
-      error_msg = common::ObString("parquet/glob schema inference is not implemented yet");
+      error_msg = common::ObString("glob schema inference is not implemented yet");
     }
     return ret;
   }
@@ -373,6 +377,365 @@ private:
         }
       }
     }
+    return ret;
+  }
+
+  class ParquetCompactReader
+  {
+  public:
+    ParquetCompactReader(const char *data, int64_t len)
+        : data_(reinterpret_cast<const uint8_t *>(data)),
+          len_(len),
+          pos_(0)
+    {
+    }
+
+    int read_byte(uint8_t &value)
+    {
+      int ret = common::OB_SUCCESS;
+      if (pos_ >= len_) {
+        ret = common::OB_INVALID_DATA;
+      } else {
+        value = data_[pos_++];
+      }
+      return ret;
+    }
+
+    int read_varint(uint64_t &value)
+    {
+      int ret = common::OB_SUCCESS;
+      value = 0;
+      int shift = 0;
+      while (OB_SUCC(ret)) {
+        uint8_t byte = 0;
+        if (shift >= 64) {
+          ret = common::OB_INVALID_DATA;
+        } else if (OB_FAIL(read_byte(byte))) {
+        } else {
+          value |= static_cast<uint64_t>(byte & 0x7f) << shift;
+          if ((byte & 0x80) == 0) {
+            break;
+          }
+          shift += 7;
+        }
+      }
+      return ret;
+    }
+
+    int read_zigzag(int64_t &value)
+    {
+      int ret = common::OB_SUCCESS;
+      uint64_t raw = 0;
+      if (OB_FAIL(read_varint(raw))) {
+      } else {
+        value = static_cast<int64_t>((raw >> 1) ^ (~(raw & 1) + 1));
+      }
+      return ret;
+    }
+
+    int read_field_header(uint8_t &type, int16_t &field_id, int16_t &last_id)
+    {
+      int ret = common::OB_SUCCESS;
+      uint8_t byte = 0;
+      if (OB_FAIL(read_byte(byte))) {
+      } else if (0 == byte) {
+        type = 0;
+      } else {
+        type = byte & 0x0f;
+        uint8_t delta = byte >> 4;
+        if (0 == delta) {
+          int64_t id = 0;
+          if (OB_FAIL(read_zigzag(id))) {
+          } else {
+            field_id = static_cast<int16_t>(id);
+          }
+        } else {
+          field_id = last_id + delta;
+        }
+        last_id = field_id;
+      }
+      return ret;
+    }
+
+    int read_binary(std::string &value)
+    {
+      int ret = common::OB_SUCCESS;
+      uint64_t len = 0;
+      if (OB_FAIL(read_varint(len)) || len > static_cast<uint64_t>(len_ - pos_)) {
+        ret = common::OB_INVALID_DATA;
+      } else {
+        value.assign(reinterpret_cast<const char *>(data_ + pos_), len);
+        pos_ += len;
+      }
+      return ret;
+    }
+
+    int read_list_header(uint8_t &elem_type, uint64_t &size)
+    {
+      int ret = common::OB_SUCCESS;
+      uint8_t byte = 0;
+      if (OB_FAIL(read_byte(byte))) {
+      } else {
+        elem_type = byte & 0x0f;
+        size = byte >> 4;
+        if (15 == size) {
+          ret = read_varint(size);
+        }
+      }
+      return ret;
+    }
+
+    int skip_value(uint8_t type)
+    {
+      int ret = common::OB_SUCCESS;
+      if (1 == type || 2 == type) {
+      } else if (3 == type) {
+        uint8_t value = 0;
+        ret = read_byte(value);
+      } else if (4 == type || 5 == type || 6 == type) {
+        int64_t value = 0;
+        ret = read_zigzag(value);
+      } else if (7 == type) {
+        if (pos_ + 8 > len_) {
+          ret = common::OB_INVALID_DATA;
+        } else {
+          pos_ += 8;
+        }
+      } else if (8 == type) {
+        std::string value;
+        ret = read_binary(value);
+      } else if (9 == type || 10 == type) {
+        uint8_t elem_type = 0;
+        uint64_t size = 0;
+        if (OB_FAIL(read_list_header(elem_type, size))) {
+        } else {
+          for (uint64_t i = 0; OB_SUCC(ret) && i < size; ++i) {
+            ret = skip_value(elem_type);
+          }
+        }
+      } else if (11 == type) {
+        uint64_t size = 0;
+        uint8_t key_type = 0;
+        uint8_t value_type = 0;
+        if (OB_FAIL(read_varint(size))) {
+        } else if (size > 0) {
+          uint8_t byte = 0;
+          if (OB_FAIL(read_byte(byte))) {
+          } else {
+            key_type = byte >> 4;
+            value_type = byte & 0x0f;
+            for (uint64_t i = 0; OB_SUCC(ret) && i < size; ++i) {
+              if (OB_FAIL(skip_value(key_type))) {
+              } else {
+                ret = skip_value(value_type);
+              }
+            }
+          }
+        }
+      } else if (12 == type) {
+        int16_t last_id = 0;
+        while (OB_SUCC(ret)) {
+          uint8_t field_type = 0;
+          int16_t field_id = 0;
+          if (OB_FAIL(read_field_header(field_type, field_id, last_id))) {
+          } else if (0 == field_type) {
+            break;
+          } else {
+            ret = skip_value(field_type);
+          }
+        }
+      } else {
+        ret = common::OB_INVALID_DATA;
+      }
+      return ret;
+    }
+
+  private:
+    const uint8_t *data_;
+    int64_t len_;
+    int64_t pos_;
+  };
+
+  static int parquet_type_to_obj_type_(int64_t physical_type,
+                                       int64_t converted_type,
+                                       common::ObObjType &obj_type)
+  {
+    int ret = common::OB_SUCCESS;
+    switch (physical_type) {
+      case 0:
+        obj_type = common::ObTinyIntType;
+        break;
+      case 1:
+        obj_type = (6 == converted_type) ? common::ObDateType : common::ObIntType;
+        break;
+      case 2:
+        obj_type = (9 == converted_type || 10 == converted_type) ?
+                   common::ObDateTimeType : common::ObIntType;
+        break;
+      case 3:
+        obj_type = common::ObDateTimeType;
+        break;
+      case 4:
+        obj_type = common::ObFloatType;
+        break;
+      case 5:
+        obj_type = common::ObDoubleType;
+        break;
+      case 6:
+      case 7:
+        obj_type = common::ObVarcharType;
+        break;
+      default:
+        ret = common::OB_NOT_SUPPORTED;
+        break;
+    }
+    return ret;
+  }
+
+  static int parse_parquet_schema_element_(ParquetCompactReader &reader,
+                                           int64_t &physical_type,
+                                           int64_t &converted_type,
+                                           std::string &name,
+                                           int64_t &num_children)
+  {
+    int ret = common::OB_SUCCESS;
+    int16_t last_id = 0;
+    physical_type = -1;
+    converted_type = -1;
+    num_children = 0;
+    while (OB_SUCC(ret)) {
+      uint8_t type = 0;
+      int16_t field_id = 0;
+      if (OB_FAIL(reader.read_field_header(type, field_id, last_id))) {
+      } else if (0 == type) {
+        break;
+      } else if ((1 == field_id || 3 == field_id || 5 == field_id || 6 == field_id) &&
+                 (5 == type || 4 == type || 3 == type)) {
+        int64_t value = 0;
+        if (OB_FAIL(reader.read_zigzag(value))) {
+        } else if (1 == field_id) {
+          physical_type = value;
+        } else if (5 == field_id) {
+          num_children = value;
+        } else if (6 == field_id) {
+          converted_type = value;
+        }
+      } else if (4 == field_id && 8 == type) {
+        if (OB_FAIL(reader.read_binary(name))) {
+        }
+      } else {
+        ret = reader.skip_value(type);
+      }
+    }
+    return ret;
+  }
+
+  static int parse_parquet_footer_(ParquetCompactReader &reader,
+                                   common::ObIAllocator &allocator,
+                                   common::ObArray<ObFileSqlColumn> &columns,
+                                   common::ObString &error_msg)
+  {
+    int ret = common::OB_SUCCESS;
+    int16_t last_id = 0;
+    while (OB_SUCC(ret)) {
+      uint8_t type = 0;
+      int16_t field_id = 0;
+      if (OB_FAIL(reader.read_field_header(type, field_id, last_id))) {
+      } else if (0 == type) {
+        break;
+      } else if (2 == field_id && 9 == type) {
+        uint8_t elem_type = 0;
+        uint64_t schema_count = 0;
+        if (OB_FAIL(reader.read_list_header(elem_type, schema_count))) {
+        } else if (12 != elem_type) {
+          ret = common::OB_INVALID_DATA;
+        } else {
+          for (uint64_t i = 0; OB_SUCC(ret) && i < schema_count; ++i) {
+            int64_t physical_type = -1;
+            int64_t converted_type = -1;
+            int64_t num_children = 0;
+            std::string name;
+            if (OB_FAIL(parse_parquet_schema_element_(reader, physical_type,
+                                                       converted_type, name,
+                                                       num_children))) {
+            } else if (physical_type < 0) {
+              // group/root node
+            } else {
+              ObFileSqlColumn column;
+              common::ObString column_name;
+              if (OB_FAIL(parquet_type_to_obj_type_(physical_type, converted_type,
+                                                     column.type_))) {
+                error_msg = common::ObString("unsupported parquet physical type");
+              } else if (OB_FAIL(ob_write_string(
+                             allocator,
+                             common::ObString(name.size(), name.data()),
+                             column_name))) {
+              } else {
+                column.name_ = column_name;
+                column.nullable_ = true;
+                column.precision_ = -1;
+                column.scale_ = -1;
+                if (OB_FAIL(columns.push_back(column))) {
+                }
+              }
+            }
+          }
+        }
+      } else {
+        ret = reader.skip_value(type);
+      }
+    }
+    return ret;
+  }
+
+  static int infer_parquet_schema_(common::ObIAllocator &allocator,
+                                   const common::ObString &path,
+                                   common::ObArray<ObFileSqlColumn> &columns,
+                                   common::ObString &error_msg)
+  {
+    int ret = common::OB_SUCCESS;
+    std::ifstream in(std::string(path.ptr(), path.length()), std::ios::binary | std::ios::ate);
+    if (!in.is_open()) {
+      ret = common::OB_FILE_NOT_EXIST;
+      error_msg = common::ObString("failed to open parquet file");
+    } else {
+      std::streamoff file_size = in.tellg();
+      if (file_size < 12) {
+        ret = common::OB_INVALID_DATA;
+        error_msg = common::ObString("parquet file is too small");
+      } else {
+        char magic[4] = {0};
+        in.seekg(0, std::ios::beg);
+        in.read(magic, 4);
+        if (0 != memcmp(magic, "PAR1", 4)) {
+          ret = common::OB_INVALID_DATA;
+          error_msg = common::ObString("invalid parquet magic");
+        } else {
+          in.seekg(file_size - 8, std::ios::beg);
+          uint8_t footer_len_buf[4] = {0};
+          in.read(reinterpret_cast<char *>(footer_len_buf), 4);
+          uint32_t footer_len = static_cast<uint8_t>(footer_len_buf[0]) |
+                                (static_cast<uint32_t>(footer_len_buf[1]) << 8) |
+                                (static_cast<uint32_t>(footer_len_buf[2]) << 16) |
+                                (static_cast<uint32_t>(footer_len_buf[3]) << 24);
+          char end_magic[4] = {0};
+          in.read(end_magic, 4);
+          if (0 != memcmp(end_magic, "PAR1", 4) ||
+              static_cast<std::streamoff>(footer_len) > file_size - 12) {
+            ret = common::OB_INVALID_DATA;
+            error_msg = common::ObString("invalid parquet footer");
+          } else {
+            std::string footer(footer_len, '\0');
+            in.seekg(file_size - 8 - footer_len, std::ios::beg);
+            in.read(&footer[0], footer_len);
+            ParquetCompactReader reader(footer.data(), footer.size());
+            if (OB_FAIL(parse_parquet_footer_(reader, allocator, columns, error_msg))) {
+            }
+          }
+        }
+      }
+    }
+    in.close();
     return ret;
   }
 
