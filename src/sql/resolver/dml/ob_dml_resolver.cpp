@@ -41,6 +41,7 @@
 #include "sql/resolver/dcl/ob_dcl_resolver.h"
 #include "sql/resolver/ddl/ob_ddl_resolver.h"
 #include "sql/hybrid_search/ob_hybrid_search_executor.h"
+#include "sql/engine/basic/ob_file_scan_utils.h"
 
 namespace oceanbase
 {
@@ -51,6 +52,51 @@ using namespace pl;
 
 namespace sql
 {
+namespace
+{
+
+bool is_file_sql_function(const ObRawExpr *expr, ObFileSqlFormat &format)
+{
+  bool is_file_func = false;
+  if (OB_NOT_NULL(expr) && expr->is_sys_func_expr()) {
+    const common::ObString &func_name = static_cast<const ObSysFunRawExpr *>(expr)->get_func_name();
+    if (func_name.case_compare("read_csv") == 0) {
+      format = ObFileSqlFormat::CSV;
+      is_file_func = true;
+    } else if (func_name.case_compare("read_json") == 0 ||
+               func_name.case_compare("read_ndjson") == 0) {
+      format = ObFileSqlFormat::JSONL;
+      is_file_func = true;
+    } else if (func_name.case_compare("read_parquet") == 0) {
+      format = ObFileSqlFormat::PARQUET;
+      is_file_func = true;
+    } else if (func_name.case_compare("glob") == 0) {
+      format = ObFileSqlFormat::GLOB;
+      is_file_func = true;
+    }
+  }
+  return is_file_func;
+}
+
+int get_static_file_path(const ObRawExpr *expr, common::ObString &path)
+{
+  int ret = common::OB_SUCCESS;
+  if (OB_ISNULL(expr) || !expr->is_static_const_expr()) {
+    ret = common::OB_NOT_SUPPORTED;
+  } else {
+    const ObConstRawExpr *const_expr = static_cast<const ObConstRawExpr *>(expr);
+    const common::ObObj &value = const_expr->get_value();
+    if (!value.is_string_type()) {
+      ret = common::OB_INVALID_ARGUMENT;
+    } else {
+      path = value.get_string();
+    }
+  }
+  return ret;
+}
+
+} // namespace
+
 ObDMLResolver::ObDMLResolver(ObResolverParams &params)
     : ObStmtResolver(params),
       current_scope_(T_NONE_SCOPE),
@@ -4022,11 +4068,52 @@ int ObDMLResolver::resolve_function_table_item(const ParseNode &parse_tree,
   }
   OZ (stmt->add_table_item(session_info_, item));
   if (OB_SUCC(ret)) {
-    //
-    // ObFunctionTable fills row data when it depends on the columns before row being the output columns of udf, here we force to add udf's output columns to ObFunctionTable
-    ObSEArray<ColumnItem, 16> col_items;
-    CK (OB_NOT_NULL(item));
-    OZ (resolve_function_table_column_item(*item, col_items));
+    ObFileSqlFormat file_format = ObFileSqlFormat::CSV;
+    if (is_file_sql_function(function_table_expr, file_format)) {
+      if (function_table_expr->get_param_count() < 1) {
+        ret = OB_INVALID_ARGUMENT;
+        LOG_USER_ERROR(OB_INVALID_ARGUMENT, "file sql function requires a path argument");
+      } else {
+        ObString file_path;
+        common::ObArray<ObFileSqlColumn> file_columns;
+        ObString error_msg;
+        ObFileSqlOptions file_options;
+        if (OB_FAIL(get_static_file_path(function_table_expr->get_param_expr(0), file_path))) {
+          LOG_USER_ERROR(OB_NOT_SUPPORTED, "file sql path must be a constant string");
+          ret = OB_NOT_SUPPORTED;
+        } else if (OB_FAIL(ObFileSqlUtils::infer_schema(*allocator_, file_path, file_format,
+                                                         file_options, file_columns, error_msg))) {
+          if (!error_msg.empty()) {
+            FORWARD_USER_ERROR_MSG(ret, "%.*s", error_msg.length(), error_msg.ptr());
+          }
+        } else {
+          for (int64_t i = 0; OB_SUCC(ret) && i < file_columns.count(); ++i) {
+            const ObFileSqlColumn &file_col = file_columns.at(i);
+            ColumnItem *col_item = NULL;
+            common::ObObjMeta meta;
+            common::ObAccuracy accuracy;
+            meta.set_type(file_col.type_);
+            if (ob_is_string_tc(file_col.type_) || ob_is_text_tc(file_col.type_)) {
+              meta.set_collation_type(CS_TYPE_UTF8MB4_BIN);
+              accuracy.set_length(ObAccuracy::DDL_DEFAULT_ACCURACY[file_col.type_].get_length());
+            } else {
+              accuracy.set_accuracy(ObAccuracy::DDL_DEFAULT_ACCURACY[file_col.type_]);
+            }
+            if (OB_FAIL(resolve_function_table_column_item(*item, meta, accuracy,
+                                                            file_col.name_,
+                                                            OB_APP_MIN_COLUMN_ID + i,
+                                                            col_item))) {
+            }
+          }
+        }
+      }
+    } else {
+      //
+      // ObFunctionTable fills row data when it depends on the columns before row being the output columns of udf, here we force to add udf's output columns to ObFunctionTable
+      ObSEArray<ColumnItem, 16> col_items;
+      CK (OB_NOT_NULL(item));
+      OZ (resolve_function_table_column_item(*item, col_items));
+    }
   }
   OX (tbl_item = item);
   return ret;
@@ -7626,10 +7713,15 @@ int ObDMLResolver::resolve_function_table_column_item_sys_func(const TableItem &
   ColumnItem *col_item = NULL;
   ObDMLStmt *stmt = get_stmt();
   const ObUserDefinedType *user_type = NULL;
+  ObFileSqlFormat file_format = ObFileSqlFormat::CSV;
 
   CK (OB_NOT_NULL(stmt));
   CK (OB_LIKELY(table_item.is_function_table()));
   CK (OB_NOT_NULL(table_expr = table_item.function_table_expr_));
+  if (OB_SUCC(ret) && is_file_sql_function(table_expr, file_format)) {
+    // File SQL columns are resolved in resolve_function_table_item.
+    return ret;
+  }
   OZ (table_expr->deduce_type(session_info_));
   if (OB_FAIL(ret)) { // do nothing ...
   } else if (!ObResolverUtils::is_expr_can_be_used_in_table_function(*table_expr)) {
