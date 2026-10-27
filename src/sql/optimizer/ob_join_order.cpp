@@ -17,6 +17,7 @@
 #define USING_LOG_PREFIX SQL_JO
 #include "config_bridge.h"
 #include "ob_join_order.h"
+#include "sql/engine/basic/ob_file_scan_utils.h"
 #include "sql/optimizer/ob_skyline_prunning.h"
 #include "sql/optimizer/ob_log_table_scan.h"
 #include "sql/rewrite/ob_transform_utils.h"
@@ -6741,6 +6742,11 @@ int FunctionTablePath::assign(const FunctionTablePath &other, common::ObIAllocat
   } else {
     table_id_ = other.table_id_;
     value_expr_ = other.value_expr_;
+    is_file_scan_ = other.is_file_scan_;
+    file_format_ = other.file_format_;
+    file_header_ = other.file_header_;
+    file_delimiter_ = other.file_delimiter_;
+    file_quote_ = other.file_quote_;
   }
   return ret;
 }
@@ -8534,7 +8540,37 @@ int ObJoinOrder::generate_function_table_paths()
                                               func_path->subquery_exprs_))) {
     } else if (OB_FAIL(func_path->nl_params_.assign(nl_params))) {
     } else {
-      func_path->value_expr_ = function_table_expr;
+      ObFileSqlFormat file_format = ObFileSqlFormat::CSV;
+      bool is_file_scan = false;
+      if (function_table_expr->is_sys_func_expr()) {
+        const ObString &func_name =
+            static_cast<const ObSysFunRawExpr *>(function_table_expr)->get_func_name();
+        if (func_name.case_compare("read_csv") == 0) {
+          file_format = ObFileSqlFormat::CSV;
+          is_file_scan = true;
+        } else if (func_name.case_compare("read_json") == 0 ||
+                   func_name.case_compare("read_ndjson") == 0) {
+          file_format = ObFileSqlFormat::JSONL;
+          is_file_scan = true;
+        } else if (func_name.case_compare("read_parquet") == 0) {
+          file_format = ObFileSqlFormat::PARQUET;
+          is_file_scan = true;
+        } else if (func_name.case_compare("glob") == 0) {
+          file_format = ObFileSqlFormat::GLOB;
+          is_file_scan = true;
+        }
+      }
+      if (is_file_scan) {
+        if (function_table_expr->get_param_count() < 1) {
+          ret = OB_INVALID_ARGUMENT;
+        } else {
+          func_path->value_expr_ = function_table_expr->get_param_expr(0);
+          func_path->is_file_scan_ = true;
+          func_path->file_format_ = static_cast<int64_t>(file_format);
+        }
+      } else {
+        func_path->value_expr_ = function_table_expr;
+      }
     }
     if (OB_FAIL(ret)) {
     } else if (OB_FAIL(func_path->estimate_cost())) {

@@ -28,7 +28,9 @@ using namespace common;
 namespace sql
 {
 
-OB_SERIALIZE_MEMBER((ObFunctionTableSpec, ObOpSpec), value_expr_, column_exprs_, has_correlated_expr_);
+OB_SERIALIZE_MEMBER((ObFunctionTableSpec, ObOpSpec), value_expr_, column_exprs_,
+                    has_correlated_expr_, is_file_scan_, file_format_,
+                    file_header_, file_delimiter_, file_quote_);
 
 int ObFunctionTableOp::inner_open()
 {
@@ -37,6 +39,23 @@ int ObFunctionTableOp::inner_open()
   already_calc_ = false;
   if (OB_ISNULL(MY_SPEC.value_expr_)) {
     ret = OB_ERR_UNEXPECTED;
+  } else if (MY_SPEC.is_file_scan_) {
+    next_row_func_ = &ObFunctionTableOp::inner_get_next_row_file_scan;
+    ObDatum *path_datum = nullptr;
+    if (OB_FAIL(MY_SPEC.value_expr_->eval(eval_ctx_, path_datum))) {
+    } else if (OB_ISNULL(path_datum) || path_datum->is_null()) {
+      ret = OB_INVALID_ARGUMENT;
+    } else {
+      ObFileSqlOptions options;
+      options.header_ = MY_SPEC.file_header_ != 0;
+      options.delimiter_ = static_cast<char>(MY_SPEC.file_delimiter_);
+      options.quote_ = static_cast<char>(MY_SPEC.file_quote_);
+      if (static_cast<int64_t>(ObFileSqlFormat::CSV) != MY_SPEC.file_format_) {
+        ret = OB_NOT_SUPPORTED;
+      } else {
+        ret = csv_reader_.open(path_datum->get_string(), options);
+      }
+    }
   } else if (ObExtendType == MY_SPEC.value_expr_->datum_meta_.type_) {
     next_row_func_ = &ObFunctionTableOp::inner_get_next_row_udf;
   } else {
@@ -103,6 +122,45 @@ int ObFunctionTableOp::get_current_result(ObObj &result)
 int ObFunctionTableOp::inner_get_next_row()
 {
   return (this->*next_row_func_)();
+}
+
+int ObFunctionTableOp::inner_get_next_row_file_scan()
+{
+  int ret = OB_SUCCESS;
+  clear_evaluated_flag();
+  if (OB_FAIL(ctx_.check_status())) {
+  } else {
+    csv_record_.clear();
+    if (OB_FAIL(csv_reader_.next(csv_record_))) {
+      if (OB_ITER_END == ret) {
+        // no more rows
+      }
+    } else if (csv_record_.size() != static_cast<size_t>(MY_SPEC.column_exprs_.count())) {
+      ret = OB_INVALID_DATA;
+    } else {
+      for (int64_t i = 0; OB_SUCC(ret) && i < MY_SPEC.column_exprs_.count(); ++i) {
+        ObExpr *column_expr = MY_SPEC.column_exprs_.at(i);
+        ObDatum &datum = column_expr->locate_datum_for_write(eval_ctx_);
+        const std::string &field = csv_record_[i];
+        const ObObjType type = column_expr->datum_meta_.type_;
+        if (ObIntType == type) {
+          datum.set_int(atoll(field.c_str()));
+        } else if (ObDoubleType == type) {
+          datum.set_double(atof(field.c_str()));
+        } else if (ObTinyIntType == type) {
+          datum.set_bool(field == "true" || field == "TRUE");
+        } else if (ob_is_string_tc(type) || ob_is_text_tc(type)) {
+          datum.set_string(field.data(), static_cast<uint32_t>(field.size()));
+        } else {
+          ret = OB_NOT_SUPPORTED;
+        }
+        if (OB_SUCC(ret)) {
+          column_expr->set_evaluated_projected(eval_ctx_);
+        }
+      }
+    }
+  }
+  return ret;
 }
 
 int ObFunctionTableOp::inner_get_next_row_udf()

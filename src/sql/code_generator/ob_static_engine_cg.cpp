@@ -5511,6 +5511,11 @@ int ObStaticEngineCG::generate_spec(ObLogFunctionTable &op, ObFunctionTableSpec 
   } else {
     spec.has_correlated_expr_ = value_raw_expr->has_flag(CNT_DYNAMIC_PARAM);
     spec.value_expr_ = value_expr;
+    spec.is_file_scan_ = op.is_file_scan();
+    spec.file_format_ = op.get_file_format();
+    spec.file_header_ = op.get_file_header();
+    spec.file_delimiter_ = op.get_file_delimiter();
+    spec.file_quote_ = op.get_file_quote();
     for (int64_t i = 0; OB_SUCC(ret) && i < op.get_output_exprs().count(); ++i) {
       if (OB_FAIL(mark_expr_self_produced(op.get_output_exprs().at(i)))) {
       }

@@ -30,7 +30,12 @@ public:
         table_id_(OB_INVALID_ID),
         value_expr_(NULL),
         table_name_(),
-        access_exprs_() { }
+        access_exprs_(),
+        is_file_scan_(false),
+        file_format_(0),
+        file_header_(1),
+        file_delimiter_(','),
+        file_quote_('"') { }
   virtual ~ObLogFunctionTable() {}
   void add_values_expr(ObRawExpr* expr) { value_expr_ = expr; }
   const ObRawExpr* get_value_expr() const { return value_expr_; }
@@ -43,6 +48,20 @@ public:
   virtual int allocate_expr_post(ObAllocExprContext &ctx) override;
   void set_table_id(uint64_t table_id) { table_id_ = table_id; }
   uint64_t get_table_id() const { return table_id_; }
+  void set_file_scan_info(bool is_file_scan, int64_t format,
+                          int64_t header, int64_t delimiter, int64_t quote)
+  {
+    is_file_scan_ = is_file_scan;
+    file_format_ = format;
+    file_header_ = header;
+    file_delimiter_ = delimiter;
+    file_quote_ = quote;
+  }
+  bool is_file_scan() const { return is_file_scan_; }
+  int64_t get_file_format() const { return file_format_; }
+  int64_t get_file_header() const { return file_header_; }
+  int64_t get_file_delimiter() const { return file_delimiter_; }
+  int64_t get_file_quote() const { return file_quote_; }
   /**
    *  Get table name
    */
@@ -56,6 +75,11 @@ private:
   ObRawExpr* value_expr_;
   common::ObString table_name_;
   common::ObSEArray<ObRawExpr*, 4, common::ModulePageAllocator, true> access_exprs_;
+  bool is_file_scan_;
+  int64_t file_format_;
+  int64_t file_header_;
+  int64_t file_delimiter_;
+  int64_t file_quote_;
   DISALLOW_COPY_AND_ASSIGN(ObLogFunctionTable);
 };
 }
