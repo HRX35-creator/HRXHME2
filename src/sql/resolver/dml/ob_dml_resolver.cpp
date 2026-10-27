@@ -4038,6 +4038,15 @@ int ObDMLResolver::resolve_function_table_item(const ParseNode &parse_tree,
             delimiter_expr = value_expr;
           } else if (is_named && 0 == arg_name.case_compare("quote")) {
             quote_expr = value_expr;
+          } else if (is_named && 0 == arg_name.case_compare("sample_size")) {
+            if (!value_expr->is_static_const_expr() ||
+                !static_cast<const ObConstRawExpr *>(value_expr)->get_value().is_int()) {
+              ret = OB_INVALID_ARGUMENT;
+              LOG_USER_ERROR(OB_INVALID_ARGUMENT, "sample_size must be -1");
+            } else if (-1 != static_cast<const ObConstRawExpr *>(value_expr)->get_value().get_int()) {
+              ret = OB_NOT_SUPPORTED;
+              LOG_USER_ERROR(OB_NOT_SUPPORTED, "only full-file schema inference is supported");
+            }
           } else if (!is_named && OB_ISNULL(header_expr)) {
             header_expr = value_expr;
           } else if (!is_named && OB_ISNULL(delimiter_expr)) {
