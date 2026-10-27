@@ -536,6 +536,31 @@ int ObTextRetrievalDaaTTokenIter::save_docids()
   return ret;
 }
 
+int ObTextRetrievalDaaTTokenIter::get_doc_id_batch(const ObDocIdExt *&ids, int64_t &count)
+{
+  int ret = OB_SUCCESS;
+  ids = nullptr;
+  count = 0;
+  if (IS_NOT_INIT) {
+    ret = OB_NOT_INIT;
+  } else if (OB_NOT_NULL(relevance_expr_)) {
+    ret = OB_INVALID_ARGUMENT;
+  } else {
+    if (cur_idx_ < 0 || cur_idx_ >= count_) {
+      cur_idx_ = count_ - 1;
+      ret = get_next_row();
+    }
+    if (OB_FAIL(ret)) {
+    } else if (OB_UNLIKELY(cur_idx_ < 0 || cur_idx_ >= count_)) {
+      ret = OB_ERR_UNEXPECTED;
+    } else {
+      ids = &doc_id_[cur_idx_];
+      count = count_ - cur_idx_;
+    }
+  }
+  return ret;
+}
+
 int ObTextRetrievalDaaTTokenIter::get_next_batch(const int64_t capacity, int64_t &count)
 {
   return OB_NOT_IMPLEMENT;

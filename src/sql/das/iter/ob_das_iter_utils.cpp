@@ -1495,12 +1495,21 @@ int ObDASIterUtils::create_text_retrieval_sub_tree(
     // a limit lets the doc-at-a-time retrieval stop early, while the term-at-a-time
     // one has to read every document of the scan range before it yields a row
     const bool has_pushdown_limit = ir_scan_rtdef->pushdown_limit_param_.is_valid();
+    // Short unscored natural-language unions can merge buffered postings in
+    // batches of document IDs instead of materializing a TAAT hash map.
+    const bool use_buffered_union = !is_func_lookup && !ir_scan_ctdef->need_calc_relevance()
+        && nullptr != ir_scan_ctdef->inv_scan_domain_id_col_
+        && (ObUInt64Type == ir_scan_ctdef->inv_scan_domain_id_col_->datum_meta_.type_
+            || (ObVarcharType == ir_scan_ctdef->inv_scan_domain_id_col_->datum_meta_.type_
+                && CS_TYPE_BINARY == ir_scan_ctdef->inv_scan_domain_id_col_->datum_meta_.cs_type_))
+        && NATURAL_LANGUAGE_MODE == ir_scan_ctdef->mode_flag_
+        && merge_iter_param.query_tokens_.count() <= 8;
     merge_iter_param.function_lookup_mode_ = is_func_lookup ? 1 : 0;
     if (ir_scan_ctdef->has_pushdown_topk() && !has_duplicate_boolean_tokens) {
       merge_iter_param.topk_mode_ = 1;
       merge_iter_param.daat_mode_ = 1;
     } else if (merge_iter_param.query_tokens_.count() > OB_MAX_TEXT_RETRIEVAL_TOKEN_CNT
-        || (!is_func_lookup && !ir_scan_ctdef->need_proj_relevance_score()
+        || (!use_buffered_union && !is_func_lookup && !ir_scan_ctdef->need_proj_relevance_score()
             && (BOOLEAN_MODE == ir_scan_ctdef->mode_flag_ || !has_pushdown_limit))) {
       if (BOOLEAN_MODE == ir_scan_ctdef->mode_flag_) {
         ret = OB_NOT_SUPPORTED;

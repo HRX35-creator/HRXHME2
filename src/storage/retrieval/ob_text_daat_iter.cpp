@@ -35,12 +35,15 @@ int ObTextDaaTIter::init(const ObTextDaaTParam &param)
   } else {
     mode_flag_ = param.mode_flag_;
     function_lookup_mode_ = param.function_lookup_mode_;
+    minimum_should_match_ = param.minimum_should_match_;
+    reuse_cursors();
   }
   return ret;
 }
 
 void ObTextDaaTIter::reset()
 {
+  reuse_cursors();
   bm25_param_estimator_.reset();
   // this class can know the type of dim_iters_, but ObSRDaaTIterImpl maybe not
   if (OB_NOT_NULL(dim_iters_)) {
@@ -53,6 +56,7 @@ void ObTextDaaTIter::reset()
 
 void ObTextDaaTIter::reuse(const bool switch_tablet)
 {
+  reuse_cursors();
   if ((OB_NOT_NULL(dim_iters_) && 0 == dim_iters_->count())) {
     // do nothing
   } else {
@@ -148,6 +152,117 @@ int ObTextDaaTIter::do_one_merge_round(int64_t &count)
       if (OB_FAIL(relevance_collector_->get_result(relevance, valid))) {
       } else if (valid && OB_FAIL(cache_result(count, *first, relevance))) {
       }
+    }
+  }
+  return ret;
+}
+
+void ObTextDaaTIter::reuse_cursors()
+{
+  for (PostingCursor &cursor : cursors_) {
+    cursor = PostingCursor();
+  }
+}
+
+bool ObTextDaaTIter::use_buffered_union() const
+{
+  return is_inited_ && nullptr == iter_param_->relevance_expr_ && !iter_param_->need_filter()
+      && !iter_param_->need_pushdown_topk() && !function_lookup_mode_
+      && mode_flag_ == sql::ObMatchAgainstMode::NATURAL_LANGUAGE_MODE
+      && minimum_should_match_ >= 0 && dim_iters_->count() > 0 && dim_iters_->count() <= 8
+      && iter_param_->eval_ctx_->is_vectorized() && !iter_param_->limit_param_->is_valid();
+}
+
+int ObTextDaaTIter::refill_postings()
+{
+  int ret = OB_SUCCESS;
+  for (int64_t i = 0; OB_SUCC(ret) && i < dim_iters_->count(); ++i) {
+    PostingCursor &cursor = cursors_[i];
+    if (!cursor.ended_ && cursor.pos_ >= cursor.count_) {
+      auto *dim = static_cast<ObTextRetrievalDaaTTokenIter *>(dim_iters_->at(i));
+      dim->consume_doc_id_batch(cursor.count_);
+      cursor.pos_ = 0;
+      if (OB_FAIL(dim->get_doc_id_batch(cursor.ids_, cursor.count_))) {
+        if (OB_ITER_END == ret) {
+          cursor.ended_ = true;
+          cursor.ids_ = nullptr;
+          cursor.count_ = 0;
+          ret = OB_SUCCESS;
+        }
+      }
+    }
+    if (OB_SUCC(ret)) {
+      iter_domain_ids_[i] = cursor.ended_ ? nullptr : &cursor.ids_[cursor.pos_].get_datum();
+    }
+  }
+  return ret;
+}
+
+int ObTextDaaTIter::get_next_rows(const int64_t capacity, int64_t &count)
+{
+  if (!use_buffered_union()) {
+    return ObSRDaaTIterImpl::get_next_rows(capacity, count);
+  }
+  int ret = OB_SUCCESS;
+  count = 0;
+  const int64_t real_capacity = MIN(capacity, iter_param_->max_batch_size_);
+  const bool integer_ids = iter_param_->id_proj_expr_->datum_meta_.type_ == common::ObUInt64Type;
+  const bool binary_ids = iter_param_->id_proj_expr_->datum_meta_.type_ == common::ObVarcharType
+      && iter_param_->id_proj_expr_->datum_meta_.cs_type_ == common::CS_TYPE_BINARY;
+  while (OB_SUCC(ret) && count < real_capacity) {
+    const ObDatum *first = nullptr;
+    ObSRMergeItem first_item;
+    uint32_t matching_dims = 0;
+    if (OB_FAIL(refill_postings())) {
+    }
+    for (int64_t i = 0; OB_SUCC(ret) && i < dim_iters_->count(); ++i) {
+      const ObDatum *id = iter_domain_ids_[i];
+      if (nullptr != id) {
+        int64_t cmp = 1;
+        if (nullptr == first) {
+        } else if (integer_ids) {
+          cmp = first->get_uint() > id->get_uint() ? 1
+              : (first->get_uint() < id->get_uint() ? -1 : 0);
+        } else if (binary_ids && first->len_ == 16 && id->len_ == 16) {
+          // Native seekdb document IDs are opaque 16-byte binary values; their
+          // storage order is byte order, not the host-endian sequence number.
+          cmp = MEMCMP(first->ptr_, id->ptr_, 16);
+        } else {
+          ObSRMergeItem item;
+          item.iter_idx_ = i;
+          if (OB_FAIL(merge_cmp_.cmp(first_item, item, cmp))) {
+          }
+        }
+        if (OB_SUCC(ret) && cmp >= 0) {
+          if (cmp > 0) {
+            first = id;
+            first_item.iter_idx_ = i;
+            matching_dims = 0;
+          }
+          matching_dims |= uint32_t(1) << i;
+        }
+      }
+    }
+    if (OB_SUCC(ret) && nullptr == first) {
+      ret = OB_ITER_END;
+    } else if (OB_SUCC(ret)) {
+      const int matched = __builtin_popcount(matching_dims);
+      if (matched >= minimum_should_match_) {
+        ret = cache_result(count, *first, static_cast<double>(matched));
+      }
+      // Current batch views remain valid through cache_result(). Refill only
+      // on the next merge round, after its output has been copied into owned IDs.
+      for (int64_t i = 0; i < dim_iters_->count(); ++i) {
+        if (matching_dims & (uint32_t(1) << i)) {
+          ++cursors_[i].pos_;
+        }
+      }
+    }
+  }
+  if ((OB_SUCC(ret) || OB_ITER_END == ret) && count > 0) {
+    int project_ret = project_results(count);
+    if (OB_SUCCESS != project_ret) {
+      ret = project_ret;
     }
   }
   return ret;
