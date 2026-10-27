@@ -2119,6 +2119,20 @@ int ObDmlCgService::generate_dml_base_ctdef(ObLogicalOperator &op,
     }
   }
 
+  if (OB_SUCC(ret) && index_dml_info.is_primary_index_) {
+    const ObTableSchema *schema = nullptr;
+    if (OB_FAIL(cg_.opt_ctx_->get_schema_guard()->get_table_schema(index_dml_info.ref_table_id_, schema))) {
+    } else if (OB_ISNULL(schema)) {
+      ret = OB_ERR_UNEXPECTED;
+    } else {
+      dml_base_ctdef.has_ai_columns_ = schema->has_ai_columns();
+      if (dml_base_ctdef.has_ai_columns_) {
+        cg_.phy_plan_->set_has_nested_sql(true);
+        cg_.phy_plan_->set_need_serial_exec(true);
+      }
+    }
+  }
+
   if (OB_SUCC(ret) &&
       log_op_def::LOG_INSERT == op.get_type()) {
     ObLogInsert &log_ins_op = static_cast<ObLogInsert &>(op);
@@ -2225,6 +2239,14 @@ int ObDmlCgService::convert_normal_triggers(ObLogDelUpd &log_op,
 {
   int ret = OB_SUCCESS;
   ObLogPlan *log_plan = log_op.get_plan();
+  if (log_plan != nullptr) {
+    const ObExecContext *exec_ctx = log_plan->get_optimizer_context().get_exec_ctx();
+    const ObSqlCtx *sql_ctx = exec_ctx == nullptr ? nullptr : exec_ctx->get_sql_ctx();
+    // Recompute/refresh is internal maintenance. Business triggers run once for
+    // the user's actual row change, without a second input mutation at publish.
+    if ((sql_ctx != nullptr && sql_ctx->ai_column_internal_write_)
+        || log_plan->get_stmt()->get_query_ctx()->ai_column_retry_) { return ret; }
+  }
   ObSchemaGetterGuard *schema_guard = NULL;
   const ObTableSchema *table_schema = NULL;
   ObDASDMLBaseCtDef &das_ctdef = dml_ctdef.das_base_ctdef_;
@@ -2314,7 +2336,9 @@ int ObDmlCgService::convert_normal_triggers(ObLogDelUpd &log_op,
           ret = OB_ERR_UNEXPECTED;
         } else {
           is_hidden = column_schema->is_hidden();
-          is_gen_col = column_schema->is_generated_column();
+          // Re-evaluate AI invalidation after BEFORE triggers have supplied
+          // all ordinary NEW values; never restore its pre-trigger result.
+          is_gen_col = column_schema->is_generated_column() || column_schema->is_ai_column();
           is_gen_col_dep = column_schema->has_generated_column_deps();
           is_update = has_exist_in_array(updated_column_ids, column_schema->get_column_id());
           if (!has_exist_in_array(column_ids, column_schema->get_column_id(), &col_idx)) {

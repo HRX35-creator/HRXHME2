@@ -16,6 +16,7 @@
 
 #define USING_LOG_PREFIX SERVER_OMT
 #include "ob_ai_service.h"
+#include "ai_column_worker.h"
 #include "observer/ai_service/ob_ai_service_executor.h"
 #include "sql/privilege_check/ob_ai_model_priv_util.h"
 #include "sql/session/ob_sql_session_info.h"
@@ -29,7 +30,7 @@ namespace omt
 {
 
 ObAiService::ObAiService()
-  : is_inited_(false)
+  : is_inited_(false), ai_column_worker_(nullptr)
 {
 }
 
@@ -53,6 +54,8 @@ int ObAiService::init()
   int ret = OB_SUCCESS;
   if (IS_INIT) {
     ret = OB_INIT_TWICE;
+  } else if ((ai_column_worker_ = OB_NEW(AIColumnWorker, "AIColumn")) == nullptr) {
+    ret = OB_ALLOCATE_MEMORY_FAILED;
   } else {
     is_inited_ = true;
   }
@@ -61,8 +64,21 @@ int ObAiService::init()
 
 void ObAiService::destroy()
 {
+  stop();
+  wait();
+  if (ai_column_worker_ != nullptr) {
+    OB_DELETE(AIColumnWorker, "AIColumn", ai_column_worker_);
+    ai_column_worker_ = nullptr;
+  }
   is_inited_ = false;
 }
+
+int ObAiService::start()
+{
+  return is_inited_ && ai_column_worker_ != nullptr ? ai_column_worker_->start() : OB_NOT_INIT;
+}
+void ObAiService::stop() { if (ai_column_worker_ != nullptr) { ai_column_worker_->stop(); } }
+void ObAiService::wait() { if (ai_column_worker_ != nullptr) { ai_column_worker_->wait(); } }
 
 int ObAiService::get_ai_service_guard(ObAiServiceGuard &ai_service_guard)
 {

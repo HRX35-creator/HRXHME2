@@ -296,6 +296,7 @@ public:
                                             const ObTableSchema &parent_table_schema,
                                             const ObForeignKeyInfo *fk_info);
   virtual int resolve_column_ref_expr(const ObQualifiedName &q_name, ObRawExpr *&real_ref_expr);
+  int record_ai_column_reads(const ObRawExpr *expr);
   int resolve_sql_expr(const ParseNode &node, ObRawExpr *&expr,
                        ObArray<ObQualifiedName> *input_columns = NULL);
   int resolve_partition_expr(const TableItem &table_item,

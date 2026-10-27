@@ -314,7 +314,7 @@ END_P SET_VAR DELIMITER
         MAX_UPDATES_PER_HOUR MAX_USER_CONNECTIONS MEDIUM MEMORY MEMTABLE MESSAGE_TEXT META MICROSECOND
         MIN MIN_MAX MIN_NGRAM_SIZE MIN_TOKEN_SIZE MINOR MIN_ROWS MINUS MINUTE MISMATCH MODE
         MODIFY MODULE MONTH MOVE MODEL MULTILINESTRING MULTIPOINT MULTIPOLYGON MULTIVALUE MUTEX
-        MYSQL_ERRNO MAXIMIZE MEMBER MINVALUE MY_NAME
+        MYSQL_ERRNO MAXIMIZE MEMBER MINVALUE MY_NAME RETRY
 
         NAME NAMES NAMESPACE NATIONAL NCHAR NDB NDBCLUSTER NESTED NEW NEXT NO NOAUDIT NONE NORMAL NOW NOWAIT NEVER NGRAM_TOKEN_SIZE
         NO_WAIT NULLS NUMBER NVARCHAR NTILE NTH_VALUE NETWORK NOPARALLEL
@@ -422,6 +422,7 @@ END_P SET_VAR DELIMITER
 %type <node> opt_float_precision opt_number_precision
 %type <node> opt_equal_mark opt_default_mark read_only_or_write not not2
 %type <node> int_or_decimal
+%type <node> opt_ai_column_options
 %type <node> opt_column_attribute_list column_attribute column_attribute_list opt_column_default_value opt_column_default_value_list
 %type <node> show_stmt from_or_in columns_or_fields database_or_schema index_or_indexes_or_keys opt_from_or_in_database_clause opt_show_condition opt_desc_column_option opt_status opt_storage opt_show_engine check_table_options check_table_option
 %type <node> prepare_stmt stmt_name preparable_stmt
@@ -6141,8 +6142,22 @@ column_attribute_list column_attribute
   $$ = $1;
 }
 
+opt_ai_column_options:
+/* EMPTY */ { $$ = NULL; }
+| WITH '(' expr_list ')'
+{
+  $$ = $3;
+  $$->type_ = T_AI_COLUMN_OPTIONS;
+}
+;
+
 column_attribute:
-not NULLX
+AI COLUMN '(' expr ')' opt_ai_column_options
+{
+  dup_expr_string($4, result, @4.first_column, @4.last_column);
+  malloc_non_terminal_node($$, result->malloc_pool_, T_AI_COLUMN, 2, $4, $6);
+}
+| not NULLX
 {
   (void)($1) ;
   (void)($2) ; /* make bison mute */
@@ -12722,6 +12737,13 @@ SHOW opt_extended_or_full TABLES opt_from_or_in_database_clause opt_show_conditi
   value->value_ = $2[0];
   malloc_non_terminal_node($$, result->malloc_pool_, T_SHOW_TABLES, 3, $4, $5, value);
 }
+| SHOW AI COLUMNS from_or_in relation_factor opt_from_or_in_database_clause opt_show_condition
+{
+  (void)$4;
+  malloc_terminal_node($$, result->malloc_pool_, T_INT);
+  $$->value_ = 4;
+  malloc_non_terminal_node($$, result->malloc_pool_, T_SHOW_COLUMNS, 4, $$, $5, $6, $7);
+}
 | SHOW databases_or_schemas opt_status opt_show_condition
 {
   (void)$2;
@@ -14747,8 +14769,21 @@ alter_with_opt_hint TABLE relation_factor alter_table_actions
 {
   ParseNode *table_actions = NULL;
   merge_nodes(table_actions, result, T_ALTER_TABLE_ACTION_LIST, $4);
-  malloc_non_terminal_node($$, result->malloc_pool_, T_ALTER_TABLE, 4, $3, table_actions, NULL, $1);
-  $$->value_ = 0;
+  if (table_actions != NULL && table_actions->num_child_ == 1
+      && table_actions->children_[0]->type_ == T_AI_COLUMN_RETRY) {
+    ParseNode *table = NULL;
+    ParseNode *from_list = NULL;
+    ParseNode *retry = table_actions->children_[0];
+    malloc_non_terminal_node(table, result->malloc_pool_, T_ORG, 4, $3, NULL, NULL, NULL);
+    malloc_non_terminal_node(from_list, result->malloc_pool_, T_TABLE_REFERENCES, 1, table);
+    /* RETRY executes through transactional UPDATE, with a dedicated native AST marker. */
+    malloc_non_terminal_node($$, result->malloc_pool_, T_UPDATE, 11,
+                             NULL, from_list, retry, retry->children_[1], NULL, NULL,
+                             NULL, $1, NULL, NULL, NULL);
+  } else {
+    malloc_non_terminal_node($$, result->malloc_pool_, T_ALTER_TABLE, 4, $3, table_actions, NULL, $1);
+    $$->value_ = 0;
+  }
 }
 ;
 
@@ -14782,7 +14817,11 @@ alter_table_action
 ;
 
 alter_table_action:
-opt_set table_option_list_space_seperated
+RETRY AI COLUMN column_name opt_where
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_AI_COLUMN_RETRY, 2, $4, $5);
+}
+| opt_set table_option_list_space_seperated
 {
   (void)$1;
   merge_nodes($$, result, T_TABLE_OPTION_LIST, $2);
@@ -17873,6 +17912,7 @@ ACCOUNT
 |       MAP
 |       MASTER
 |       MASTER_AUTO_POSITION
+|       RETRY
 |       MASTER_CONNECT_RETRY
 |       MASTER_DELAY
 |       MASTER_HEARTBEAT_PERIOD

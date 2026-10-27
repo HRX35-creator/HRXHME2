@@ -1,0 +1,328 @@
+#!/usr/bin/env python3
+# Copyright (c) 2026 OceanBase. Licensed under the Apache License, Version 2.0.
+"""Real background execution, typed publication and stale-result regressions."""
+import json
+import threading
+import time
+import unittest
+
+from ai_sql_test_utils import AISQLMockTestCase
+
+
+class AIColumnWorkerIntegrationTest(AISQLMockTestCase):
+    MODEL_TYPE = "completion"
+    ENDPOINT_PATH = "/chat/completions"
+
+    @staticmethod
+    def response(text):
+        return {"choices": [{"message": {"content": text}}]}
+
+    @staticmethod
+    def default_response(request):
+        text = request["messages"][-1]["content"]
+        value = json.dumps({"input": text}) if text.startswith("JSON:") else (
+            "7" if text.startswith("Score:") else "reply:" + text)
+        return AIColumnWorkerIntegrationTest.response(value)
+
+    def create(self, suffix, columns=None):
+        table = self.model + "_" + suffix
+        if columns is None:
+            columns = ("id INT PRIMARY KEY,content LONGTEXT,"
+                       f"result LONGTEXT AI COLUMN(AI_COMPLETE('{self.model}',content)) WITH(max_retries=2)")
+        self.execute(f"CREATE TABLE `{table}`({columns})")
+        self.addCleanup(self.execute, f"DROP TABLE `{table}`")
+        return table
+
+    def wait_for(self, predicate, timeout=12):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if predicate():
+                return
+            time.sleep(0.05)
+        self.fail("background AI column condition did not become true")
+
+    def tasks(self, table):
+        return self.execute("SELECT task.state,task.retry_count,task.request_id "
+                            "FROM oceanbase.__all_ai_column_task task "
+                            "JOIN oceanbase.__all_table t ON t.table_id=task.table_id "
+                            "WHERE t.table_name=%s ORDER BY task.column_id", (table,))
+
+    def wait_value(self, table, expected, row=1):
+        self.wait_for(lambda: self.execute(f"SELECT result FROM `{table}` WHERE id=%s", (row,)) == ((expected,),))
+
+    def override_response(self, callback):
+        self.server.default_response = callback
+        self.addCleanup(setattr, self.server, "default_response", type(self).default_response)
+
+    def test_rollback_makes_no_request_and_commit_starts_execution(self):
+        table = self.create("commit")
+        self.connection.begin()
+        try:
+            self.execute(f"INSERT INTO `{table}`(id,content) VALUES(1,'rolled back')")
+            self.assertEqual(1, len(self.tasks(table)))
+            time.sleep(0.25)
+            self.assertTrue(self.server.requests.empty())
+        finally:
+            self.connection.rollback()
+        time.sleep(0.25)
+        self.assertTrue(self.server.requests.empty())
+        self.assertEqual((), self.tasks(table))
+        self.execute(f"INSERT INTO `{table}`(id,content) VALUES(1,'committed')")
+        self.wait_value(table, "reply:committed")
+        self.assertEqual("committed", self.server.requests.get_nowait()["messages"][-1]["content"])
+        self.assertEqual((), self.tasks(table))
+
+    def test_retry_is_persistent_and_transport_does_not_add_attempts(self):
+        table = self.create("retry")
+        self.respond({"error": {"message": "retry once"}}, status=429)
+        self.execute(f"INSERT INTO `{table}`(id,content) VALUES(1,'retry')")
+        def retry_waiting():
+            rows = self.tasks(table)
+            return len(rows) == 1 and rows[0][:2] == (3, 1)
+        self.wait_for(retry_waiting)
+        self.assertEqual(1, self.server.requests.qsize())
+        self.wait_value(table, "reply:retry")
+        self.assertEqual(2, self.server.requests.qsize())
+        self.assertEqual((), self.tasks(table))
+
+    def test_typed_json_and_integer_share_one_atomic_publication(self):
+        table = self.create("typed", "id INT PRIMARY KEY,content VARCHAR(50),"
+                            f"tags JSON AI COLUMN(AI_COMPLETE('{self.model}',CONCAT('JSON:',content))),"
+                            f"score BIGINT AI COLUMN(AI_COMPLETE('{self.model}',CONCAT('Score:',content)))")
+        self.execute(f"INSERT INTO `{table}`(id,content) VALUES(1,'original')")
+        deadline = time.monotonic() + 12
+        while time.monotonic() < deadline:
+            tags, score = self.execute(f"SELECT tags,score FROM `{table}` WHERE id=1")[0]
+            self.assertEqual(tags is None, score is None, "request group became partially visible")
+            if tags is not None:
+                self.assertEqual({"input": "JSON:original"}, json.loads(tags))
+                self.assertEqual(7, score)
+                break
+            time.sleep(0.01)
+        else:
+            self.fail("typed request group did not publish")
+        self.assertEqual((), self.tasks(table))
+        requests = [self.server.requests.get_nowait(), self.server.requests.get_nowait()]
+        self.assertTrue(self.server.requests.empty())
+        for request in requests:
+            user = request["messages"][-1]["content"]
+            system = request["messages"][0]["content"]
+            self.assertIn(user, ("JSON:original", "Score:original"))
+            self.assertIn("valid JSON value" if user.startswith("JSON:") else "base-10 integer", system)
+
+    def test_terminal_type_failure_still_publishes_successful_sibling(self):
+        self.override_response(lambda request: self.response(
+            "7" if request["messages"][-1]["content"].startswith("Score:") else "invalid JSON"))
+        table = self.create("mixed", "id INT PRIMARY KEY,content VARCHAR(50),"
+                            f"tags JSON AI COLUMN(AI_COMPLETE('{self.model}',content)) WITH(max_retries=0),"
+                            f"score BIGINT AI COLUMN(AI_COMPLETE('{self.model}',CONCAT('Score:',content))) WITH(max_retries=0)")
+        self.execute(f"INSERT INTO `{table}`(id,content) VALUES(1,'bad')")
+        self.wait_for(lambda: self.tasks(table) == ())
+        self.assertEqual(((None, 7),), self.execute(f"SELECT tags,score FROM `{table}`"))
+        self.assertEqual(2, self.server.requests.qsize())
+
+    def test_slow_old_result_cannot_overwrite_new_request(self):
+        table = self.create("stale")
+        entered, release = threading.Event(), threading.Event()
+        self.addCleanup(release.set)
+
+        def callback(request):
+            value = request["messages"][-1]["content"]
+            if value == "old":
+                entered.set()
+                release.wait(10)
+            return self.response("reply:" + value)
+
+        self.override_response(callback)
+        self.execute(f"INSERT INTO `{table}`(id,content) VALUES(1,'old')")
+        self.assertTrue(entered.wait(5), "old request did not begin")
+        self.execute(f"UPDATE `{table}` SET content='new' WHERE id=1")
+        self.wait_value(table, "reply:new")
+        release.set()
+        time.sleep(1)
+        self.assertEqual((("reply:new",),), self.execute(f"SELECT result FROM `{table}` WHERE id=1"))
+        self.assertEqual((), self.tasks(table))
+
+    def test_expired_lease_cannot_publish_over_the_new_owner(self):
+        table = self.create("lease")
+        entered, release = threading.Event(), threading.Event()
+        self.addCleanup(release.set)
+        counter, lock = [0], threading.Lock()
+
+        def callback(request):
+            with lock:
+                counter[0] += 1
+                attempt = counter[0]
+            if attempt == 1:
+                entered.set()
+                release.wait(10)
+            return self.response("old attempt" if attempt == 1 else "new owner")
+
+        self.override_response(callback)
+        self.execute(f"INSERT INTO `{table}`(id,content) VALUES(1,'unchanged input')")
+        self.assertTrue(entered.wait(5))
+        self.execute("UPDATE oceanbase.__all_ai_column_group SET lease_until=TIMESTAMPADD(SECOND,-1,NOW(6)) "
+                     "WHERE table_id IN(SELECT table_id FROM oceanbase.__all_table WHERE table_name=%s)", (table,))
+        self.wait_value(table, "new owner")
+        release.set()
+        time.sleep(1)
+        self.assertEqual((("new owner",),), self.execute(f"SELECT result FROM `{table}`"))
+        self.assertEqual(2, counter[0])
+        self.assertEqual((), self.tasks(table))
+
+    def test_long_input_and_json_config_are_materialized_before_http(self):
+        table = self.create("lob", "id INT PRIMARY KEY,content LONGTEXT,config JSON,"
+                            f"result LONGTEXT AI COLUMN(AI_COMPLETE('{self.model}',content,config)) WITH(max_retries=0)")
+        content = '世界\\"\n\x00' * 5000
+        config = {"user": "u" * 12000, "max_tokens": 17}
+        self.execute(f"INSERT INTO `{table}`(id,content,config) VALUES(1,%s,%s)", (content, json.dumps(config)))
+        self.wait_value(table, "reply:" + content)
+        request = self.server.requests.get_nowait()
+        self.assertEqual(content, request["messages"][-1]["content"])
+        self.assertEqual(config["user"], request["user"])
+        self.assertEqual(17, request["max_tokens"])
+        self.assertTrue(self.server.requests.empty())
+
+    def test_session_timestamp_override_does_not_delay_durable_work(self):
+        table = self.create("clock")
+        self.addCleanup(self.execute, "SET timestamp=0")
+        original_zone = self.execute("SELECT @@time_zone")[0][0]
+        self.addCleanup(self.execute, "SET time_zone=%s", (original_zone,))
+        self.execute("SET time_zone='+12:00'")
+        self.execute("SET timestamp=2000000000")
+        self.connection.begin()
+        self.addCleanup(self.connection.rollback)
+        self.execute(f"INSERT INTO `{table}`(id,content) VALUES(1,'future SQL clock')")
+        self.assertEqual(((1,),), self.execute(
+            "SELECT g.lease_until IS NULL FROM oceanbase.__all_ai_column_group g "
+            "JOIN oceanbase.__all_table t ON t.table_id=g.table_id WHERE t.table_name=%s", (table,)))
+        self.connection.commit()
+        self.wait_value(table, "reply:future SQL clock")
+        self.assertEqual((), self.tasks(table))
+        self.assertEqual(1, self.server.requests.qsize())
+
+    def test_implicit_timestamp_dependency_regenerates_without_writeback_side_effects(self):
+        table = self.create("implicit_time", "id INT PRIMARY KEY,payload VARCHAR(20),"
+                            "stamp TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),"
+                            f"result VARCHAR(100) AI COLUMN(AI_COMPLETE('{self.model}',CAST(stamp AS CHAR)))")
+        self.addCleanup(self.execute, "SET timestamp=0")
+        self.execute("SET timestamp=1700000000")
+        self.execute(f"INSERT INTO `{table}`(id,payload) VALUES(1,'first')")
+        self.execute("SET timestamp=0")
+        expected = self.execute(f"SELECT CONCAT('reply:',CAST(stamp AS CHAR)) FROM `{table}`")[0][0]
+        self.wait_value(table, expected)
+        self.assertEqual(((1700000000,),), self.execute(f"SELECT UNIX_TIMESTAMP(stamp) FROM `{table}`"))
+        self.execute("SET timestamp=1700000001")
+        self.execute(f"UPDATE `{table}` SET payload='second' WHERE id=1")
+        self.execute("SET timestamp=0")
+        updated = self.execute(f"SELECT CONCAT('reply:',CAST(stamp AS CHAR)) FROM `{table}`")[0][0]
+        self.assertNotEqual(expected, updated)
+        self.wait_value(table, updated)
+        self.assertEqual(((1700000001,),), self.execute(f"SELECT UNIX_TIMESTAMP(stamp) FROM `{table}`"))
+
+    def test_composite_text_keys_preserve_bytes_across_sql_modes(self):
+        table = self.create("text_keys", "id VARCHAR(100),shard INT,content VARCHAR(100),"
+                            f"result VARCHAR(200) AI COLUMN(AI_COMPLETE('{self.model}',content)),PRIMARY KEY(id,shard)")
+        mode = self.execute("SELECT @@sql_mode")[0][0]
+        self.addCleanup(self.execute, "SET sql_mode=%s", (mode,))
+        self.execute("SET sql_mode='NO_BACKSLASH_ESCAPES'")
+        keys = ("key\\slash", "key'quote", "' OR 1=1 -- ", "世界\\路径'引号")
+        for i, key in enumerate(keys):
+            self.execute(f"INSERT INTO `{table}`(id,shard,content) VALUES(%s,%s,%s)", (key, i, "row:" + str(i)))
+        # A second row with the same text key exercises the full composite key.
+        self.execute(f"INSERT INTO `{table}`(id,shard,content) VALUES(%s,99,'sibling')", (keys[0],))
+        self.execute("SET sql_mode=%s", (mode,))
+        self.wait_for(lambda: self.execute(f"SELECT COUNT(*) FROM `{table}` WHERE result IS NOT NULL") == ((5,),))
+        for i, key in enumerate(keys):
+            self.assertEqual((("reply:row:" + str(i),),), self.execute(
+                f"SELECT result FROM `{table}` WHERE id=%s AND shard=%s", (key, i)))
+        self.assertEqual((("reply:sibling",),), self.execute(
+            f"SELECT result FROM `{table}` WHERE id=%s AND shard=99", (keys[0],)))
+        self.assertEqual(5, self.server.requests.qsize())
+
+    def test_timestamp_primary_key_is_absolute_across_worker_time_zones(self):
+        table = self.create("timestamp_key", "id TIMESTAMP(6) PRIMARY KEY,content VARCHAR(100),"
+                            f"result VARCHAR(200) AI COLUMN(AI_COMPLETE('{self.model}',content))")
+        zone = self.execute("SELECT @@time_zone")[0][0]
+        self.addCleanup(self.execute, "SET time_zone=%s", (zone,))
+        self.execute("SET time_zone='+12:00'")
+        self.execute(f"INSERT INTO `{table}`(id,content) VALUES('1960-01-02 03:04:05.123456','historical')")
+        self.wait_for(lambda: self.execute(f"SELECT result FROM `{table}`") == (("reply:historical",),))
+        self.connection.begin()
+        try:
+            self.execute(f"UPDATE `{table}` SET id='2099-02-03 04:05:06.654321',content='relocated'")
+            self.assertEqual(((None,),), self.execute(f"SELECT result FROM `{table}`"))
+            self.connection.rollback()
+        finally:
+            self.connection.rollback()
+        self.assertEqual((("reply:historical",),), self.execute(f"SELECT result FROM `{table}`"))
+        self.execute(f"UPDATE `{table}` SET id='2099-02-03 04:05:06.654321',content='relocated'")
+        self.wait_for(lambda: self.execute(f"SELECT result FROM `{table}`") == (("reply:relocated",),))
+        self.assertEqual(((1,),), self.execute(f"SELECT id='2099-02-03 04:05:06.654321' FROM `{table}`"))
+        self.assertEqual(2, self.server.requests.qsize())
+
+    def test_zero_timestamp_primary_key_remains_addressable(self):
+        table = self.create("zero_key", "id TIMESTAMP(6) PRIMARY KEY,content VARCHAR(100),"
+                            f"result VARCHAR(200) AI COLUMN(AI_COMPLETE('{self.model}',content))")
+        mode = self.execute("SELECT @@sql_mode")[0][0]
+        self.addCleanup(self.execute, "SET sql_mode=%s", (mode,))
+        self.execute("SET sql_mode=''")
+        self.execute(f"INSERT INTO `{table}`(id,content) VALUES('0000-00-00 00:00:00','zero')")
+        self.wait_for(lambda: self.execute(f"SELECT result FROM `{table}`") == (("reply:zero",),))
+        self.assertEqual(1, self.server.requests.qsize())
+
+
+class AIColumnVectorIntegrationTest(AISQLMockTestCase):
+    MODEL_TYPE = "dense_embedding"
+
+    @staticmethod
+    def default_response(request):
+        return {"data": [{"index": i, "embedding": [int(value), 0, 0, 0]}
+                         for i, value in enumerate(request["input"])]}
+
+    def wait_embeddings(self, table, row, expected):
+        deadline = time.monotonic() + 12
+        while time.monotonic() < deadline:
+            value = self.execute(f"SELECT emb FROM `{table}` WHERE id=%s", (row,))[0][0]
+            if value is not None and json.loads(value) == expected:
+                return
+            time.sleep(0.05)
+        self.fail("AI vector did not publish")
+
+    def ann(self, table, limit=3):
+        return self.execute(f"SELECT id FROM `{table}` "
+                            f"ORDER BY l2_distance(emb,[0,0,0,0]) APPROXIMATE LIMIT {limit}")
+
+    def test_invalidation_rollback_and_regeneration_maintain_ann(self):
+        table = self.model + "_ann"
+        self.execute(f"CREATE TABLE `{table}`(id INT PRIMARY KEY,content VARCHAR(30),"
+                     f"emb VECTOR(4) AI COLUMN(AI_EMBED('{self.model}',content)))")
+        self.addCleanup(self.execute, f"DROP TABLE `{table}`")
+        self.execute(f"INSERT INTO `{table}`(id,content) VALUES(1,'0'),(2,'10'),(3,'20')")
+        for row, value in ((1, 0), (2, 10), (3, 20)):
+            self.wait_embeddings(table, row, [value, 0, 0, 0])
+        self.execute(f"CREATE VECTOR INDEX idx ON `{table}`(emb) "
+                     "WITH(distance=l2,type=hnsw,lib=vsag,m=10,ef_construction=12,ef_search=40)")
+        self.connection.begin()
+        try:
+            self.execute(f"UPDATE `{table}` SET content='0' WHERE id=2")
+            self.assertEqual(((None,),), self.execute(f"SELECT emb FROM `{table}` WHERE id=2"))
+            self.assertEqual({1, 3}, {row[0] for row in self.ann(table)})
+        finally:
+            self.connection.rollback()
+        self.assertEqual({1, 2, 3}, {row[0] for row in self.ann(table)})
+        self.assertEqual("[10,0,0,0]", self.execute(f"SELECT emb FROM `{table}` WHERE id=2")[0][0])
+        self.connection.begin()
+        try:
+            self.execute(f"INSERT INTO `{table}`(id,content) VALUES(2,'0') "
+                         "ON DUPLICATE KEY UPDATE content=VALUES(content)")
+            self.assertEqual({1, 3}, {row[0] for row in self.ann(table)})
+            self.connection.commit()
+        finally:
+            self.connection.rollback()
+        self.wait_embeddings(table, 2, [0, 0, 0, 0])
+        self.assertEqual({1, 2}, {row[0] for row in self.ann(table, 2)})
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

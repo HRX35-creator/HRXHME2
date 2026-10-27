@@ -120,6 +120,7 @@ ObSqlCtx::ObSqlCtx()
     plan_cache_hit_(false),
     self_add_plan_(false),
     disable_privilege_check_(PRIV_CHECK_FLAG_NORMAL),
+    ai_column_internal_write_(false),
     force_print_trace_(false),
     is_show_trace_stmt_(false),
     retry_times_(OB_INVALID_COUNT),
@@ -167,6 +168,7 @@ void ObSqlCtx::reset()
   plan_cache_hit_ = false;
   self_add_plan_ = false;
   disable_privilege_check_ = PRIV_CHECK_FLAG_NORMAL;
+  ai_column_internal_write_ = false;
   force_print_trace_ = false;
   is_show_trace_stmt_ = false;
   retry_times_ = OB_INVALID_COUNT;

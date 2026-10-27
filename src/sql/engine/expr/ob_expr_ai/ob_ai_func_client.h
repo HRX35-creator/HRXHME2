@@ -34,6 +34,9 @@ public:
   void clean_up();
   void reset();
   void set_timeout_sec(int64_t timeout_sec) { timeout_sec_ = timeout_sec; }
+  void set_max_retry_times(int64_t retries) { max_retry_times_ = retries < 0 ? 0 : retries; }
+  void set_cancellation(const std::atomic<bool> *cancel) { cancellation_ = cancel; }
+  void set_response_limit(int64_t bytes) { response_limit_ = bytes > 0 ? bytes : INT64_MAX; }
   // ai function interface
   virtual int send_post(common::ObIAllocator &allocator, 
                         const ObString &url,
@@ -55,6 +58,8 @@ private:
   int send_post_batch(ObArray<ObJsonObject *> &data_array, ObArray<ObJsonObject *> &responses);
   int init_easy_handle(CURL *curl, ObJsonObject *data, ObStringBuffer &response_buf);
   static size_t write_callback(void *contents, size_t size, size_t nmemb, void *userp);
+  static int progress_callback(void *userp, curl_off_t, curl_off_t, curl_off_t, curl_off_t);
+  struct ResponseContext { ObStringBuffer *buffer_; int64_t limit_; };
   bool is_retryable_status_code(int64_t http_code);
   bool is_timeout();
 private:
@@ -71,6 +76,8 @@ private:
   int64_t max_retry_times_;
   int64_t abs_timeout_ts_;
   int64_t timeout_sec_;
+  const std::atomic<bool> *cancellation_;
+  int64_t response_limit_;
   DISALLOW_COPY_AND_ASSIGN(ObAIFuncClient);
 };
 

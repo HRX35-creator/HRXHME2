@@ -471,6 +471,8 @@ public:
   bool plan_cache_hit_;
   bool self_add_plan_; //used for retry query, and add plan to plan cache in this query;
   int  disable_privilege_check_;  //internal user set disable privilege check
+  // Granted only by the native AI worker API for this one result/statement.
+  bool ai_column_internal_write_;
   bool force_print_trace_; // [OUT]if the trace log is enabled by hint
   bool is_show_trace_stmt_;  // [OUT]
   int64_t retry_times_;
@@ -552,6 +554,8 @@ struct ObQueryCtx
 public:
   ObQueryCtx()
     : question_marks_count_(0),
+      ai_column_reads_(),
+      ai_column_retry_(false),
       calculable_items_(),
       ab_param_exprs_(),
       fetch_cur_time_(true),
@@ -595,6 +599,8 @@ public:
   void reset()
   {
     question_marks_count_ = 0;
+    ai_column_reads_.reset();
+    ai_column_retry_ = false;
     calculable_items_.reset();
     fetch_cur_time_ = true;
     is_contain_virtual_table_ = false;
@@ -672,6 +678,8 @@ public:
   typedef common::ObSEArray<ObHiddenColumnItem, CALCULABLE_EXPR_NUM, common::ModulePageAllocator, true> CalculableItems;
 public:
   int64_t question_marks_count_;
+  common::ObSEArray<std::pair<uint64_t, uint64_t>, 4> ai_column_reads_;
+  bool ai_column_retry_;
   CalculableItems calculable_items_;
   //array binding param exprs, mark the all array binding param expr in the batch stmt
   common::ObSEArray<ObRawExpr*, 4, common::ModulePageAllocator, true> ab_param_exprs_;

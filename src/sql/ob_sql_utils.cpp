@@ -3373,7 +3373,10 @@ bool ObSQLUtils::is_iter_uncommitted_row(ObExecContext *cur_ctx)
 
 bool ObSQLUtils::is_nested_sql(ObExecContext *cur_ctx)
 {
-  return is_pl_nested_sql(cur_ctx) || is_fk_nested_sql(cur_ctx) || is_online_stat_gathering_nested_sql(cur_ctx);
+  // Internal row processing can read the parent's uncommitted writes without
+  // being a foreign-key action. It still shares the parent's statement/txn.
+  return is_pl_nested_sql(cur_ctx) || is_fk_nested_sql(cur_ctx)
+      || is_online_stat_gathering_nested_sql(cur_ctx) || is_iter_uncommitted_row(cur_ctx);
 }
 
 //bind current execute context to my session,

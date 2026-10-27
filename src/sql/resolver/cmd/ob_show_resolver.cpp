@@ -395,7 +395,11 @@ int ObShowResolver::resolve(const ParseNode &parse_tree)
                */
               bool is_full = (1 == ((parse_tree.children_[0]->value_)&1));
               bool is_extended = (1 == (((parse_tree.children_[0]->value_)>>1)&1));
-              if (OB_UNLIKELY(((parse_tree.children_[0]->value_)>>2) != 0)) {
+              if (parse_tree.children_[0]->value_ == 4) {
+                GEN_SQL_STEP_1(ObShowSqlSet::SHOW_AI_COLUMNS);
+                GEN_SQL_STEP_2(ObShowSqlSet::SHOW_AI_COLUMNS, OB_SYS_DATABASE_NAME,
+                    OB_ALL_VIRTUAL_TABLE_COLUMN_TNAME, show_table_id);
+              } else if (OB_UNLIKELY(((parse_tree.children_[0]->value_)>>2) != 0)) {
                 ret = OB_ERR_UNEXPECTED;
               } else if (is_full) {
                 if (is_extended) {
@@ -2369,6 +2373,15 @@ DEFINE_SHOW_CLAUSE_SET(SHOW_GLOBAL_VARIABLES,
                        "SELECT /*+parallel(1)*/ variable_name AS `Variable_name`, value AS `Value` FROM %s.%s ORDER BY variable_name ASC",
                        R"(SELECT /*+parallel(1)*/ "VARIABLE_NAME" AS "VARIABLE_NAME", "VALUE" AS "VALUE" FROM %s.%s ORDER BY VARIABLE_NAME ASC)",
                        "Variable_name");
+DEFINE_SHOW_CLAUSE_SET(SHOW_AI_COLUMNS,
+                       NULL,
+                       "SELECT c.field AS `Field`,c.type AS `Type`,a.original_expr AS `Expression`,"
+                       "a.normalized_expr AS `Normalized_expression`,'async' AS `Sync_mode`,"
+                       "a.max_retries AS `Max_retries` FROM %s.%s c "
+                       "JOIN oceanbase.__all_ai_column a ON a.table_id=c.table_id AND a.column_name=c.field "
+                       "WHERE c.table_id=%ld AND c.is_hidden=0 ORDER BY a.column_id",
+                       NULL,
+                       "Field");
 DEFINE_SHOW_CLAUSE_SET(SHOW_COLUMNS,
                        NULL,
                        "SELECT field AS `Field`, type AS `Type`, `NULL` AS `Null`, `KEY` AS `Key`, `DEFAULT` AS `Default`, extra AS `Extra` \

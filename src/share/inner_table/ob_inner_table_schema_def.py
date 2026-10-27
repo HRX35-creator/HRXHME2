@@ -2503,7 +2503,43 @@ def_table_schema(**gen_history_table_def(1134, all_objauth_mysql_def))
 
 ################################################################################
 # Reserved position
-################################################################################
+################################################################################ Native asynchronous AI column metadata and durable work queues.
+def_table_schema(
+    owner = 'competition', table_name = '__all_ai_column', table_id = '9000',
+    table_type = 'SYSTEM_TABLE', gm_columns = ['gmt_create', 'gmt_modified'],
+    rowkey_columns = [('table_id', 'int'), ('column_id', 'int')],
+    normal_columns = [
+        ('column_name', 'varchar:128', 'false'),
+        ('state_column_id', 'int', 'false'), ('request_column_id', 'int', 'false'),
+        ('result_spec_column_id', 'int', 'false'),
+        ('definition_version', 'int', 'false'), ('owner_user_id', 'int', 'false'),
+        ('max_retries', 'int', 'false'), ('normalized_expr', 'longtext', 'false'),
+        ('original_expr', 'longtext', 'false'), ('model_name', 'varchar:128', 'false'),
+        ('metadata', 'longblob', 'false')])
+def_table_schema(
+    owner = 'competition', table_name = '__all_ai_column_history', table_id = '9001',
+    table_type = 'SYSTEM_TABLE', gm_columns = ['gmt_create', 'gmt_modified'],
+    rowkey_columns = [('table_id', 'int'), ('schema_version', 'int')],
+    normal_columns = [('metadata', 'longblob', 'false')])
+def_table_schema(
+    owner = 'competition', table_name = '__all_ai_column_task', table_id = '9002',
+    table_type = 'SYSTEM_TABLE', gm_columns = ['gmt_create', 'gmt_modified'],
+    rowkey_columns = [('table_id', 'int'), ('request_id', 'varchar:64'), ('column_id', 'int')],
+    normal_columns = [
+        ('rowkey_predicate', 'longtext', 'false'), ('eligible_ts', 'timestamp:6', 'false'),
+        ('state', 'int', 'false', '0'), ('retry_count', 'int', 'false', '0'),
+        ('definition_version', 'int', 'false'), ('outcome', 'longblob', 'true'),
+        ('error_code', 'int', 'false', '0')])
+def_table_schema(
+    owner = 'competition', table_name = '__all_ai_column_group', table_id = '9003',
+    table_type = 'SYSTEM_TABLE', gm_columns = ['gmt_create', 'gmt_modified'],
+    rowkey_columns = [('table_id', 'int'), ('request_id', 'varchar:64')],
+    normal_columns = [
+        ('rowkey_predicate', 'longtext', 'false'), ('eligible_ts', 'timestamp:6', 'false'),
+        ('lease_owner', 'varchar:64', 'false', ''), ('lease_epoch', 'int', 'false', '0'),
+        ('lease_until', 'timestamp:6', 'true'), ('state', 'int', 'false', '0')])
+
+#
 # Virtual Table (10000, 20000]
 # Normally, virtual table's index_using_type should be USING_HASH.
 ################################################################################

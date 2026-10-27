@@ -1302,6 +1302,23 @@ int ObSchemaServiceSQLImpl::get_sys_variable_schema(
       ObSysVarClassType sys_var_id = ObSysVariables::get_sys_var_id(i);
       const ObSysVarSchema *sys_var = NULL;
       if (OB_FAIL(sys_variable_schema.get_sysvar_schema(sys_var_id, sys_var))) {
+        if (ret == OB_ERR_SYS_VARIABLE_UNKNOWN) {
+          // An older store has no history row for a newly registered variable.
+          // Supply only that missing default; retain every persisted override.
+          ret = OB_SUCCESS;
+          ObSysVarSchema added;
+          const ObString value = sys_var_id == SYS_VAR_LOWER_CASE_TABLE_NAMES
+              ? ObString::make_string("2") : ObSysVariables::get_value(i);
+          added.set_data_type(ObSysVariables::get_type(i));
+          added.set_flags(ObSysVariables::get_flags(i));
+          added.set_schema_version(fetch_version);
+          if (OB_FAIL(added.set_name(ObSysVariables::get_name(i)))) {
+          } else if (OB_FAIL(added.set_value(value))) {
+          } else if (OB_FAIL(added.set_min_val(ObSysVariables::get_min(i)))) {
+          } else if (OB_FAIL(added.set_max_val(ObSysVariables::get_max(i)))) {
+          } else if (OB_FAIL(added.set_info(ObSysVariables::get_info(i)))) {
+          } else { ret = sys_variable_schema.add_sysvar_schema(added); }
+        }
       } else if (OB_ISNULL(sys_var)) {
         ret = OB_ERR_UNEXPECTED;
       } else {
@@ -1327,49 +1344,54 @@ int ObSchemaServiceSQLImpl::fetch_all_column_info(
     const int64_t table_ids_size /*= 0 */)
 {
   int ret = OB_SUCCESS;
-  SMART_VAR(ObMySQLProxy::MySQLResult, res) {
-    ObMySQLResult *result = NULL;
-    ObSqlString sql;
-    const int64_t snapshot_timestamp = schema_status.snapshot_timestamp_;
+  {
+    SMART_VAR(ObMySQLProxy::MySQLResult, res) {
+      ObMySQLResult *result = NULL;
+      ObSqlString sql;
+      const int64_t snapshot_timestamp = schema_status.snapshot_timestamp_;
     
-    if (INT64_MAX == schema_version) {
-      if (OB_FAIL(sql.append_fmt(FETCH_ALL_COLUMN_SQL, OB_ALL_COLUMN_TNAME,
-                                 OB_INVALID_RUNTIME_ID))) {
-      } else {
-        if (NULL != table_ids && table_ids_size > 0) {
-          if (OB_FAIL(sql.append_fmt(" AND table_id IN "))) {
-          } else if (OB_FAIL(sql_append_pure_ids(schema_status, table_ids, table_ids_size, sql))) {
+      if (INT64_MAX == schema_version) {
+        if (OB_FAIL(sql.append_fmt(FETCH_ALL_COLUMN_SQL, OB_ALL_COLUMN_TNAME,
+                                   OB_INVALID_RUNTIME_ID))) {
+        } else {
+          if (NULL != table_ids && table_ids_size > 0) {
+            if (OB_FAIL(sql.append_fmt(" AND table_id IN "))) {
+            } else if (OB_FAIL(sql_append_pure_ids(schema_status, table_ids, table_ids_size, sql))) {
+            }
+          }
+          if (FAILEDx(sql.append_fmt(" ORDER BY TABLE_ID, COLUMN_ID"))) {
           }
         }
-        if (FAILEDx(sql.append_fmt(" ORDER BY TABLE_ID, COLUMN_ID"))) {
-        }
-      }
-    } else {
-      if (OB_FAIL(sql.append_fmt(FETCH_ALL_COLUMN_HISTORY_SQL, OB_ALL_COLUMN_HISTORY_TNAME,
-                                 OB_INVALID_RUNTIME_ID))) {
       } else {
-        if (NULL != table_ids && table_ids_size > 0) {
-          if (OB_FAIL(sql.append_fmt(" AND table_id IN "))) {
-          } else if (OB_FAIL(sql_append_pure_ids(schema_status, table_ids, table_ids_size, sql))) {
+        if (OB_FAIL(sql.append_fmt(FETCH_ALL_COLUMN_HISTORY_SQL, OB_ALL_COLUMN_HISTORY_TNAME,
+                                   OB_INVALID_RUNTIME_ID))) {
+        } else {
+          if (NULL != table_ids && table_ids_size > 0) {
+            if (OB_FAIL(sql.append_fmt(" AND table_id IN "))) {
+            } else if (OB_FAIL(sql_append_pure_ids(schema_status, table_ids, table_ids_size, sql))) {
+            }
+          }
+        }
+        if (OB_SUCC(ret)) {
+          if (OB_FAIL(sql.append_fmt(" AND SCHEMA_VERSION <= %ld", schema_version))) {
+          } else if (OB_FAIL(sql.append_fmt(" ORDER BY TABLE_ID, COLUMN_ID, SCHEMA_VERSION"))) {
           }
         }
       }
-      if (OB_SUCC(ret)) {
-        if (OB_FAIL(sql.append_fmt(" AND SCHEMA_VERSION <= %ld", schema_version))) {
-        } else if (OB_FAIL(sql.append_fmt(" ORDER BY TABLE_ID, COLUMN_ID, SCHEMA_VERSION"))) {
-        }
-      }
-    }
 
-    if (OB_SUCC(ret)) {
-      const bool check_deleted = (INT64_MAX != schema_version);
-      DEFINE_SQL_CLIENT_RETRY_WEAK_WITH_SNAPSHOT(sql_client, snapshot_timestamp);
-      if (OB_FAIL(sql_client_retry_weak.read(res, sql.ptr()))) {
-      } else if (OB_UNLIKELY(NULL == (result = res.get_result()))) {
-        ret = OB_ERR_UNEXPECTED;
-      } else if (OB_FAIL(ObSchemaRetrieveUtils::retrieve_column_schema(check_deleted, *result, table_schema_array))) {
+      if (OB_SUCC(ret)) {
+        const bool check_deleted = (INT64_MAX != schema_version);
+        DEFINE_SQL_CLIENT_RETRY_WEAK_WITH_SNAPSHOT(sql_client, snapshot_timestamp);
+        if (OB_FAIL(sql_client_retry_weak.read(res, sql.ptr()))) {
+        } else if (OB_UNLIKELY(NULL == (result = res.get_result()))) {
+          ret = OB_ERR_UNEXPECTED;
+        } else if (OB_FAIL(ObSchemaRetrieveUtils::retrieve_column_schema(check_deleted, *result, table_schema_array))) {
+        }
       }
     }
+  } // Release the column result before reusing a transaction's SQL connection.
+  for (int64_t i = 0; OB_SUCC(ret) && i < table_schema_array.count(); ++i) {
+    ret = fetch_ai_column_info(schema_status, schema_version, sql_client, *table_schema_array.at(i));
   }
   return ret;
 }
@@ -4141,6 +4163,31 @@ int ObSchemaServiceSQLImpl::fetch_table_info(
   return ret;
 }
 
+int ObSchemaServiceSQLImpl::fetch_ai_column_info(
+    const ObRefreshSchemaStatus &schema_status, const int64_t schema_version,
+    ObISQLClient &sql_client, ObTableSchema &table_schema)
+{
+  int ret = OB_SUCCESS;
+  if (!table_schema.has_ai_column_history() || is_inner_table(table_schema.get_table_id())) { return ret; }
+  ObSqlString sql;
+  const int64_t snapshot_timestamp = schema_status.snapshot_timestamp_;
+  DEFINE_SQL_CLIENT_RETRY_WEAK_WITH_SNAPSHOT(sql_client, snapshot_timestamp);
+  SMART_VAR(ObMySQLProxy::MySQLResult, res) {
+    ObMySQLResult *result = nullptr;
+    ObString metadata;
+    if (OB_FAIL(sql.append_fmt("SELECT metadata FROM oceanbase.__all_ai_column_history "
+          "WHERE table_id=%lu AND schema_version<=%ld ORDER BY schema_version DESC LIMIT 1",
+          table_schema.get_table_id(), schema_version))) {
+    } else if (OB_FAIL(sql_client_retry_weak.read(res, sql.ptr()))) {
+    } else if ((result = res.get_result()) == nullptr) { ret = OB_ERR_UNEXPECTED; }
+    else if (OB_FAIL(result->next())) {
+    } else if (OB_FAIL(result->get_varchar("metadata", metadata))) {
+    } else if (OB_FAIL(table_schema.deserialize_ai_column_metadata(metadata))) {
+    }
+  }
+  return ret;
+}
+
 int ObSchemaServiceSQLImpl::fetch_column_info(const ObRefreshSchemaStatus &schema_status,
                                               const uint64_t table_id,
                                               const int64_t schema_version,
@@ -4148,26 +4195,31 @@ int ObSchemaServiceSQLImpl::fetch_column_info(const ObRefreshSchemaStatus &schem
                                               ObTableSchema *&table_schema)
 {
   int ret = OB_SUCCESS;
-  SMART_VAR(ObMySQLProxy::MySQLResult, res) {
-    ObMySQLResult *result = NULL;
-    ObSqlString sql;
-    const int64_t snapshot_timestamp = schema_status.snapshot_timestamp_;
+  {
+    SMART_VAR(ObMySQLProxy::MySQLResult, res) {
+      ObMySQLResult *result = NULL;
+      ObSqlString sql;
+      const int64_t snapshot_timestamp = schema_status.snapshot_timestamp_;
     
-    if (OB_FAIL(sql.append_fmt(FETCH_ALL_COLUMN_HISTORY_SQL, OB_ALL_COLUMN_HISTORY_TNAME,
-                               OB_INVALID_RUNTIME_ID))) {
-    } else if (OB_FAIL(sql.append_fmt(" AND table_id = %lu and schema_version <= %ld"
-                                      " ORDER BY TABLE_ID, COLUMN_ID, SCHEMA_VERSION",
-                                      table_id,
-                                      schema_version))) {
-    } else {
-      const bool check_deleted = true;
-      DEFINE_SQL_CLIENT_RETRY_WEAK_WITH_SNAPSHOT(sql_client, snapshot_timestamp);
-      if (OB_FAIL(sql_client_retry_weak.read(res, sql.ptr()))) {
-      } else if (OB_UNLIKELY(NULL == (result = res.get_result()))) {
-        ret = OB_ERR_UNEXPECTED;
-      } else if (OB_FAIL(ObSchemaRetrieveUtils::retrieve_column_schema(check_deleted, *result, table_schema))) {
+      if (OB_FAIL(sql.append_fmt(FETCH_ALL_COLUMN_HISTORY_SQL, OB_ALL_COLUMN_HISTORY_TNAME,
+                                 OB_INVALID_RUNTIME_ID))) {
+      } else if (OB_FAIL(sql.append_fmt(" AND table_id = %lu and schema_version <= %ld"
+                                        " ORDER BY TABLE_ID, COLUMN_ID, SCHEMA_VERSION",
+                                        table_id,
+                                        schema_version))) {
+      } else {
+        const bool check_deleted = true;
+        DEFINE_SQL_CLIENT_RETRY_WEAK_WITH_SNAPSHOT(sql_client, snapshot_timestamp);
+        if (OB_FAIL(sql_client_retry_weak.read(res, sql.ptr()))) {
+        } else if (OB_UNLIKELY(NULL == (result = res.get_result()))) {
+          ret = OB_ERR_UNEXPECTED;
+        } else if (OB_FAIL(ObSchemaRetrieveUtils::retrieve_column_schema(check_deleted, *result, table_schema))) {
+        }
       }
     }
+  } // SMART_VAR's owner is declared outside its apparent if-body.
+  if (OB_SUCC(ret) && table_schema != nullptr) {
+    ret = fetch_ai_column_info(schema_status, schema_version, sql_client, *table_schema);
   }
   return ret;
 }

@@ -39,6 +39,15 @@ int ObCodeGenerator::generate(const ObLogPlan &log_plan,
   if (OB_FAIL(ret)) {
   } else if (OB_FAIL(generate_exprs(log_plan, phy_plan))) {
   } else if (OB_FAIL(generate_operators(log_plan, phy_plan))) {
+  } else if (OB_FAIL(phy_plan.set_ai_column_reads(log_plan.get_stmt()->get_query_ctx()->ai_column_reads_))) {
+  } else if (!phy_plan.get_ai_column_reads().empty()) {
+    bool strict = false;
+    if (OB_FAIL(log_plan.get_optimizer_context().get_session_info()->get_sys_variable(
+            share::SYS_VAR_AI_COLUMN_STRICT_READ, strict))) {
+    } else if (strict) {
+      phy_plan.set_has_nested_sql(true);
+      phy_plan.set_need_serial_exec(true);
+    }
   }
 
   return ret;

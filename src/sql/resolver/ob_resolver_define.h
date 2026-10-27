@@ -337,6 +337,7 @@ struct ObResolverParams
        sql_proxy_(NULL),
        database_id_(common::OB_INVALID_ID),
        disable_privilege_check_(PRIV_CHECK_FLAG_NORMAL),
+       ai_column_internal_write_(false),
        force_trace_log_(false),
        expr_factory_(NULL),
        stmt_factory_(NULL),
@@ -404,6 +405,7 @@ public:
   uint64_t database_id_;
   //internal user set disable privilege check
   bool disable_privilege_check_;
+  bool ai_column_internal_write_;
   bool force_trace_log_;
   ObRawExprFactory *expr_factory_;
   ObStmtFactory *stmt_factory_;

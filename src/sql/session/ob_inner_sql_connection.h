@@ -56,6 +56,9 @@ public:
   virtual int end_nested_session(
       ObSQLSessionInfo::StmtSavedValue &saved_session,
       SavedValue &saved_connection) = 0;
+
+  virtual int execute_ai_column_write(const common::ObString &sql, int64_t &affected_rows)
+  { return OB_NOT_SUPPORTED; }
 };
 
 inline ObIInnerSQLConnection *as_inner_sql_connection(

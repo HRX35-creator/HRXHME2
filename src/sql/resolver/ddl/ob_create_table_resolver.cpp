@@ -951,6 +951,24 @@ int ObCreateTableResolver::resolve_table_elements(const ParseNode *node,
       }
     }
   }
+  if (OB_SUCC(ret) && node != nullptr && resolve_rule != RESOLVE_NON_COL) {
+    ObTableSchema &table = static_cast<ObCreateTableStmt *>(stmt_)->get_create_table_arg().schema_;
+    for (int64_t i = 0; OB_SUCC(ret) && i < node->num_child_; ++i) {
+      const ParseNode *column_node = node->children_[i];
+      if (column_node->type_ == T_COLUMN_DEFINITION && column_node->children_[2] != nullptr) {
+        const ParseNode &attributes = *column_node->children_[2];
+        const ParseNode &name = *column_node->children_[0]->children_[2];
+        ObColumnSchemaV2 *column = table.get_column_schema(ObString(name.str_len_, name.str_value_));
+        for (int64_t j = 0; OB_SUCC(ret) && j < attributes.num_child_; ++j) {
+          if (attributes.children_[j]->type_ == T_AI_COLUMN) {
+            if (column == nullptr) { ret = OB_ERR_UNEXPECTED; }
+            else { ret = resolve_ai_column_definition(*attributes.children_[j], table, *column, cur_column_id_); }
+          }
+        }
+      }
+    }
+    if (OB_SUCC(ret)) { table.set_max_used_column_id(cur_column_id_); }
+  }
   return ret;
 }
 

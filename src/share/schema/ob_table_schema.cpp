@@ -18,6 +18,9 @@
 #include "common/datum/ob_datum.h"
 #include "share/schema/ob_col_desc.h"  // ObColDesc complete type(previously hidden behind the ddl_common include chain)
 #include "ob_table_schema.h"
+#include "ai_column_schema.h"
+#include "ob_column_schema.h"
+#include "ob_constraint.h"
 #include "lib/compress/ob_compressor_pool.h"
 #include "share/schema/ob_partition_array_utils.h"
 #include "share/schema/ob_part_mgr_util.h"
@@ -1299,6 +1302,15 @@ int ObTableSchema::assign(const ObTableSchema &src_schema)
         }
       }
 
+      if (OB_SUCC(ret) && src_schema.ai_column_count_ > 0) {
+        ai_columns_ = static_cast<AIColumnSchema **>(
+            alloc(src_schema.ai_column_count_ * sizeof(AIColumnSchema *)));
+        if (ai_columns_ == nullptr) { ret = OB_ALLOCATE_MEMORY_FAILED; }
+        else { ai_column_capacity_ = src_schema.ai_column_count_; }
+      }
+      for (int64_t i = 0; OB_SUCC(ret) && i < src_schema.ai_column_count_; ++i) {
+        ret = add_ai_column(*src_schema.ai_columns_[i]);
+      }
       if (OB_SUCC(ret)) {
         if (OB_FAIL(assign_constraint(src_schema))) {
         }
@@ -2506,6 +2518,10 @@ int64_t ObTableSchema::get_convert_size() const
     convert_size += column_array_[i]->get_convert_size();
   }
 
+  convert_size += ai_column_count_ * sizeof(AIColumnSchema *);
+  for (int64_t i = 0; i < ai_column_count_; ++i) {
+    convert_size += ai_columns_[i]->get_convert_size();
+  }
   convert_size += cst_cnt_ * sizeof(ObConstraint*);
   for (int64_t i = 0; i < cst_cnt_ && NULL != cst_array_[i];  ++i) {
     convert_size += cst_array_[i]->get_convert_size();
@@ -2587,6 +2603,8 @@ void ObTableSchema::reset()
   cst_cnt_ = 0;
   cst_array_capacity_ = 0;
   cst_array_ = NULL;
+  ai_columns_ = nullptr;
+  ai_column_count_ = ai_column_capacity_ = 0;
   foreign_key_infos_.reset();
   simple_index_infos_.reset();
   trigger_list_.reset();
@@ -2875,6 +2893,35 @@ int ObTableSchema::convert_column_ids_in_info(const ObHashMap<uint64_t, uint64_t
 
 // Redistribute column ids for user columns such that they are sorted by column id in prev next list.
 // Note that the column array won't changed during this function.
+int ObTableSchema::convert_ai_column_ids(const ObHashMap<uint64_t, uint64_t> &column_id_map)
+{
+  int ret = OB_SUCCESS;
+  for (int64_t i = 0; OB_SUCC(ret) && i < ai_column_count_; ++i) {
+    AIColumnSchema rewritten;
+    ObSEArray<uint64_t, 4> dependencies;
+    if (OB_FAIL(rewritten.assign(*ai_columns_[i]))) {
+    }
+    uint64_t *ids[] = {&rewritten.column_id_, &rewritten.state_column_id_,
+        &rewritten.request_column_id_, &rewritten.result_spec_column_id_};
+    for (int64_t j = 0; OB_SUCC(ret) && j < 4; ++j) {
+      uint64_t mapped = OB_INVALID_ID;
+      if (OB_FAIL(column_id_map.get_refactored(*ids[j], mapped))) {
+      } else { *ids[j] = mapped; }
+    }
+    for (int64_t j = 0; OB_SUCC(ret) && j < rewritten.get_dependency_count(); ++j) {
+      uint64_t mapped = OB_INVALID_ID;
+      if (OB_FAIL(column_id_map.get_refactored(rewritten.get_dependencies()[j], mapped))) {
+      } else if (OB_FAIL(dependencies.push_back(mapped))) {
+      }
+    }
+    if (OB_FAIL(ret)) {
+    } else if (OB_FAIL(rewritten.set_dependencies(dependencies))) {
+    } else if (OB_FAIL(ai_columns_[i]->assign(rewritten))) {
+    }
+  }
+  return ret;
+}
+
 int ObTableSchema::convert_column_ids_for_ddl(const ObHashMap<uint64_t, uint64_t> &column_id_map)
 {
   int ret = OB_SUCCESS;
@@ -2883,6 +2930,7 @@ int ObTableSchema::convert_column_ids_for_ddl(const ObHashMap<uint64_t, uint64_t
   } else if (OB_FAIL(convert_basic_column_ids(column_id_map))) {
   } else if (OB_FAIL(convert_column_ids_in_generated_columns(column_id_map))) {
   } else if (OB_FAIL(convert_column_ids_in_constraint(column_id_map))) {
+  } else if (OB_FAIL(convert_ai_column_ids(column_id_map))) {
   } else if (OB_FAIL(convert_autoinc_column_id(column_id_map))) {
   } else if (OB_FAIL(convert_column_ids_in_info(column_id_map, rowkey_info_))) {
   } else if (OB_FAIL(convert_column_ids_in_info(column_id_map, shadow_rowkey_info_))) {
@@ -5406,6 +5454,7 @@ OB_DEF_SERIALIZE(ObTableSchema)
   OB_UNIS_ENCODE(parser_properties_);
   OB_UNIS_ENCODE(semistruct_encoding_type_);
   OB_UNIS_ENCODE(micro_block_format_version_);
+  OB_UNIS_ENCODE_ARRAY_POINTER(ai_columns_, ai_column_count_);
   // !!! end static check
   /*
    * Add deserialized members before this end static check comment
@@ -5609,6 +5658,7 @@ OB_DEF_DESERIALIZE(ObTableSchema)
   OB_UNIS_DECODE_AND_FUNC(parser_properties_, deep_copy_str);
   OB_UNIS_DECODE(semistruct_encoding_type_);
   OB_UNIS_DECODE(micro_block_format_version_);
+  OB_UNIS_DECODE_ARRAY_POINTER(ai_columns_, ai_column_count_, add_ai_column);
   // !!! end static check
   /*
    * Add deserialized members before this end static check comment
@@ -5719,6 +5769,7 @@ OB_DEF_SERIALIZE_SIZE(ObTableSchema)
   OB_UNIS_ADD_LEN(parser_properties_);
   OB_UNIS_ADD_LEN(semistruct_encoding_type_);
   OB_UNIS_ADD_LEN(micro_block_format_version_);
+  OB_UNIS_ADD_LEN_ARRAY_POINTER(ai_columns_, ai_column_count_);
   // !!! end static check
   /*
    * Add deserialized members before this end static check comment
@@ -6179,6 +6230,97 @@ int ObTableSchema::remove_cst_from_cst_array(const ObConstraint *cst)
   }
 
   return ret;
+}
+
+int ObTableSchema::serialize_ai_column_metadata(ObIAllocator &allocator, ObString &data) const
+{
+  int ret = OB_SUCCESS;
+  int64_t size = serialization::encoded_length_vi64(ai_column_count_);
+  for (int64_t i = 0; i < ai_column_count_; ++i) { size += ai_columns_[i]->get_serialize_size(); }
+  char *buffer = nullptr;
+  int64_t pos = 0;
+  if (size > 4 * 1024 * 1024) { ret = OB_SIZE_OVERFLOW; }
+  else if ((buffer = static_cast<char *>(allocator.alloc(size))) == nullptr) { ret = OB_ALLOCATE_MEMORY_FAILED; }
+  else if (OB_FAIL(serialization::encode_vi64(buffer, size, pos, ai_column_count_))) {
+  }
+  for (int64_t i = 0; OB_SUCC(ret) && i < ai_column_count_; ++i) {
+    ret = ai_columns_[i]->serialize(buffer, size, pos);
+  }
+  if (OB_SUCC(ret)) { data.assign_ptr(buffer, pos); }
+  return ret;
+}
+
+int ObTableSchema::deserialize_ai_column_metadata(const ObString &data)
+{
+  int ret = OB_SUCCESS;
+  int64_t count = 0, pos = 0;
+  if (ai_column_count_ != 0 || data.empty() || data.length() > 4 * 1024 * 1024) { ret = OB_INVALID_ARGUMENT; }
+  else if (OB_FAIL(serialization::decode_vi64(data.ptr(), data.length(), pos, &count))) {
+  } else if (count < 0 || count > 4096) { ret = OB_DESERIALIZE_ERROR; }
+  for (int64_t i = 0; OB_SUCC(ret) && i < count; ++i) {
+    AIColumnSchema column;
+    if (OB_FAIL(column.deserialize(data.ptr(), data.length(), pos))) {
+    } else if (OB_FAIL(add_ai_column(column))) {
+    }
+  }
+  if (OB_SUCC(ret) && pos != data.length()) { ret = OB_DESERIALIZE_ERROR; }
+  if (OB_FAIL(ret)) { error_ret_ = ret; }
+  return ret;
+}
+
+const AIColumnSchema *ObTableSchema::get_ai_column(uint64_t column_id) const
+{
+  const AIColumnSchema *result = nullptr;
+  for (int64_t i = 0; result == nullptr && i < ai_column_count_; ++i) {
+    if (ai_columns_[i]->column_id_ == column_id) { result = ai_columns_[i]; }
+  }
+  return result;
+}
+
+int ObTableSchema::add_ai_column(const AIColumnSchema &column)
+{
+  int ret = OB_SUCCESS;
+  AIColumnSchema *copy = nullptr;
+  if (!column.is_valid() || get_ai_column(column.column_id_) != nullptr || ai_column_count_ >= 4096) {
+    ret = OB_INVALID_ARGUMENT;
+  } else if (ai_column_count_ == ai_column_capacity_) {
+    const int64_t capacity = ai_column_capacity_ == 0 ? 4 : ai_column_capacity_ * 2;
+    auto **entries = static_cast<AIColumnSchema **>(alloc(capacity * sizeof(AIColumnSchema *)));
+    if (entries == nullptr) {
+      ret = OB_ALLOCATE_MEMORY_FAILED;
+    } else {
+      if (ai_column_count_ > 0) { MEMCPY(entries, ai_columns_, ai_column_count_ * sizeof(AIColumnSchema *)); }
+      free(ai_columns_);
+      ai_columns_ = entries;
+      ai_column_capacity_ = capacity;
+    }
+  }
+  if (OB_SUCC(ret)) {
+    void *memory = alloc(sizeof(AIColumnSchema));
+    if (memory == nullptr) { ret = OB_ALLOCATE_MEMORY_FAILED; }
+    else { copy = new (memory) AIColumnSchema(allocator_); }
+  }
+  if (OB_SUCC(ret) && OB_FAIL(copy->assign(column))) {
+  } else if (OB_SUCC(ret)) {
+    ai_columns_[ai_column_count_++] = copy;
+    add_table_flag(AI_COLUMN_HISTORY_FLAG);
+  }
+  if (OB_FAIL(ret)) { error_ret_ = ret; }
+  return ret;
+}
+
+int ObTableSchema::remove_ai_column(uint64_t column_id)
+{
+  for (int64_t i = 0; i < ai_column_count_; ++i) {
+    if (ai_columns_[i]->column_id_ == column_id) {
+      ai_columns_[i]->~AIColumnSchema();
+      free(ai_columns_[i]);
+      for (int64_t j = i + 1; j < ai_column_count_; ++j) { ai_columns_[j - 1] = ai_columns_[j]; }
+      --ai_column_count_;
+      break;
+    }
+  }
+  return OB_SUCCESS;
 }
 
 int ObTableSchema::add_constraint(const ObConstraint &constraint)

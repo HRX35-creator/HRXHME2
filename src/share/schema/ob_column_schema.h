@@ -296,6 +296,8 @@ int assign(const ObColumnSchemaV2 &src_schema);
   inline bool has_column_flag(int64_t flag) const { return column_flags_ & flag; }
   inline int64_t get_column_flags() const { return column_flags_; }
   //these column flags must be stored in __all_column
+  bool is_ai_column() const { return (column_flags_ & AI_COLUMN_FLAG) != 0; }
+  void set_ai_column() { column_flags_ |= AI_COLUMN_FLAG; }
   inline int64_t get_stored_column_flags() const { return column_flags_ & STORED_COLUMN_FLAGS_MASK; }
   inline bool is_heap_alter_rowkey_column() const {return column_flags_ & HEAP_ALTER_ROWKEY_FLAG; }
   inline bool is_not_null_for_read() const {

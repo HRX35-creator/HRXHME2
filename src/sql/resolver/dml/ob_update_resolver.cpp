@@ -16,6 +16,7 @@
 
 #define USING_LOG_PREFIX SQL_RESV
 #include "sql/resolver/dml/ob_update_resolver.h"
+#include "share/schema/ai_column_schema.h"
 
 namespace oceanbase
 {
@@ -81,7 +82,9 @@ int ObUpdateResolver::resolve(const ParseNode &parse_tree)
     current_scope_ = T_UPDATE_SCOPE;
     // resolve assignments
     ParseNode *assign_list = parse_tree.children_[UPDATE_LIST];
-    if (OB_ISNULL(assign_list) || OB_UNLIKELY(T_ASSIGN_LIST != assign_list->type_)) {
+    if (assign_list != nullptr && assign_list->type_ == T_AI_COLUMN_RETRY) {
+      ret = resolve_ai_retry_assignment(*assign_list, tables_assign);
+    } else if (OB_ISNULL(assign_list) || OB_UNLIKELY(T_ASSIGN_LIST != assign_list->type_)) {
       ret = OB_ERR_UNEXPECTED;
       LOG_WARN("invalid assign list node", K(assign_list));
     } else if (OB_FAIL(resolve_assignments(*assign_list,
@@ -149,6 +152,89 @@ int ObUpdateResolver::resolve(const ParseNode &parse_tree)
     } else if (OB_FAIL(update_stmt->check_dml_source_from_join())) {
     } else if (OB_FAIL(check_safe_update_mode(update_stmt))) {
     } else { /*do nothing*/ }
+  }
+  return ret;
+}
+
+namespace {
+ParseNode *retry_constant(ObIAllocator &allocator, ObItemType type, const char *text, int64_t value = 0)
+{
+  ParseNode *node = new_terminal_node(&allocator, type);
+  if (node != nullptr) {
+    node->value_ = value;
+    node->str_value_ = text;
+    node->str_len_ = text == nullptr ? 0 : strlen(text);
+    node->is_tree_not_param_ = true;
+    node->is_hidden_const_ = true;
+  }
+  return node;
+}
+
+int replace_retry_status(ParseNode *&node, ParseNode *status)
+{
+  int ret = OB_SUCCESS;
+  if (node == nullptr || node->type_ == T_SELECT) {
+  } else if (node->type_ == T_COLUMN_REF && node->num_child_ == 3
+      && node->children_[0] == nullptr && node->children_[1] == nullptr
+      && node->children_[2] != nullptr && !node->children_[2]->is_input_quoted_
+      && ObString(node->children_[2]->str_len_, node->children_[2]->str_value_).case_compare("status") == 0) {
+    node = status;
+  } else {
+    for (int64_t i = 0; OB_SUCC(ret) && i < node->num_child_; ++i) {
+      ret = SMART_CALL(replace_retry_status(node->children_[i], status));
+    }
+  }
+  return ret;
+}
+} // namespace
+
+int ObUpdateResolver::resolve_ai_retry_assignment(const ParseNode &retry, ObIArray<ObTableAssignment> &assigns)
+{
+  int ret = OB_SUCCESS;
+  ObUpdateStmt *stmt = get_update_stmt();
+  const TableItem *item = nullptr;
+  const ObTableSchema *table = nullptr;
+  const ObColumnSchemaV2 *column = nullptr;
+  const AIColumnSchema *ai = nullptr;
+  if (retry.num_child_ != 2 || retry.children_[0] == nullptr || stmt->get_table_size() != 1
+      || (item = stmt->get_table_item(0)) == nullptr || !item->is_basic_table()) {
+    ret = OB_NOT_SUPPORTED;
+  } else if (OB_FAIL(schema_checker_->get_table_schema(item->ref_id_, table))) {
+  } else if (table == nullptr || (column = table->get_column_schema(
+          ObString(retry.children_[0]->str_len_, retry.children_[0]->str_value_))) == nullptr
+      || (ai = table->get_ai_column(column->get_column_id())) == nullptr) {
+    ret = OB_NOT_SUPPORTED;
+    LOG_USER_ERROR(OB_NOT_SUPPORTED, "retrying a column that is not an AI column");
+  } else {
+    ai_retry_column_id_ = ai->column_id_;
+    params_.query_ctx_->ai_column_retry_ = true;
+    ObTableAssignment assignment;
+    assignment.table_id_ = item->table_id_;
+    ret = assigns.push_back(assignment);
+  }
+  if (OB_SUCC(ret) && retry.children_[1] != nullptr) {
+    const ObColumnSchemaV2 *state = table->get_column_schema(ai->state_column_id_);
+    ParseNode *state_name = state == nullptr ? nullptr : retry_constant(*allocator_, T_IDENT, nullptr);
+    if (state_name == nullptr) { ret = OB_ALLOCATE_MEMORY_FAILED;
+    } else {
+      state_name->str_value_ = state->get_column_name_str().ptr();
+      state_name->str_len_ = state->get_column_name_str().length();
+      ParseNode *state_ref = new_non_terminal_node(allocator_, T_COLUMN_REF, 3, static_cast<ParseNode *>(nullptr), static_cast<ParseNode *>(nullptr), state_name);
+      ParseNode *ready = retry_constant(*allocator_, T_VARCHAR, "READY");
+      ParseNode *failed = retry_constant(*allocator_, T_VARCHAR, "FAILED");
+      ParseNode *pending = retry_constant(*allocator_, T_VARCHAR, "PENDING");
+      ParseNode *one = retry_constant(*allocator_, T_INT, nullptr, 1);
+      ParseNode *two = retry_constant(*allocator_, T_INT, nullptr, 2);
+      ParseNode *when_ready = new_non_terminal_node(allocator_, T_WHEN, 2, one, ready);
+      ParseNode *when_failed = new_non_terminal_node(allocator_, T_WHEN, 2, two, failed);
+      ParseNode *whens = new_non_terminal_node(allocator_, T_WHEN_LIST, 2, when_ready, when_failed);
+      ParseNode *status = new_non_terminal_node(allocator_, T_CASE, 3, state_ref, whens, pending);
+      if (state_ref == nullptr || ready == nullptr || failed == nullptr || pending == nullptr
+          || one == nullptr || two == nullptr || when_ready == nullptr || when_failed == nullptr
+          || whens == nullptr || status == nullptr) {
+        ret = OB_ALLOCATE_MEMORY_FAILED;
+      } else { ret = replace_retry_status(retry.children_[1], status); }
+    }
   }
   return ret;
 }

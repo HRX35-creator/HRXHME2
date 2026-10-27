@@ -74,6 +74,9 @@ protected:
                                      const ObStmtScope scope);
   int generate_wrapper_expr_for_assignemnts(common::ObIArray<ObAssignment> &assigns,
                                             bool has_before_trigger);
+  int resolve_ai_column_assignments(ObTableAssignment &table_assign);
+  int resolve_ai_column_insert_values(ObInsertTableInfo &table_info);
+  int build_ai_request_expr(ObRawExpr *&expr);
 
   virtual int add_assignment(common::ObIArray<ObTableAssignment> &table_assigns,
                              const TableItem *table_item,
@@ -240,6 +243,7 @@ private:
   bool is_column_specify_;
 protected:
   bool is_resolve_insert_update_;
+  uint64_t ai_retry_column_id_;
 };
 
 } /* namespace sql */

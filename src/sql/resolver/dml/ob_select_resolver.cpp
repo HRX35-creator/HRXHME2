@@ -1685,7 +1685,8 @@ int ObSelectResolver::expand_target_list(
       tmp_select_item.expr_name_ = col_item.column_name_;
       tmp_select_item.is_real_alias_ = false;
       tmp_select_item.expr_ = col_item.expr_;
-      if (OB_FAIL(target_list.push_back(tmp_select_item))) {
+      if (OB_FAIL(record_ai_column_reads(tmp_select_item.expr_))) {
+      } else if (OB_FAIL(target_list.push_back(tmp_select_item))) {
       }
     }
   }

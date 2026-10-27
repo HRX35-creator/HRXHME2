@@ -950,6 +950,33 @@ int ObDMLResolver::get_target_column_list(ObSEArray<ColumnItem, 4> &target_list,
   return ret;
 }
 
+int ObDMLResolver::record_ai_column_reads(const ObRawExpr *expr)
+{
+  int ret = OB_SUCCESS;
+  // Called only for explicit SQL expressions / star expansion, before DML
+  // derives full rows, invalidation, generated columns or index assignments.
+  if (expr == nullptr || params_.ai_column_internal_write_) {
+  } else if (expr->is_column_ref_expr()) {
+    const auto *column = static_cast<const ObColumnRefRawExpr *>(expr);
+    const TableItem *item = get_stmt()->get_table_item_by_id(column->get_table_id());
+    const ObTableSchema *table = nullptr;
+    if (item == nullptr || !item->is_basic_table()) {
+    } else if (OB_FAIL(schema_checker_->get_table_schema(item->ref_id_, table))) {
+    } else if (table != nullptr && table->get_ai_column(column->get_column_id()) != nullptr) {
+      auto &reads = params_.query_ctx_->ai_column_reads_;
+      const std::pair<uint64_t, uint64_t> key(item->ref_id_, column->get_column_id());
+      bool present = false;
+      for (int64_t i = 0; !present && i < reads.count(); ++i) { present = reads.at(i) == key; }
+      if (!present) { ret = reads.push_back(key); }
+    }
+  } else {
+    for (int64_t i = 0; OB_SUCC(ret) && i < expr->get_param_count(); ++i) {
+      ret = SMART_CALL(record_ai_column_reads(expr->get_param_expr(i)));
+    }
+  }
+  return ret;
+}
+
 int ObDMLResolver::resolve_sql_expr(const ParseNode &node, ObRawExpr *&expr,
     ObArray<ObQualifiedName> *output_columns/* = NULL*/)
 {
@@ -1129,6 +1156,7 @@ int ObDMLResolver::resolve_sql_expr(const ParseNode &node, ObRawExpr *&expr,
       }
     }
   }
+  if (OB_SUCC(ret)) { ret = record_ai_column_reads(expr); }
   return ret;
 }
 
@@ -2845,6 +2873,12 @@ int ObDMLResolver::resolve_joined_table(const ParseNode &parse_node, JoinedTable
       } else { /*do nothing*/ }
       current_scope_ = old_scope;
     }
+  }
+  // USING and NATURAL synthesize ON expressions without resolve_sql_expr.
+  // They still explicitly read the participating AI columns.
+  for (int64_t i = 0; OB_SUCC(ret) && joined_table != nullptr
+      && i < joined_table->join_conditions_.count(); ++i) {
+    ret = record_ai_column_reads(joined_table->join_conditions_.at(i));
   }
   return ret;
 }

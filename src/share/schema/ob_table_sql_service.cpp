@@ -16,6 +16,7 @@
 
 #define USING_LOG_PREFIX SHARE_SCHEMA
 #include "ob_table_sql_service.h"
+#include "ai_column_sql_service.h"
 #include "lib/literals/ob_literals.h"
 #include "share/ob_global_stat_proxy.h"
 #include "share/schema/ob_constraint.h"
@@ -697,6 +698,18 @@ int ObTableSqlService::drop_table(const ObTableSchema &table_schema,
     }
   }
 
+  if (OB_SUCC(ret) && table_schema.has_ai_column_history()) {
+    if (OB_FAIL(AIColumnSQLService::delete_current_metadata(sql_client, table_id))) {
+    }
+    const char *queues[] = {"__all_ai_column_task", "__all_ai_column_group"};
+    for (int64_t i = 0; OB_SUCC(ret) && i < 2; ++i) {
+      ObSqlString cleanup;
+      int64_t affected = 0;
+      if (OB_FAIL(cleanup.append_fmt("DELETE FROM oceanbase.%s WHERE table_id=%lu", queues[i], table_id))) {
+      } else if (OB_FAIL(sql_client.write(cleanup.ptr(), affected))) {
+      }
+    }
+  }
   // delete from __all_table_stat, __all_monitor_modified, __all_column_usage, __all_optstat_user_prefs
   if (OB_SUCC(ret)) {
     if (OB_FAIL(delete_from_all_table_stat(sql_client, table_id))) {
@@ -1680,6 +1693,7 @@ int ObTableSqlService::add_table(
     }
   }
 
+  if (OB_SUCC(ret) && !only_history) { ret = AIColumnSQLService::store_metadata(sql_client, table); }
   return ret;
 }
 
@@ -1721,6 +1735,9 @@ int ObTableSqlService::batch_add_table_for_create_table(common::ObISQLClient &sq
     } else if (OB_FAIL(dml.set_default_columns("is_deleted", "0"))) {
     } else if (OB_FAIL(exec_dml(sql_client, OB_ALL_TABLE_HISTORY_TNAME, dml, tables.count()))) {
     } else if (FALSE_IT(time_guard.click("insert_all_table_history"))) {
+    }
+    for (int64_t i = 0; OB_SUCC(ret) && i < tables.count(); ++i) {
+      ret = AIColumnSQLService::store_metadata(sql_client, tables.at(i));
     }
   }
   return ret;
@@ -2481,6 +2498,7 @@ int ObTableSqlService::update_table_attribute(ObISQLClient &sql_client,
       }
     }
   }
+  if (OB_SUCC(ret)) { ret = AIColumnSQLService::store_metadata(sql_client, new_table_schema); }
   return ret;
 }
 
