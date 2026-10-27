@@ -220,6 +220,57 @@ class AIColumnWorkerIntegrationTest(AISQLMockTestCase):
         self.wait_value(table, updated)
         self.assertEqual(((1700000001,),), self.execute(f"SELECT UNIX_TIMESTAMP(stamp) FROM `{table}`"))
 
+    def test_composite_text_keys_preserve_bytes_across_sql_modes(self):
+        table = self.create("text_keys", "id VARCHAR(100),shard INT,content VARCHAR(100),"
+                            f"result VARCHAR(200) AI COLUMN(AI_COMPLETE('{self.model}',content)),PRIMARY KEY(id,shard)")
+        mode = self.execute("SELECT @@sql_mode")[0][0]
+        self.addCleanup(self.execute, "SET sql_mode=%s", (mode,))
+        self.execute("SET sql_mode='NO_BACKSLASH_ESCAPES'")
+        keys = ("key\\slash", "key'quote", "' OR 1=1 -- ", "世界\\路径'引号")
+        for i, key in enumerate(keys):
+            self.execute(f"INSERT INTO `{table}`(id,shard,content) VALUES(%s,%s,%s)", (key, i, "row:" + str(i)))
+        # A second row with the same text key exercises the full composite key.
+        self.execute(f"INSERT INTO `{table}`(id,shard,content) VALUES(%s,99,'sibling')", (keys[0],))
+        self.execute("SET sql_mode=%s", (mode,))
+        self.wait_for(lambda: self.execute(f"SELECT COUNT(*) FROM `{table}` WHERE result IS NOT NULL") == ((5,),))
+        for i, key in enumerate(keys):
+            self.assertEqual((("reply:row:" + str(i),),), self.execute(
+                f"SELECT result FROM `{table}` WHERE id=%s AND shard=%s", (key, i)))
+        self.assertEqual((("reply:sibling",),), self.execute(
+            f"SELECT result FROM `{table}` WHERE id=%s AND shard=99", (keys[0],)))
+        self.assertEqual(5, self.server.requests.qsize())
+
+    def test_timestamp_primary_key_is_absolute_across_worker_time_zones(self):
+        table = self.create("timestamp_key", "id TIMESTAMP(6) PRIMARY KEY,content VARCHAR(100),"
+                            f"result VARCHAR(200) AI COLUMN(AI_COMPLETE('{self.model}',content))")
+        zone = self.execute("SELECT @@time_zone")[0][0]
+        self.addCleanup(self.execute, "SET time_zone=%s", (zone,))
+        self.execute("SET time_zone='+12:00'")
+        self.execute(f"INSERT INTO `{table}`(id,content) VALUES('1960-01-02 03:04:05.123456','historical')")
+        self.wait_for(lambda: self.execute(f"SELECT result FROM `{table}`") == (("reply:historical",),))
+        self.connection.begin()
+        try:
+            self.execute(f"UPDATE `{table}` SET id='2099-02-03 04:05:06.654321',content='relocated'")
+            self.assertEqual(((None,),), self.execute(f"SELECT result FROM `{table}`"))
+            self.connection.rollback()
+        finally:
+            self.connection.rollback()
+        self.assertEqual((("reply:historical",),), self.execute(f"SELECT result FROM `{table}`"))
+        self.execute(f"UPDATE `{table}` SET id='2099-02-03 04:05:06.654321',content='relocated'")
+        self.wait_for(lambda: self.execute(f"SELECT result FROM `{table}`") == (("reply:relocated",),))
+        self.assertEqual(((1,),), self.execute(f"SELECT id='2099-02-03 04:05:06.654321' FROM `{table}`"))
+        self.assertEqual(2, self.server.requests.qsize())
+
+    def test_zero_timestamp_primary_key_remains_addressable(self):
+        table = self.create("zero_key", "id TIMESTAMP(6) PRIMARY KEY,content VARCHAR(100),"
+                            f"result VARCHAR(200) AI COLUMN(AI_COMPLETE('{self.model}',content))")
+        mode = self.execute("SELECT @@sql_mode")[0][0]
+        self.addCleanup(self.execute, "SET sql_mode=%s", (mode,))
+        self.execute("SET sql_mode=''")
+        self.execute(f"INSERT INTO `{table}`(id,content) VALUES('0000-00-00 00:00:00','zero')")
+        self.wait_for(lambda: self.execute(f"SELECT result FROM `{table}`") == (("reply:zero",),))
+        self.assertEqual(1, self.server.requests.qsize())
+
 
 class AIColumnVectorIntegrationTest(AISQLMockTestCase):
     MODEL_TYPE = "dense_embedding"

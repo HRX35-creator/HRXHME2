@@ -2176,14 +2176,29 @@ int build_ai_rowkey(const share::schema::ObTableSchema &schema,
     char *literal = nullptr;
     int64_t capacity = 0, pos = 0;
     const share::schema::ObColumnSchemaV2 *column = nullptr;
+    ObObjPrintParams print_params = op.get_obj_print_params();
+    // This durable predicate is evaluated by sessions with different SQL modes
+    // and time zones. Character hex literals preserve charset/collation while
+    // keeping row-key bytes out of SQL syntax.
+    print_params.character_hex_safe_represent_ = true;
     if (OB_FAIL(key.get_column_id(i, id))) {
     } else if (OB_ISNULL(column = schema.get_column_schema(id))) { ret = OB_ERR_UNEXPECTED;
     } else if (OB_FAIL(ai_row_value(ctdef, row, id, op, value))) {
-    } else if (OB_FAIL(value.print_sql_literal(literal, capacity, pos, alloc, op.get_obj_print_params()))) {
+    } else {
+      if (value.is_timestamp()) { print_params.tz_info_ = nullptr; }
+      ret = value.print_sql_literal(literal, capacity, pos, alloc, print_params);
+    }
+    const bool absolute_timestamp = value.is_timestamp()
+        && value.get_timestamp() != ObTimeConverter::ZERO_DATETIME;
+    if (OB_FAIL(ret)) {
     } else if (i != 0 && OB_FAIL(predicate.append(" AND "))) {
     } else if (OB_FAIL(append_ai_identifier(predicate, column->get_column_name_str()))) {
     } else if (OB_FAIL(predicate.append(" = "))) {
-    } else { ret = predicate.append(literal, pos); }
+    } else if (absolute_timestamp && OB_FAIL(predicate.append("CONVERT_TZ("))) {
+    } else if (OB_FAIL(predicate.append(literal, pos))) {
+    } else if (absolute_timestamp) {
+      ret = predicate.append(",'+00:00',@@session.time_zone)");
+    }
   }
   return ret;
 }
