@@ -72,8 +72,13 @@ class FTSTruthAggregationIntegrationTest(unittest.TestCase):
         direct = ('SELECT /*+ INDEX(docs ft_body) */ COUNT(*) FROM docs WHERE '
                   'MATCH(body) AGAINST(%s)')
         self.assertIn('calc_relevance=false', self.plan(direct, ('quasar',)))
-        self.assertIn('calc_relevance=true', self.plan(direct + ' > 0', ('quasar',)))
-        self.assertIn('calc_relevance=true', self.plan(direct + ' > 0.001', ('quasar',)))
+        # A numeric-only predicate uses functional lookup instead of a direct
+        # FTS access path, even with an INDEX hint. Keep a membership predicate
+        # so this plan assertion exercises scored FTS rather than that lookup.
+        scored = direct + ' AND MATCH(body) AGAINST(%s) > %s'
+        for threshold in [0, 0.001, 0.25, 1.5]:
+            self.assertIn('calc_relevance=true',
+                          self.plan(scored, ('quasar', 'quasar', threshold)))
 
     def test_truth_and_scored_predicate_agree_on_input_boundaries(self):
         expected = {'quasar': 301, 'nebula': 300, 'comet': 300, 'dwarf': 150,
