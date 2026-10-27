@@ -28,6 +28,7 @@
 #include <errno.h>
 #include <sys/ioctl.h>
 #include <net/if.h>
+#include <net/if_arp.h>
 #include <unistd.h>
 #ifdef __APPLE__
 #include <ifaddrs.h>
@@ -115,6 +116,9 @@ int ObUUIDNode::init(NodeProvider get_mac, NodeProvider get_random_node)
     } else if (OB_FAIL(get_random_node(node, NODE_LENGTH))) {
       LOG_ERROR("no usable MAC address and failed to generate random uuid node",
                 K(ret), K(mac_ret));
+    } else if (OB_NOT_SUPPORTED == mac_ret) {
+      // the platform exposes no hardware address by design
+      LOG_INFO("use random multicast uuid node", K(mac_ret));
     } else {
       LOG_WARN_RET(mac_ret, "no usable MAC address for uuid node, use random multicast node instead",
                    K(mac_ret));
@@ -194,6 +198,65 @@ int ObUUIDNode::read_fully(const int fd, unsigned char *buf, const int64_t len)
 }
 #endif
 
+#if defined(__linux__) && !defined(__EMSCRIPTEN__)
+static long sys_getrandom(void *buf, size_t len, unsigned int flags)
+{
+#ifdef SYS_getrandom
+  return syscall(SYS_getrandom, buf, len, flags);
+#else
+  errno = ENOSYS;
+  return -1;
+#endif
+}
+
+int ObUUIDNode::get_linux_entropy(GetRandomFunc get_random, const char *fallback_path,
+                                  unsigned char *buf, const int64_t len)
+{
+  int ret = OB_SUCCESS;
+  bool use_fallback = false;
+  int64_t pos = 0;
+  if (OB_ISNULL(get_random) || OB_ISNULL(fallback_path) || OB_ISNULL(buf) || OB_UNLIKELY(len < 0)) {
+    ret = OB_INVALID_ARGUMENT;
+    LOG_WARN("invalid argument", K(ret), KP(buf), K(len));
+  }
+  while (OB_SUCC(ret) && !use_fallback && pos < len) {
+    long n = get_random(buf + pos, static_cast<size_t>(len - pos), 0);
+    if (n > 0) {
+      pos += n;
+    } else if (n < 0 && EINTR == errno) {
+      // retry
+    } else if (n < 0 && (ENOSYS == errno || EPERM == errno)) {
+      // getrandom(2) is unavailable (old kernel) or denied by a seccomp filter
+      const int err = errno;
+      use_fallback = true;
+      LOG_WARN_RET(OB_ERR_SYS, "getrandom unavailable, read random device instead", K(err), K(fallback_path));
+    } else {
+      const int err = (n < 0) ? errno : 0;
+      ret = OB_ERR_SYS;
+      LOG_WARN("getrandom failed", K(ret), K(n), K(pos), K(len), K(err));
+    }
+  }
+  if (OB_SUCC(ret) && use_fallback) {
+    int fd = -1;
+    do {
+      fd = ::open(fallback_path, O_RDONLY | O_CLOEXEC);
+    } while (fd < 0 && EINTR == errno);
+    if (fd < 0) {
+      const int err = errno;
+      ret = OB_ERR_SYS;
+      LOG_WARN("failed to open random device", K(ret), K(fallback_path), K(err));
+    } else {
+      // getrandom(2) never returns partial data that must be kept, so refill
+      if (OB_FAIL(read_fully(fd, buf, len))) {
+        LOG_WARN("failed to read random device", K(ret), K(fallback_path));
+      }
+      ::close(fd);
+    }
+  }
+  return ret;
+}
+#endif
+
 /*
  * Fill buf with bytes from the operating system CSPRNG.
  */
@@ -219,42 +282,7 @@ int ObUUIDNode::get_os_entropy(unsigned char *buf, const int64_t len)
       }
     }
 #else
-    bool use_urandom = true;
-#ifdef SYS_getrandom
-    use_urandom = false;
-    int64_t pos = 0;
-    while (OB_SUCC(ret) && !use_urandom && pos < len) {
-      long n = syscall(SYS_getrandom, buf + pos, static_cast<size_t>(len - pos), 0);
-      if (n > 0) {
-        pos += n;
-      } else if (n < 0 && EINTR == errno) {
-        // retry
-      } else if (n < 0 && ENOSYS == errno) {
-        // kernel without getrandom(2)
-        use_urandom = true;
-      } else {
-        const int err = errno;
-        ret = OB_ERR_SYS;
-        LOG_WARN("getrandom failed", K(ret), K(n), K(pos), K(len), K(err));
-      }
-    }
-#endif
-    if (OB_SUCC(ret) && use_urandom) {
-      int fd = -1;
-      do {
-        fd = ::open("/dev/urandom", O_RDONLY | O_CLOEXEC);
-      } while (fd < 0 && EINTR == errno);
-      if (fd < 0) {
-        const int err = errno;
-        ret = OB_ERR_SYS;
-        LOG_WARN("failed to open /dev/urandom", K(ret), K(err));
-      } else {
-        if (OB_FAIL(read_fully(fd, buf, len))) {
-          LOG_WARN("failed to read /dev/urandom", K(ret));
-        }
-        ::close(fd);
-      }
-    }
+    ret = get_linux_entropy(sys_getrandom, "/dev/urandom", buf, len);
 #endif
   }
   return ret;
@@ -270,18 +298,15 @@ static inline bool is_usable_mac_address(const unsigned char *mac, const int64_t
 }
 
 /*
- * Get the MAC address of the first non-loopback interface.
- * Returns OB_ENTRY_NOT_EXIST if no usable MAC address is found, or OB_ERR_SYS
- * if interface enumeration fails.
+ * Copy the hardware address of the first usable non-loopback interface into
+ * node. Returns OB_ERR_SYS (with errno logged) if interface enumeration fails
+ * and OB_NOT_SUPPORTED where the platform exposes no hardware address.
  */
-int ObUUIDNode::get_mac_address(unsigned char *node, const int64_t len)
+static int get_platform_mac_address(unsigned char *node, bool &mac_addr_found)
 {
   int ret = OB_SUCCESS;
-  bool mac_addr_found = false;
-  if (OB_ISNULL(node) || OB_UNLIKELY(NODE_LENGTH != len)) {
-    ret = OB_INVALID_ARGUMENT;
-    LOG_WARN("invalid argument", K(ret), KP(node), K(len));
-  } else {
+  const int64_t NODE_LENGTH = ObUUIDNode::NODE_LENGTH;
+  mac_addr_found = false;
 #ifdef __EMSCRIPTEN__
   // Browsers expose no hardware MAC.
   ret = OB_NOT_SUPPORTED;
@@ -374,6 +399,8 @@ int ObUUIDNode::get_mac_address(unsigned char *node, const int64_t len)
         } else if (ioctl(sock, SIOCGIFHWADDR, &ifr) != 0) {
           const int err = errno;
           LOG_WARN("ioctl failed, SIOCGIFHWADDR", K(err), K(ifr.ifr_name));
+        } else if (ARPHRD_ETHER != ifr.ifr_hwaddr.sa_family) {
+          // only 6-byte IEEE 802 addresses can serve as a UUID node
         } else if (is_usable_mac_address(reinterpret_cast<const unsigned char *>(ifr.ifr_hwaddr.sa_data),
                                          NODE_LENGTH)) {
           MEMCPY(node, ifr.ifr_hwaddr.sa_data, NODE_LENGTH);
@@ -384,8 +411,21 @@ int ObUUIDNode::get_mac_address(unsigned char *node, const int64_t len)
     close(sock);
   }
 #endif
-  }
-  if (OB_SUCC(ret) && !mac_addr_found) {
+  return ret;
+}
+
+/*
+ * Returns OB_ENTRY_NOT_EXIST if no usable MAC address is found.
+ */
+int ObUUIDNode::get_mac_address(unsigned char *node, const int64_t len)
+{
+  int ret = OB_SUCCESS;
+  bool mac_addr_found = false;
+  if (OB_ISNULL(node) || OB_UNLIKELY(NODE_LENGTH != len)) {
+    ret = OB_INVALID_ARGUMENT;
+    LOG_WARN("invalid argument", K(ret), KP(node), K(len));
+  } else if (OB_FAIL(get_platform_mac_address(node, mac_addr_found))) {
+  } else if (!mac_addr_found) {
     ret = OB_ENTRY_NOT_EXIST;
     LOG_WARN("no usable MAC address found", K(ret));
   }

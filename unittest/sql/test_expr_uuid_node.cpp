@@ -16,6 +16,8 @@
 
 #include "sql/engine/expr/ob_expr_uuid.h"
 #include <errno.h>
+#include <fcntl.h>
+#include <stdlib.h>
 #include <unistd.h>
 #include <cstring>
 #include <gtest/gtest.h>
@@ -76,6 +78,76 @@ int failing_entropy(unsigned char *, const int64_t)
   return OB_ERR_SYS;
 }
 
+int getrandom_calls = 0;
+
+long getrandom_eperm(void *, size_t, unsigned int)
+{
+  ++getrandom_calls;
+  errno = EPERM;
+  return -1;
+}
+
+long getrandom_enosys(void *, size_t, unsigned int)
+{
+  ++getrandom_calls;
+  errno = ENOSYS;
+  return -1;
+}
+
+long getrandom_eio(void *, size_t, unsigned int)
+{
+  ++getrandom_calls;
+  errno = EIO;
+  return -1;
+}
+
+// EINTR first, then one byte per call
+long getrandom_interrupted_partial(void *buf, size_t len, unsigned int)
+{
+  long ret = -1;
+  if (0 == getrandom_calls++) {
+    errno = EINTR;
+  } else if (len > 0) {
+    static_cast<unsigned char *>(buf)[0] = static_cast<unsigned char>(0xa0 + getrandom_calls);
+    ret = 1;
+  } else {
+    ret = 0;
+  }
+  return ret;
+}
+
+// a regular file with known content stands in for /dev/urandom
+class FallbackFile
+{
+public:
+  explicit FallbackFile(const unsigned char *data, const int64_t len)
+  {
+    strcpy(path_, "/tmp/test_expr_uuid_node_XXXXXX");
+    fd_ = mkstemp(path_);
+    if (fd_ >= 0 && len > 0) {
+      ok_ = (write(fd_, data, len) == len);
+    } else {
+      ok_ = (fd_ >= 0);
+    }
+  }
+  ~FallbackFile()
+  {
+    if (fd_ >= 0) {
+      close(fd_);
+      unlink(path_);
+    }
+  }
+  bool ok() const { return ok_; }
+  const char *path() const { return path_; }
+
+private:
+  char path_[64];
+  int fd_ = -1;
+  bool ok_ = false;
+};
+
+const unsigned char FALLBACK_BYTES[NODE_LEN] = {0x10, 0x11, 0x12, 0x13, 0x14, 0x15};
+
 ObUUIDNode make_uninited_node()
 {
   ObUUIDNode node;
@@ -88,7 +160,11 @@ ObUUIDNode make_uninited_node()
 class TestExprUuidNode : public ::testing::Test
 {
 protected:
-  void SetUp() override { random_node_calls = 0; }
+  void SetUp() override
+  {
+    random_node_calls = 0;
+    getrandom_calls = 0;
+  }
 };
 
 TEST_F(TestExprUuidNode, uses_mac_address_when_available)
@@ -234,6 +310,75 @@ TEST_F(TestExprUuidNode, gen_server_uuid_returns_version1_uuid)
   EXPECT_EQ('1', uuid[14]);
   EXPECT_EQ('-', uuid[18]);
   EXPECT_EQ('-', uuid[23]);
+}
+
+TEST_F(TestExprUuidNode, linux_entropy_falls_back_when_getrandom_is_denied)
+{
+  FallbackFile file(FALLBACK_BYTES, NODE_LEN);
+  ASSERT_TRUE(file.ok());
+  unsigned char out[NODE_LEN] = {0};
+  ASSERT_EQ(OB_SUCCESS, ObUUIDNode::get_linux_entropy(getrandom_eperm, file.path(), out, NODE_LEN));
+  EXPECT_EQ(0, MEMCMP(FALLBACK_BYTES, out, NODE_LEN));
+  EXPECT_EQ(1, getrandom_calls);
+}
+
+TEST_F(TestExprUuidNode, linux_entropy_falls_back_when_getrandom_is_missing)
+{
+  FallbackFile file(FALLBACK_BYTES, NODE_LEN);
+  ASSERT_TRUE(file.ok());
+  unsigned char out[NODE_LEN] = {0};
+  ASSERT_EQ(OB_SUCCESS, ObUUIDNode::get_linux_entropy(getrandom_enosys, file.path(), out, NODE_LEN));
+  EXPECT_EQ(0, MEMCMP(FALLBACK_BYTES, out, NODE_LEN));
+}
+
+TEST_F(TestExprUuidNode, linux_entropy_retries_eintr_and_partial_results)
+{
+  unsigned char out[NODE_LEN] = {0};
+  ASSERT_EQ(OB_SUCCESS, ObUUIDNode::get_linux_entropy(getrandom_interrupted_partial, "/nonexistent",
+                                                      out, NODE_LEN));
+  EXPECT_EQ(1 + NODE_LEN, getrandom_calls);
+  for (int64_t i = 0; i < NODE_LEN; ++i) {
+    EXPECT_EQ(0xa0 + i + 2, out[i]);
+  }
+}
+
+TEST_F(TestExprUuidNode, linux_entropy_reports_other_errors)
+{
+  FallbackFile file(FALLBACK_BYTES, NODE_LEN);
+  ASSERT_TRUE(file.ok());
+  unsigned char out[NODE_LEN] = {0};
+  EXPECT_EQ(OB_ERR_SYS, ObUUIDNode::get_linux_entropy(getrandom_eio, file.path(), out, NODE_LEN));
+}
+
+TEST_F(TestExprUuidNode, linux_entropy_fails_when_fallback_is_unusable)
+{
+  unsigned char out[NODE_LEN] = {0};
+  EXPECT_EQ(OB_ERR_SYS, ObUUIDNode::get_linux_entropy(getrandom_eperm, "/nonexistent/urandom",
+                                                      out, NODE_LEN));
+  FallbackFile short_file(FALLBACK_BYTES, 3);
+  ASSERT_TRUE(short_file.ok());
+  EXPECT_NE(OB_SUCCESS, ObUUIDNode::get_linux_entropy(getrandom_eperm, short_file.path(),
+                                                      out, NODE_LEN));
+  EXPECT_EQ(OB_INVALID_ARGUMENT, ObUUIDNode::get_linux_entropy(nullptr, "/dev/urandom", out, NODE_LEN));
+}
+
+TEST_F(TestExprUuidNode, gen_server_uuid_keeps_node_stable)
+{
+  char first[UuidCommon::LENGTH_UUID + 1] = {0};
+  char second[UuidCommon::LENGTH_UUID + 1] = {0};
+  ASSERT_EQ(OB_SUCCESS, ObExprUuid::gen_server_uuid(first, UuidCommon::LENGTH_UUID));
+  ASSERT_EQ(OB_SUCCESS, ObExprUuid::gen_server_uuid(second, UuidCommon::LENGTH_UUID));
+  // the last 12 hex digits encode the node
+  EXPECT_EQ(0, MEMCMP(first + 24, second + 24, 12));
+  EXPECT_NE(0, MEMCMP(first, second, UuidCommon::LENGTH_UUID));
+
+  ObUUIDNode node = make_uninited_node();
+  ASSERT_EQ(OB_SUCCESS, node.init());
+  char expected[13] = {0};
+  for (int64_t i = 0; i < NODE_LEN; ++i) {
+    snprintf(expected + 2 * i, 3, "%02x", node.mac_addr_[i]);
+  }
+  EXPECT_EQ(0, MEMCMP(expected, first + 24, 12));
 }
 
 }  // namespace sql

@@ -59,6 +59,14 @@ struct ObUUIDNode
   // Reads exactly len bytes, retrying on EINTR and partial reads.
   static int read_fully(const int fd, unsigned char *buf, const int64_t len);
 #endif
+#if defined(__linux__) && !defined(__EMSCRIPTEN__)
+  // getrandom(2)-compatible: returns the byte count, or -1 with errno set.
+  typedef long (*GetRandomFunc)(void *buf, size_t len, unsigned int flags);
+  // Reads len bytes with get_random, retrying on EINTR and partial results;
+  // reads fallback_path instead when getrandom fails with ENOSYS or EPERM.
+  static int get_linux_entropy(GetRandomFunc get_random, const char *fallback_path,
+                               unsigned char *buf, const int64_t len);
+#endif
 
   unsigned char mac_addr_[NODE_LENGTH];
   bool is_inited_;
