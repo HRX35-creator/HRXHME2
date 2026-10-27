@@ -80,6 +80,37 @@ int ObSqlString::append(const ObString &str)
   return append(str.ptr(), str.length());
 }
 
+int ObSqlString::append_escaped_identifier(const ObString &identifier)
+{
+  int ret = OB_SUCCESS;
+  const char *name = identifier.ptr();
+  const int64_t name_len = identifier.length();
+  int64_t begin = 0;
+  if (name_len < 0 || (name_len > 0 && OB_ISNULL(name))) {
+    ret = OB_INVALID_ARGUMENT;
+  } else if (NULL != data_ && string().contains(name)) {
+    // Appending can move this buffer; retain aliased input before growing it.
+    ObSqlString copy;
+    if (OB_FAIL(copy.assign(identifier))) {
+    } else {
+      ret = append_escaped_identifier(copy.string());
+    }
+  } else {
+    for (int64_t i = 0; OB_SUCC(ret) && i < name_len; ++i) {
+      if ('`' == name[i]) {
+        if (OB_FAIL(append(name + begin, i - begin + 1))) {
+        } else if (OB_FAIL(append("`"))) {
+        }
+        begin = i + 1;
+      }
+    }
+    if (OB_SUCC(ret) && begin < name_len) {
+      ret = append(name + begin, name_len - begin);
+    }
+  }
+  return ret;
+}
+
 int ObSqlString::append_fmt(const char *fmt, ...)
 {
   int ret = OB_SUCCESS;
