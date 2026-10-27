@@ -1,0 +1,34 @@
+# owner: issue-1535 fix
+# description: boolean idempotence and absorption simplification in WHERE conditions
+
+--disable_warnings
+drop table if exists bool_simp_t;
+--enable_warnings
+create table bool_simp_t (id int primary key, p int, q int);
+insert into bool_simp_t values (1,1,0),(2,1,1),(3,0,0),(4,0,1),(5,null,0),(6,null,1),(7,1,null),(8,0,null),(9,null,null);
+
+# AND idempotence
+select id from bool_simp_t where p = 1 and p = 1 order by id;
+
+# AND absorption, forward and reversed operand order
+select id from bool_simp_t where p = 1 and (p = 1 or q = 1) order by id;
+select id from bool_simp_t where (p = 1 or q = 1) and p = 1 order by id;
+
+# repeated absorbed branches, the reported pattern in miniature
+select id from bool_simp_t where p = 1 and (p = 1 or q = 1) and (p = 1 or q = 1) and (p = 1 or q = 1) order by id;
+
+# OR idempotence
+select id from bool_simp_t where p = 1 or p = 1 order by id;
+
+# OR absorption, forward and reversed
+select id from bool_simp_t where p = 1 or (p = 1 and q = 1) order by id;
+select id from bool_simp_t where (p = 1 and q = 1) or p = 1 order by id;
+
+# absorption nested inside an OR branch
+select id from bool_simp_t where q = 0 or (p = 1 and (p = 1 or q = 1)) order by id;
+
+# duplicated composite predicates inside AND
+select id from bool_simp_t where p = 1 and q = 0 and p = 1 and q = 0 order by id;
+select id from bool_simp_t where p + q > 0 and p + q > 0 order by id;
+
+drop table bool_simp_t;

@@ -390,6 +390,10 @@ public:
   {
     types = (types | (1L << type));
   }
+  static inline void remove_trans_type(uint64_t &types, TRANSFORM_TYPE type)
+  {
+    types = (types & ~(1L << type));
+  }
   int transform_self(common::ObIArray<ObParentDMLStmt> &parent_stmts,
                      const int64_t current_level,
                      ObDMLStmt *&stmt);

@@ -744,14 +744,123 @@ int ObTransformSimplifyExpr::inner_remove_dummy_expr(common::ObIArray<ObRawExpr*
 // when add pre calc constrains, cluster and create const predicate and create pre calc frame
 //  1. and_op(1 = 1, c1 = 1, 2 = 1) create pre calc frame use and_op(1 = 1, 2 = 1) expect false;
 //  2. or_op(1 = 1, c1 = 1, 2 = 1) create pre calc frame use and_op(1 = 1, 2 = 1) expect false;
+// Eliminates duplicated and absorbed operands of a boolean operator:
+//  - idempotence: X AND X -> X, X OR X -> X
+//  - absorption:  P AND (P OR Q) -> P, P OR (P AND Q) -> P
+// The operand list is rewritten in place; trans_happened reports whether any
+// operand was dropped. A dropped operand must be deterministic, and an
+// absorbed operand must additionally be error free, because its evaluation
+// disappears from the statement while the retained operand keeps evaluating.
+int ObTransformSimplifyExpr::dedup_and_absorb_bool_exprs(common::ObIArray<ObRawExpr*> &exprs,
+                                                         bool is_and,
+                                                         bool &trans_happened)
+{
+  int ret = OB_SUCCESS;
+  trans_happened = false;
+  ObSEArray<ObRawExpr*, 16> survivors;
+  if (exprs.count() <= 1) {
+    /* nothing to deduplicate */
+  } else {
+    for (int64_t i = 0; OB_SUCC(ret) && i < exprs.count(); ++i) {
+      ObRawExpr *cur = exprs.at(i);
+      bool drop_cur = false;
+      if (OB_ISNULL(cur)) {
+        ret = OB_ERR_UNEXPECTED;
+      } else {
+        int64_t j = 0;
+        while (OB_SUCC(ret) && !drop_cur && j < survivors.count()) {
+          ObRawExpr *kept = survivors.at(j);
+          if (OB_ISNULL(kept)) {
+            ret = OB_ERR_UNEXPECTED;
+          } else if (!cur->is_deterministic()) {
+            // dropping a non-deterministic operand changes how often it is
+            // evaluated; keep it
+            ++j;
+          } else if (cur->same_as(*kept)) {
+            // X AND X -> X, X OR X -> X
+            drop_cur = true;
+          } else if (OB_FAIL(check_operand_absorbed(cur, kept, is_and, drop_cur))) {
+          } else if (drop_cur) {
+            // cur absorbs against kept
+          } else if (!kept->is_deterministic()) {
+            ++j;
+          } else {
+            // kept may be absorbed by cur: P AND (P OR Q) with P arriving late
+            bool drop_kept = false;
+            if (OB_FAIL(check_operand_absorbed(kept, cur, is_and, drop_kept))) {
+            } else if (drop_kept) {
+              if (OB_FAIL(survivors.remove(j))) {
+              }
+            } else {
+              ++j;
+            }
+          }
+        }
+        if (OB_SUCC(ret) && !drop_cur) {
+          if (OB_FAIL(survivors.push_back(cur))) {
+          }
+        } else if (OB_SUCC(ret)) {
+          trans_happened = true;
+        }
+      }
+    }
+  }
+  if (OB_SUCC(ret) && trans_happened) {
+    exprs.reset();
+    for (int64_t i = 0; OB_SUCC(ret) && i < survivors.count(); ++i) {
+      if (OB_FAIL(exprs.push_back(survivors.at(i)))) {
+      }
+    }
+  }
+  return ret;
+}
+
+// Checks whether `absorbed` is an operand that disappears because of `kept`:
+// in an AND list, (P OR Q) is absorbed when one of its params is P; in an OR
+// list, (P AND Q) is absorbed when one of its params is P.
+int ObTransformSimplifyExpr::check_operand_absorbed(ObRawExpr *absorbed,
+                                                    ObRawExpr *kept,
+                                                    bool is_and,
+                                                    bool &is_absorbed)
+{
+  int ret = OB_SUCCESS;
+  is_absorbed = false;
+  ObItemType inner_type = is_and ? T_OP_OR : T_OP_AND;
+  if (OB_ISNULL(absorbed) || OB_ISNULL(kept)) {
+    ret = OB_ERR_UNEXPECTED;
+  } else if (absorbed->get_expr_type() != inner_type) {
+    /* not the absorbable shape */
+  } else {
+    for (int64_t k = 0; OB_SUCC(ret) && !is_absorbed && k < absorbed->get_param_count(); ++k) {
+      ObRawExpr *param = absorbed->get_param_expr(k);
+      if (OB_ISNULL(param)) {
+        ret = OB_ERR_UNEXPECTED;
+      } else if (!param->same_as(*kept)) {
+        /* keep looking */
+      } else {
+        // the absorbed operand vanishes from evaluation, so it must not be
+        // able to raise errors on its own
+        bool is_error_free = false;
+        if (OB_FAIL(ObTransformUtils::check_error_free_expr(absorbed, is_error_free))) {
+        } else {
+          is_absorbed = is_error_free;
+        }
+      }
+    }
+  }
+  return ret;
+}
+
 int ObTransformSimplifyExpr::remove_dummy_filter_exprs(common::ObIArray<ObRawExpr*> &exprs,
                                                        ObIArray<ObExprConstraint> &constraints)
 {
   int ret = OB_SUCCESS;
   bool is_valid_type = true;
+  bool dedup_happened = false;
   if (OB_FAIL(ObTransformUtils::check_integer_result_type(exprs, is_valid_type))) {
   } else if (!is_valid_type) {
   } else if (OB_FAIL(inner_remove_dummy_expr(exprs, constraints))) {
+  } else if (OB_FAIL(dedup_and_absorb_bool_exprs(exprs, true, dedup_happened))) {
   } else if (exprs.empty()) {
     /* do nothing */
   } else {

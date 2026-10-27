@@ -67,7 +67,16 @@ private:
                               ObIArray<ObExprConstraint> &constraints);
   int inner_remove_dummy_expr(common::ObIArray<ObRawExpr*> &exprs,
                               ObIArray<ObExprConstraint> &constraints);
-                              
+
+  int dedup_and_absorb_bool_exprs(common::ObIArray<ObRawExpr*> &exprs,
+                                  bool is_and,
+                                  bool &trans_happened);
+
+  int check_operand_absorbed(ObRawExpr *absorbed,
+                             ObRawExpr *kept,
+                             bool is_and,
+                             bool &is_absorbed);
+
   int is_valid_transform_type(ObRawExpr *expr,
                               bool &is_valid);
 

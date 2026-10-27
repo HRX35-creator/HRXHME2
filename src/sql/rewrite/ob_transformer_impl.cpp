@@ -538,6 +538,14 @@ int ObTransformerImpl::choose_rewrite_rules(ObDMLStmt *stmt, uint64_t &need_type
   } else {
     if (func.contain_geometry_values_ || func.contain_fulltext_search_ || func.contain_vec_index_approx_) {
       disable_list = ObTransformRule::ALL_TRANSFORM_RULES;
+      if (func.contain_vec_index_approx_) {
+        // Expression simplification only rewrites boolean trees in place:
+        // constant folding, null replacement, duplicated/absorbed operand
+        // elimination. It neither moves predicates nor changes the statement
+        // shape, so the approximate vector index plan selection is unaffected,
+        // while semantically equivalent filters keep their cheap form.
+        ObTransformRule::remove_trans_type(disable_list, SIMPLIFY_EXPR);
+      }
     }
     if (func.contain_enum_set_values_) {
       uint64_t enum_set_enable_list = 0;
