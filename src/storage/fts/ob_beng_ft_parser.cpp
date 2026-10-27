@@ -42,6 +42,27 @@ int ObBEngFTParser::get_next_token(
   word_freq = 0;
   if (OB_UNLIKELY(!is_inited_)) {
     ret = OB_NOT_INIT;
+  } else if (ascii_mode_) {
+    // In these UTF8 collations all ASCII non-alphanumeric characters are
+    // tokenizer delimiters. The original pipeline then lowercases each token.
+    auto is_alnum = [](unsigned char c) {
+      return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9');
+    };
+    while (ascii_offset_ < doc_.len_ && !is_alnum(ascii_buffer_[ascii_offset_])) {
+      ++ascii_offset_;
+    }
+    const int64_t begin = ascii_offset_;
+    while (ascii_offset_ < doc_.len_ && is_alnum(ascii_buffer_[ascii_offset_])) {
+      ++ascii_offset_;
+    }
+    if (begin == ascii_offset_) {
+      ret = OB_ITER_END;
+    } else {
+      word = ascii_buffer_ + begin;
+      word_len = ascii_offset_ - begin;
+      char_len = word_len;
+      word_freq = 1;
+    }
   } else if (OB_ISNULL(token_stream_)) {
     ret = OB_ERR_UNEXPECTED;
   } else if (OB_FAIL(token_stream_->get_next(token, token_freq))) {
@@ -76,7 +97,24 @@ int ObBEngFTParser::init(ObFTParserParam *param)
     analysis_ctx_.cs_ = param->cs_;
     analysis_ctx_.filter_stopword_ = false;
     analysis_ctx_.need_grouping_ = false;
-    if (OB_FAIL(english_analyzer_.init(analysis_ctx_, *param->allocator_))) {
+    bool is_ascii = param->cs_->number == CS_TYPE_UTF8MB4_BIN
+        || param->cs_->number == CS_TYPE_UTF8MB4_GENERAL_CI;
+    for (int64_t i = 0; is_ascii && i < param->ft_length_; ++i) {
+      is_ascii = static_cast<unsigned char>(param->fulltext_[i]) < 0x80;
+    }
+    if (is_ascii) {
+      if (OB_ISNULL(ascii_buffer_ = static_cast<char *>(allocator_.alloc(param->ft_length_)))) {
+        ret = OB_ALLOCATE_MEMORY_FAILED;
+      } else {
+        for (int64_t i = 0; i < param->ft_length_; ++i) {
+          const char c = param->fulltext_[i];
+          ascii_buffer_[i] = c >= 'A' && c <= 'Z' ? c + ('a' - 'A') : c;
+        }
+        ascii_offset_ = 0;
+        ascii_mode_ = true;
+        is_inited_ = true;
+      }
+    } else if (OB_FAIL(english_analyzer_.init(analysis_ctx_, *param->allocator_))) {
     } else if (OB_FAIL(segment(doc_, token_stream_))) {
     } else if (OB_ISNULL(token_stream_)) {
       ret = OB_ERR_UNEXPECTED;
@@ -110,6 +148,9 @@ void ObBEngFTParser::reset()
   english_analyzer_.reset();
   doc_.reset();
   token_stream_ = nullptr;
+  ascii_buffer_ = nullptr;
+  ascii_offset_ = 0;
+  ascii_mode_ = false;
   is_inited_ = false;
 }
 

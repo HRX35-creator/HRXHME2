@@ -28,6 +28,16 @@ namespace oceanbase
 {
 namespace storage
 {
+struct BuiltinFTDictionary
+{
+  explicit BuiltinFTDictionary(const ObFTDictDesc &desc)
+      : allocator_(lib::ObMemAttr("FTBuiltinDict")),
+        container_(allocator_), dict_(allocator_, &container_, desc) {}
+  ObArenaAllocator allocator_;
+  ObFTCacheRangeContainer container_;
+  ObFTRangeDict dict_;
+};
+
 int ObFTDictHub::init()
 {
   static constexpr int K_MAX_DICT_BUCKET = 128; // for now, only built-in dicts.
@@ -43,7 +53,62 @@ int ObFTDictHub::init()
 int ObFTDictHub::destroy()
 {
   int ret = OB_SUCCESS;
+  lib::ObMutexGuard guard(builtin_lock_);
+  for (int64_t i = 0; i < ARRAYSIZEOF(builtin_dicts_); ++i) {
+    BuiltinFTDictionary *entry = ATOMIC_LOAD(&builtin_dicts_[i]);
+    if (OB_NOT_NULL(entry)) {
+      ATOMIC_STORE(&builtin_dicts_[i], static_cast<BuiltinFTDictionary *>(nullptr));
+      OB_DELETE(BuiltinFTDictionary, "FTBuiltinDict", entry);
+    }
+  }
   is_inited_ = false;
+  return ret;
+}
+
+int ObFTDictHub::get_builtin_dict(const ObFTDictDesc &desc, ObIFTDict *&dict)
+{
+  int ret = OB_SUCCESS;
+  const int64_t idx = static_cast<int64_t>(desc.type_);
+  dict = nullptr;
+  if (idx <= 0 || idx >= ARRAYSIZEOF(builtin_dicts_)
+      || desc.charset_ != CHARSET_UTF8MB4 || desc.coll_type_ != CS_TYPE_UTF8MB4_BIN) {
+    return OB_NOT_SUPPORTED;
+  }
+  // Published immutable views live until quiescent process teardown. Keep
+  // parallel document parsing off the cold-initialization mutex.
+  BuiltinFTDictionary *cached = ATOMIC_LOAD(&builtin_dicts_[idx]);
+  if (nullptr != cached) {
+    dict = &cached->dict_;
+    return ret;
+  }
+  lib::ObMutexGuard guard(builtin_lock_);
+  if (!is_inited_) {
+    ret = OB_NOT_INIT;
+  } else if (idx <= 0 || idx >= ARRAYSIZEOF(builtin_dicts_)
+      || desc.charset_ != CHARSET_UTF8MB4 || desc.coll_type_ != CS_TYPE_UTF8MB4_BIN) {
+    ret = OB_NOT_SUPPORTED;
+  } else {
+    if (OB_ISNULL(ATOMIC_LOAD(&builtin_dicts_[idx]))) {
+      BuiltinFTDictionary *entry = OB_NEW(BuiltinFTDictionary, "FTBuiltinDict", desc);
+      if (OB_ISNULL(entry)) {
+        ret = OB_ALLOCATE_MEMORY_FAILED;
+      } else {
+        if (OB_FAIL(load_cache(desc, entry->container_)) && OB_ENTRY_NOT_EXIST == ret) {
+          ret = build_cache(desc, entry->container_);
+        }
+        if (OB_SUCC(ret) && OB_FAIL(entry->dict_.init())) {
+        }
+        if (OB_FAIL(ret)) {
+          OB_DELETE(BuiltinFTDictionary, "FTBuiltinDict", entry);
+        } else {
+          ATOMIC_STORE(&builtin_dicts_[idx], entry);
+        }
+      }
+    }
+    if (OB_SUCC(ret)) {
+      dict = &ATOMIC_LOAD(&builtin_dicts_[idx])->dict_;
+    }
+  }
   return ret;
 }
 int ObFTDictHub::build_cache(const ObFTDictDesc &desc, ObFTCacheRangeContainer &container)

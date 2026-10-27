@@ -1,0 +1,92 @@
+DROP TABLE IF EXISTS membership_aggregate;
+CREATE TABLE membership_aggregate (
+id INT PRIMARY KEY,
+body TEXT,
+FULLTEXT INDEX ft_body(body) WITH PARSER beng
+);
+INSERT INTO membership_aggregate VALUES
+(1, 'database performance audit'),
+(2, 'database database storage'),
+(3, 'audit security'),
+(4, 'different words'),
+(5, NULL);
+SELECT COUNT(*), SUM(id), MAX(id) FROM membership_aggregate
+WHERE MATCH(body) AGAINST('database audit');
+COUNT(*)	SUM(id)	MAX(id)
+3	6	3
+SELECT COUNT(*) FROM membership_aggregate WHERE MATCH(body) AGAINST('database database');
+COUNT(*)
+2
+SELECT COUNT(*) FROM membership_aggregate WHERE MATCH(body) AGAINST('absent');
+COUNT(*)
+0
+SELECT COUNT(*) FROM membership_aggregate WHERE MATCH(body) AGAINST('');
+COUNT(*)
+0
+SELECT COUNT(*) FROM membership_aggregate WHERE MATCH(body) AGAINST(NULL);
+COUNT(*)
+0
+SELECT COUNT(*) FROM membership_aggregate WHERE id >= 2 AND MATCH(body) AGAINST('database audit');
+COUNT(*)
+2
+SELECT COUNT(*) FROM membership_aggregate WHERE MATCH(body) AGAINST('database audit') > 0;
+COUNT(*)
+3
+SELECT COUNT(*) FROM membership_aggregate WHERE MATCH(body) AGAINST('database audit') > 0.1;
+COUNT(*)
+3
+SELECT COUNT(*), ROUND(SUM(MATCH(body) AGAINST('database audit')), 6)
+FROM membership_aggregate WHERE MATCH(body) AGAINST('database audit');
+COUNT(*)	ROUND(SUM(MATCH(body) AGAINST('database audit')), 6)
+3	2.019202
+SELECT MOD(id, 2), COUNT(*) FROM membership_aggregate
+WHERE MATCH(body) AGAINST('database audit') GROUP BY MOD(id, 2) ORDER BY 1;
+MOD(id, 2)	COUNT(*)
+0	1
+1	2
+SELECT id, ROUND(MATCH(body) AGAINST('database audit'), 6)
+FROM membership_aggregate WHERE MATCH(body) AGAINST('database audit') ORDER BY id;
+id	ROUND(MATCH(body) AGAINST('database audit'), 6)
+1	0.942980
+2	0.576061
+3	0.500161
+SELECT COUNT(*) FROM (SELECT id FROM membership_aggregate
+WHERE MATCH(body) AGAINST('database audit') LIMIT 2) t;
+COUNT(*)
+2
+SELECT COUNT(*) FROM membership_aggregate WHERE MATCH(body) AGAINST('+database -storage' IN BOOLEAN MODE);
+COUNT(*)
+1
+PREPARE membership_query FROM 'SELECT COUNT(*) FROM membership_aggregate WHERE MATCH(body) AGAINST(?)';
+SET @term = 'database';
+EXECUTE membership_query USING @term;
+COUNT(*)
+2
+SET @term = 'audit';
+EXECUTE membership_query USING @term;
+COUNT(*)
+2
+SET @term = 'absent';
+EXECUTE membership_query USING @term;
+COUNT(*)
+0
+Membership-only query with more than 256 distinct terms uses TaaT.
+COUNT(*)
+3
+COUNT(*)
+3
+DEALLOCATE PREPARE membership_query;
+START TRANSACTION;
+DELETE FROM membership_aggregate WHERE id = 1;
+SELECT COUNT(*) FROM membership_aggregate WHERE MATCH(body) AGAINST('database audit');
+COUNT(*)
+2
+ROLLBACK;
+SELECT COUNT(*) FROM membership_aggregate WHERE MATCH(body) AGAINST('database audit');
+COUNT(*)
+3
+UPDATE membership_aggregate SET body = 'audit database' WHERE id = 4;
+SELECT COUNT(*) FROM membership_aggregate WHERE MATCH(body) AGAINST('database audit');
+COUNT(*)
+4
+DROP TABLE membership_aggregate;
