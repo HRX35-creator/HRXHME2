@@ -49,6 +49,8 @@ struct ObFileSqlOptions
         delimiter_(','),
         quote_('"'),
         sample_size_(-1),
+        max_file_size_(1024LL * 1024LL * 1024LL),
+        max_rows_(10000000),
         null_text_()
   {
   }
@@ -56,6 +58,8 @@ struct ObFileSqlOptions
   char delimiter_;
   char quote_;
   int64_t sample_size_;
+  int64_t max_file_size_;
+  int64_t max_rows_;
   common::ObString null_text_;
 };
 
@@ -796,7 +800,8 @@ public:
         peek_(-1),
         eof_(true),
         stat_valid_(false),
-        stat_info_()
+        stat_info_(),
+        row_count_(0)
   {
   }
 
@@ -814,6 +819,7 @@ public:
     peek_ = -1;
     eof_ = false;
     stat_valid_ = false;
+    row_count_ = 0;
     in_.clear();
     std::string path_str(path.ptr(), path.length());
     path_ = path_str;
@@ -823,6 +829,10 @@ public:
       eof_ = true;
     } else if (0 == stat(path_str.c_str(), &stat_info_)) {
       stat_valid_ = true;
+      if (options_.max_file_size_ > 0 && stat_info_.st_size > options_.max_file_size_) {
+        ret = common::OB_SIZE_OVERFLOW;
+        eof_ = true;
+      }
     }
     return ret;
   }
@@ -843,6 +853,8 @@ public:
     record.clear();
     if (eof_) {
       ret = common::OB_ITER_END;
+    } else if (options_.max_rows_ > 0 && row_count_ >= options_.max_rows_) {
+      ret = common::OB_SIZE_OVERFLOW;
     } else if (stat_valid_ && OB_FAIL(check_unchanged_())) {
     } else {
       std::string field;
@@ -894,6 +906,9 @@ public:
           eof_ = true;
         }
       }
+      if (OB_SUCC(ret)) {
+        ++row_count_;
+      }
     }
     return ret;
   }
@@ -943,6 +958,7 @@ private:
   bool stat_valid_;
   struct stat stat_info_;
   std::string path_;
+  int64_t row_count_;
 };
 
 class ObFileJsonlReader
@@ -954,7 +970,8 @@ public:
         eof_(true),
         stat_valid_(false),
         stat_info_(),
-        path_()
+        path_(),
+        row_count_(0)
   {
   }
 
@@ -971,6 +988,7 @@ public:
     columns_.clear();
     eof_ = false;
     stat_valid_ = false;
+    row_count_ = 0;
     in_.clear();
     std::string path_str(path.ptr(), path.length());
     path_ = path_str;
@@ -980,6 +998,10 @@ public:
       eof_ = true;
     } else if (0 == stat(path_str.c_str(), &stat_info_)) {
       stat_valid_ = true;
+      if (stat_info_.st_size > 1024LL * 1024LL * 1024LL) {
+        ret = common::OB_SIZE_OVERFLOW;
+        eof_ = true;
+      }
     } else if (OB_FAIL(collect_columns_())) {
     } else if (OB_FAIL(reset())) {
     }
@@ -1007,13 +1029,17 @@ public:
     nulls.assign(columns_.size(), true);
     if (eof_) {
       ret = common::OB_ITER_END;
+    } else if (row_count_ >= 10000000) {
+      ret = common::OB_SIZE_OVERFLOW;
     } else if (stat_valid_ && OB_FAIL(check_unchanged_())) {
     } else {
       std::string line;
+      bool got_line = false;
       while (OB_SUCC(ret) && std::getline(in_, line)) {
         if (line.empty()) {
           continue;
         }
+        got_line = true;
         rapidjson::Document doc;
         doc.Parse(line.c_str());
         if (doc.HasParseError() || !doc.IsObject()) {
@@ -1046,9 +1072,11 @@ public:
         }
         break;
       }
-      if (OB_SUCC(ret) && in_.eof() && values.empty()) {
+      if (OB_SUCC(ret) && !got_line) {
         ret = common::OB_ITER_END;
         eof_ = true;
+      } else if (OB_SUCC(ret)) {
+        ++row_count_;
       }
     }
     return ret;
@@ -1108,6 +1136,7 @@ private:
   bool stat_valid_;
   struct stat stat_info_;
   std::string path_;
+  int64_t row_count_;
 };
 
 inline bool snappy_read_varint_(const uint8_t *input,
