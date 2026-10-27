@@ -556,5 +556,144 @@ private:
   bool eof_;
 };
 
+class ObFileJsonlReader
+{
+public:
+  ObFileJsonlReader()
+      : in_(),
+        columns_(),
+        eof_(true)
+  {
+  }
+
+  ~ObFileJsonlReader()
+  {
+    if (in_.is_open()) {
+      in_.close();
+    }
+  }
+
+  int open(const common::ObString &path)
+  {
+    int ret = common::OB_SUCCESS;
+    columns_.clear();
+    eof_ = false;
+    in_.clear();
+    in_.open(std::string(path.ptr(), path.length()), std::ios::binary);
+    if (!in_.is_open()) {
+      ret = common::OB_FILE_NOT_EXIST;
+      eof_ = true;
+    } else if (OB_FAIL(collect_columns_())) {
+    } else if (OB_FAIL(reset())) {
+    }
+    return ret;
+  }
+
+  int reset()
+  {
+    int ret = common::OB_SUCCESS;
+    in_.clear();
+    in_.seekg(0, std::ios::beg);
+    eof_ = !in_.is_open();
+    return ret;
+  }
+
+  const std::vector<std::string> &columns() const
+  {
+    return columns_;
+  }
+
+  int next(std::vector<std::string> &values, std::vector<bool> &nulls)
+  {
+    int ret = common::OB_SUCCESS;
+    values.assign(columns_.size(), "");
+    nulls.assign(columns_.size(), true);
+    if (eof_) {
+      ret = common::OB_ITER_END;
+    } else {
+      std::string line;
+      while (OB_SUCC(ret) && std::getline(in_, line)) {
+        if (line.empty()) {
+          continue;
+        }
+        rapidjson::Document doc;
+        doc.Parse(line.c_str());
+        if (doc.HasParseError() || !doc.IsObject()) {
+          ret = common::OB_INVALID_DATA;
+          break;
+        }
+        for (int64_t i = 0; OB_SUCC(ret) && i < static_cast<int64_t>(columns_.size()); ++i) {
+          rapidjson::Value::ConstMemberIterator it = doc.FindMember(columns_[i].c_str());
+          if (it == doc.MemberEnd()) {
+            nulls[i] = true;
+            values[i] = "";
+          } else if (it->value.IsNull()) {
+            nulls[i] = true;
+            values[i] = "";
+          } else if (it->value.IsBool()) {
+            nulls[i] = false;
+            values[i] = it->value.GetBool() ? "true" : "false";
+          } else if (it->value.IsInt64()) {
+            nulls[i] = false;
+            values[i] = std::to_string(it->value.GetInt64());
+          } else if (it->value.IsDouble()) {
+            nulls[i] = false;
+            values[i] = std::to_string(it->value.GetDouble());
+          } else if (it->value.IsString()) {
+            nulls[i] = false;
+            values[i] = it->value.GetString();
+          } else {
+            ret = common::OB_NOT_SUPPORTED;
+          }
+        }
+        break;
+      }
+      if (OB_SUCC(ret) && in_.eof() && values.empty()) {
+        ret = common::OB_ITER_END;
+        eof_ = true;
+      }
+    }
+    return ret;
+  }
+
+private:
+  int collect_columns_()
+  {
+    int ret = common::OB_SUCCESS;
+    std::string line;
+    while (OB_SUCC(ret) && std::getline(in_, line)) {
+      if (line.empty()) {
+        continue;
+      }
+      rapidjson::Document doc;
+      doc.Parse(line.c_str());
+      if (doc.HasParseError() || !doc.IsObject()) {
+        ret = common::OB_INVALID_DATA;
+        break;
+      }
+      for (rapidjson::Value::ConstMemberIterator it = doc.MemberBegin();
+           it != doc.MemberEnd(); ++it) {
+        const std::string key = it->name.GetString();
+        if (it->value.IsObject() || it->value.IsArray()) {
+          ret = common::OB_NOT_SUPPORTED;
+          break;
+        }
+        if (std::find(columns_.begin(), columns_.end(), key) == columns_.end()) {
+          columns_.push_back(key);
+        }
+      }
+    }
+    if (OB_SUCC(ret) && in_.bad()) {
+      ret = common::OB_IO_ERROR;
+    }
+    return ret;
+  }
+
+private:
+  std::ifstream in_;
+  std::vector<std::string> columns_;
+  bool eof_;
+};
+
 } // namespace sql
 } // namespace oceanbase

@@ -51,10 +51,13 @@ int ObFunctionTableOp::inner_open()
       options.header_ = MY_SPEC.file_header_ != 0;
       options.delimiter_ = static_cast<char>(MY_SPEC.file_delimiter_);
       options.quote_ = static_cast<char>(MY_SPEC.file_quote_);
-      if (static_cast<int64_t>(ObFileSqlFormat::CSV) != MY_SPEC.file_format_) {
-        ret = OB_NOT_SUPPORTED;
-      } else {
+      if (static_cast<int64_t>(ObFileSqlFormat::CSV) == MY_SPEC.file_format_) {
         ret = csv_reader_.open(path_datum->get_string(), options);
+      } else if (static_cast<int64_t>(ObFileSqlFormat::JSONL) == MY_SPEC.file_format_ ||
+                 static_cast<int64_t>(ObFileSqlFormat::NDJSON) == MY_SPEC.file_format_) {
+        ret = jsonl_reader_.open(path_datum->get_string());
+      } else {
+        ret = OB_NOT_SUPPORTED;
       }
     }
   } else if (ObExtendType == MY_SPEC.value_expr_->datum_meta_.type_) {
@@ -131,20 +134,44 @@ int ObFunctionTableOp::inner_get_next_row_file_scan()
   clear_evaluated_flag();
   if (OB_FAIL(ctx_.check_status())) {
   } else {
-    csv_record_.clear();
-    if (OB_FAIL(csv_reader_.next(csv_record_))) {
+    std::vector<std::string> *record = nullptr;
+    std::vector<bool> *nulls = nullptr;
+    if (static_cast<int64_t>(ObFileSqlFormat::CSV) == MY_SPEC.file_format_) {
+      csv_record_.clear();
+      record = &csv_record_;
+      if (OB_FAIL(csv_reader_.next(csv_record_))) {
+        if (OB_ITER_END != ret) {
+        }
+      }
+    } else if (static_cast<int64_t>(ObFileSqlFormat::JSONL) == MY_SPEC.file_format_ ||
+               static_cast<int64_t>(ObFileSqlFormat::NDJSON) == MY_SPEC.file_format_) {
+      jsonl_record_.clear();
+      jsonl_nulls_.clear();
+      record = &jsonl_record_;
+      nulls = &jsonl_nulls_;
+      if (OB_FAIL(jsonl_reader_.next(jsonl_record_, jsonl_nulls_))) {
+        if (OB_ITER_END != ret) {
+        }
+      }
+    } else {
+      ret = OB_NOT_SUPPORTED;
+    }
+    if (OB_FAIL(ret)) {
       if (OB_ITER_END == ret) {
         // no more rows
       }
-    } else if (csv_record_.size() != static_cast<size_t>(MY_SPEC.column_exprs_.count())) {
+    } else if (OB_ISNULL(record) ||
+               record->size() != static_cast<size_t>(MY_SPEC.column_exprs_.count())) {
       ret = OB_INVALID_DATA;
     } else {
       for (int64_t i = 0; OB_SUCC(ret) && i < MY_SPEC.column_exprs_.count(); ++i) {
         ObExpr *column_expr = MY_SPEC.column_exprs_.at(i);
         ObDatum &datum = column_expr->locate_datum_for_write(eval_ctx_);
-        const std::string &field = csv_record_[i];
+        const std::string &field = record->at(i);
         const ObObjType type = column_expr->datum_meta_.type_;
-        if (ObIntType == type) {
+        if (OB_NOT_NULL(nulls) && nulls->at(i)) {
+          datum.set_null();
+        } else if (ObIntType == type) {
           datum.set_int(atoll(field.c_str()));
         } else if (ObDoubleType == type) {
           datum.set_double(atof(field.c_str()));
