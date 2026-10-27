@@ -280,6 +280,11 @@ int ObExprAIRerank::sort_document_array_by_model_result(ObIAllocator &allocator,
   if (OB_FAIL(ObAIFuncJsonUtils::get_json_array(allocator, sorted_document_array_obj))) {
   } else {
     int64_t count = model_result_array->element_count();
+    // 新增：校验返回数量是否与输入文档数量匹配
+    if (OB_UNLIKELY(count != document_array->element_count())) {
+      ret = OB_INVALID_ARGUMENT;
+      LOG_WARN("ai_rerank, model result count mismatch", K(ret), K(count), K(document_array->element_count()));
+    }
     for (int64_t i = 0; OB_SUCC(ret) && i < count; i++) {
       ObJsonObject *model_result_obj = static_cast<ObJsonObject *>(model_result_array->get_value(i));
       if (OB_ISNULL(model_result_obj)) {
@@ -291,14 +296,20 @@ int ObExprAIRerank::sort_document_array_by_model_result(ObIAllocator &allocator,
           ret = OB_ERR_UNEXPECTED;
         } else {
           int64_t index = index_value->value();
-          ObJsonObject *origin_obj = static_cast<ObJsonObject *>(document_array->get_value(index));
-          ObJsonObject *new_obj = nullptr;
-          if (OB_ISNULL(origin_obj)) {
-            ret = OB_ERR_UNEXPECTED;
-          } else if (OB_ISNULL(new_obj = static_cast<ObJsonObject *>(origin_obj->clone(&allocator, true)))) {
-            ret = OB_ERR_UNEXPECTED;
-          } else if (OB_FAIL(new_obj->add(MODEL_SCORE_KEY, score_value))) {
-          } else if (OB_FAIL(sorted_document_array_obj->append(new_obj))) {
+          // 新增：严格校验模型返回的 index 是否越界
+          if (OB_UNLIKELY(index < 0 || index >= document_array->element_count())) {
+            ret = OB_INVALID_ARGUMENT;
+            LOG_WARN("ai_rerank, model returned invalid index", K(ret), K(index), K(document_array->element_count()));
+          } else {
+            ObJsonObject *origin_obj = static_cast<ObJsonObject *>(document_array->get_value(index));
+            ObJsonObject *new_obj = nullptr;
+            if (OB_ISNULL(origin_obj)) {
+              ret = OB_ERR_UNEXPECTED;
+            } else if (OB_ISNULL(new_obj = static_cast<ObJsonObject *>(origin_obj->clone(&allocator, true)))) {
+              ret = OB_ERR_UNEXPECTED;
+            } else if (OB_FAIL(new_obj->add(MODEL_SCORE_KEY, score_value))) {
+            } else if (OB_FAIL(sorted_document_array_obj->append(new_obj))) {
+            }
           }
         }
       }
@@ -349,6 +360,10 @@ int ObExprAIRerank::inner_eval_ai_rerank(ObIAllocator &allocator,
     ret = OB_ERR_UNEXPECTED;
   } else if (OB_ISNULL(res = static_cast<ObJsonArray *>(response))) {
     ret = OB_ERR_UNEXPECTED;
+  } else if (OB_UNLIKELY(res->element_count() != document_array->element_count())) {
+    // 新增：校验返回的数组数量是否和请求的数量一致
+    ret = OB_INVALID_ARGUMENT;
+    LOG_WARN("ai_rerank, batch result size mismatch", K(ret), K(res->element_count()), K(document_array->element_count()));
   } else {
     result_array = res;
   }

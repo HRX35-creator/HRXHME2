@@ -18,6 +18,8 @@
 #include "ob_expr_ai_embed.h"
 #include "query/ai/ob_ai_endpoint_resolver.h"
 #include "share/rc/ob_server_runtime.h"
+#include <rapidjson/document.h>
+#include <cmath>
 
 using namespace oceanbase::common;
 using namespace oceanbase::sql;
@@ -82,9 +84,12 @@ int ObExprAIEmbed::eval_ai_embed(const ObExpr &expr, ObEvalCtx &ctx, ObDatum &re
   ObDatum *arg_dim = nullptr;
   if (expr.arg_cnt_ == 3 ? OB_FAIL(expr.eval_param_value(ctx, arg_model_id, arg_content, arg_dim))
                          : OB_FAIL(expr.eval_param_value(ctx, arg_model_id, arg_content))) {
-  } else if (arg_model_id->is_null() || arg_content->is_null()) {
+  } else if (arg_content->is_null()) {
+    // 修改：如果是 NULL 内容，直接返回 NULL 结果，不报错，保证跨行批量的 NULL 传播
+    res.set_null();
+  } else if (arg_model_id->is_null()) {
     ret = OB_INVALID_ARGUMENT;
-    LOG_USER_ERROR(OB_INVALID_ARGUMENT, "ai_embed, model id or content is null");
+    LOG_USER_ERROR(OB_INVALID_ARGUMENT, "ai_embed, model id is null");
     res.set_null();
   } else {
     ObEvalCtx::TempAllocGuard tmp_alloc_g(ctx);
@@ -98,11 +103,16 @@ int ObExprAIEmbed::eval_ai_embed(const ObExpr &expr, ObEvalCtx &ctx, ObDatum &re
         ::oceanbase::share::server_service<::oceanbase::query::ObIAiEndpointResolver>();
     ObString model_id = arg_model_id->get_string();
     ObString content = arg_content->get_string();
-    if (model_id.empty() || content.empty()) {
+    
+    if (model_id.empty()) {
       ret = OB_INVALID_ARGUMENT;
-      LOG_USER_ERROR(OB_INVALID_ARGUMENT, "ai_embed, model id or input is empty");
+      LOG_USER_ERROR(OB_INVALID_ARGUMENT, "ai_embed, model id is empty");
+      res.set_null();
+    } else if (content.empty()) {
+      // 修改：空内容也直接返回 NULL，不报错
       res.set_null();
     }
+    
     int64_t dim = 0;
     ObJsonInt *dim_json = nullptr;
     ObJsonObject *config = nullptr;
@@ -128,7 +138,36 @@ int ObExprAIEmbed::eval_ai_embed(const ObExpr &expr, ObEvalCtx &ctx, ObDatum &re
       ObAIFuncModel model(temp_allocator, *info, *endpoint_info);
       ObString result;
       if (OB_FAIL(model.call_dense_embedding(content, config, result))) {
-      } else if (OB_FAIL(ObAIFuncUtils::set_string_result(expr, ctx, res, result))) {
+      } else {
+        // --- 新增：对返回的 JSON 数组进行合法性及维度校验 ---
+        rapidjson::Document doc;
+        doc.Parse(result.ptr(), result.length());
+        if (doc.HasParseError() || !doc.IsArray()) {
+          ret = OB_INVALID_ARGUMENT;
+          LOG_WARN("ai_embed, response is not a valid JSON array", K(ret), K(result));
+        } else if (OB_NOT_NULL(arg_dim) && doc.Size() != dim) {
+          ret = OB_INVALID_ARGUMENT;
+          LOG_WARN("ai_embed, returned vector dimension mismatch", K(ret), K(doc.Size()), K(dim));
+        } else {
+          for (rapidjson::SizeType i = 0; i < doc.Size(); i++) {
+            if (!doc[i].IsNumber()) {
+              ret = OB_INVALID_ARGUMENT;
+              LOG_WARN("ai_embed, vector element is not a number", K(ret), K(i));
+              break;
+            }
+            double val = doc[i].GetDouble();
+            if (std::isnan(val) || std::isinf(val)) {
+              ret = OB_INVALID_ARGUMENT;
+              LOG_WARN("ai_embed, vector element is NaN or Inf", K(ret), K(i), K(val));
+              break;
+            }
+          }
+        }
+        
+        if (OB_SUCC(ret)) {
+          if (OB_FAIL(ObAIFuncUtils::set_string_result(expr, ctx, res, result))) {
+          }
+        }
       }
     }
   }
