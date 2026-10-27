@@ -1065,4 +1065,3 @@ int ObExprBin2uuid::bin2uuid_batch(const ObExpr &expr,
 
 } //namespace sql
 } //namespace oceanbase
-
