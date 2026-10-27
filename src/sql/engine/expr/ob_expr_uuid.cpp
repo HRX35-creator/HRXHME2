@@ -25,16 +25,21 @@
 #endif
 #include <iphlpapi.h>
 #else
+#include <errno.h>
 #include <sys/ioctl.h>
 #include <net/if.h>
+#include <unistd.h>
 #ifdef __APPLE__
 #include <ifaddrs.h>
 #include <net/if_dl.h>
-#elif defined(__ANDROID__)
+#include <sys/random.h>
+#else
+#include <fcntl.h>
+#include <sys/syscall.h>
+#ifdef __ANDROID__
 #include <ifaddrs.h>
 #include <linux/if_packet.h>
-#include <fcntl.h>
-#include <unistd.h>
+#endif
 #endif
 #endif
 #include "sql/engine/expr/ob_expr_uuid.h"
@@ -81,174 +86,311 @@ ObUUIDNode::ObUUIDNode()
   (void)init();
 }
 
+ObLatch ObUUIDNode::random_node_lock_;
+unsigned char ObUUIDNode::random_node_[ObUUIDNode::NODE_LENGTH] = {0};
+bool ObUUIDNode::has_random_node_ = false;
 
 /*
- * get and set mac address
- *
+ * Resolve the UUID node: prefer the hardware MAC address and fall back to a
+ * random multicast node (RFC 9562 section 6.10) when no usable MAC address can
+ * be obtained, e.g. in sandboxes that deny interface enumeration.
  */
 int ObUUIDNode::init()
 {
+  return init(get_mac_address, get_process_random_node);
+}
+
+int ObUUIDNode::init(NodeProvider get_mac, NodeProvider get_random_node)
+{
   int ret = OB_SUCCESS;
+  unsigned char node[NODE_LENGTH] = {0};
   is_inited_ = false;
-#ifdef __EMSCRIPTEN__
-  // Browsers expose no hardware MAC. Use a random UUID node and mark it as
-  // non-MAC with the multicast bit, as on the Android fallback below.
-  // Emscripten getentropy uses the host cryptographic random source.
-  if (getentropy(mac_addr_, sizeof(mac_addr_)) != 0) {
-    ret = OB_ERR_UNEXPECTED;
-    LOG_WARN("failed to generate UUID node", K(ret), K(errno));
+  if (OB_ISNULL(get_mac) || OB_ISNULL(get_random_node)) {
+    ret = OB_INVALID_ARGUMENT;
+    LOG_WARN("invalid uuid node provider", K(ret));
   } else {
-    mac_addr_[0] |= 0x01;
+    int mac_ret = get_mac(node, NODE_LENGTH);
+    if (OB_SUCCESS == mac_ret) {
+      // use the hardware MAC address
+    } else if (OB_FAIL(get_random_node(node, NODE_LENGTH))) {
+      LOG_ERROR("no usable MAC address and failed to generate random uuid node",
+                K(ret), K(mac_ret));
+    } else {
+      LOG_WARN_RET(mac_ret, "no usable MAC address for uuid node, use random multicast node instead",
+                   K(mac_ret));
+    }
+  }
+  if (OB_SUCC(ret)) {
+    // publish the node only after it has been completely resolved
+    MEMCPY(mac_addr_, node, NODE_LENGTH);
     is_inited_ = true;
   }
+  return ret;
+}
+
+int ObUUIDNode::gen_random_node(EntropyProvider get_entropy, unsigned char *node, const int64_t len)
+{
+  int ret = OB_SUCCESS;
+  unsigned char buf[NODE_LENGTH] = {0};
+  if (OB_ISNULL(get_entropy) || OB_ISNULL(node) || OB_UNLIKELY(NODE_LENGTH != len)) {
+    ret = OB_INVALID_ARGUMENT;
+    LOG_WARN("invalid argument", K(ret), KP(node), K(len));
+  } else if (OB_FAIL(get_entropy(buf, NODE_LENGTH))) {
+    LOG_WARN("failed to read random bytes for uuid node", K(ret));
+  } else {
+    // multicast bit marks the node as not being an IEEE 802 address
+    buf[0] |= 0x01;
+    MEMCPY(node, buf, NODE_LENGTH);
+  }
+  return ret;
+}
+
+int ObUUIDNode::get_process_random_node(unsigned char *node, const int64_t len)
+{
+  int ret = OB_SUCCESS;
+  if (OB_ISNULL(node) || OB_UNLIKELY(NODE_LENGTH != len)) {
+    ret = OB_INVALID_ARGUMENT;
+    LOG_WARN("invalid argument", K(ret), KP(node), K(len));
+  } else {
+    // generate once per process so that every uuid node initialization,
+    // including the temporary one in gen_server_uuid, uses the same node
+    ObLatchWGuard guard(random_node_lock_, ObLatchIds::DEFAULT_MUTEX);
+    if (!has_random_node_) {
+      if (OB_FAIL(gen_random_node(get_os_entropy, random_node_, NODE_LENGTH))) {
+      } else {
+        has_random_node_ = true;
+      }
+    }
+    if (OB_SUCC(ret)) {
+      MEMCPY(node, random_node_, NODE_LENGTH);
+    }
+  }
+  return ret;
+}
+
+#if !defined(_WIN32)
+int ObUUIDNode::read_fully(const int fd, unsigned char *buf, const int64_t len)
+{
+  int ret = OB_SUCCESS;
+  int64_t pos = 0;
+  if (OB_UNLIKELY(fd < 0) || OB_ISNULL(buf) || OB_UNLIKELY(len < 0)) {
+    ret = OB_INVALID_ARGUMENT;
+    LOG_WARN("invalid argument", K(ret), K(fd), KP(buf), K(len));
+  }
+  while (OB_SUCC(ret) && pos < len) {
+    ssize_t n = ::read(fd, buf + pos, static_cast<size_t>(len - pos));
+    if (n > 0) {
+      pos += n;
+    } else if (0 == n) {
+      ret = OB_ERR_UNEXPECTED;
+      LOG_WARN("unexpected end of file", K(ret), K(fd), K(pos), K(len));
+    } else if (EINTR != errno) {
+      const int err = errno;
+      ret = OB_ERR_SYS;
+      LOG_WARN("read failed", K(ret), K(fd), K(pos), K(len), K(err));
+    }
+  }
+  return ret;
+}
+#endif
+
+/*
+ * Fill buf with bytes from the operating system CSPRNG.
+ */
+int ObUUIDNode::get_os_entropy(unsigned char *buf, const int64_t len)
+{
+  int ret = OB_SUCCESS;
+  if (OB_ISNULL(buf) || OB_UNLIKELY(len < 0)) {
+    ret = OB_INVALID_ARGUMENT;
+    LOG_WARN("invalid argument", K(ret), KP(buf), K(len));
+  } else {
+#if defined(_WIN32)
+    ret = OB_NOT_SUPPORTED;
+    LOG_WARN("random uuid node is not supported on this platform", K(ret));
+#elif defined(__EMSCRIPTEN__) || defined(__APPLE__)
+    // getentropy is bounded to 256 bytes per call
+    static const int64_t MAX_GETENTROPY_LEN = 256;
+    for (int64_t pos = 0; OB_SUCC(ret) && pos < len; pos += MAX_GETENTROPY_LEN) {
+      const int64_t n = (len - pos < MAX_GETENTROPY_LEN) ? (len - pos) : MAX_GETENTROPY_LEN;
+      if (0 != getentropy(buf + pos, static_cast<size_t>(n))) {
+        const int err = errno;
+        ret = OB_ERR_SYS;
+        LOG_WARN("getentropy failed", K(ret), K(err));
+      }
+    }
+#else
+    bool use_urandom = true;
+#ifdef SYS_getrandom
+    use_urandom = false;
+    int64_t pos = 0;
+    while (OB_SUCC(ret) && !use_urandom && pos < len) {
+      long n = syscall(SYS_getrandom, buf + pos, static_cast<size_t>(len - pos), 0);
+      if (n > 0) {
+        pos += n;
+      } else if (n < 0 && EINTR == errno) {
+        // retry
+      } else if (n < 0 && ENOSYS == errno) {
+        // kernel without getrandom(2)
+        use_urandom = true;
+      } else {
+        const int err = errno;
+        ret = OB_ERR_SYS;
+        LOG_WARN("getrandom failed", K(ret), K(n), K(pos), K(len), K(err));
+      }
+    }
+#endif
+    if (OB_SUCC(ret) && use_urandom) {
+      int fd = -1;
+      do {
+        fd = ::open("/dev/urandom", O_RDONLY | O_CLOEXEC);
+      } while (fd < 0 && EINTR == errno);
+      if (fd < 0) {
+        const int err = errno;
+        ret = OB_ERR_SYS;
+        LOG_WARN("failed to open /dev/urandom", K(ret), K(err));
+      } else {
+        if (OB_FAIL(read_fully(fd, buf, len))) {
+          LOG_WARN("failed to read /dev/urandom", K(ret));
+        }
+        ::close(fd);
+      }
+    }
+#endif
+  }
+  return ret;
+}
+
+static inline bool is_usable_mac_address(const unsigned char *mac, const int64_t len)
+{
+  bool usable = false;
+  for (int64_t i = 0; i < len && !usable; ++i) {
+    usable = (0 != mac[i]);
+  }
+  return usable;
+}
+
+/*
+ * Get the MAC address of the first non-loopback interface.
+ * Returns OB_ENTRY_NOT_EXIST if no usable MAC address is found, or OB_ERR_SYS
+ * if interface enumeration fails.
+ */
+int ObUUIDNode::get_mac_address(unsigned char *node, const int64_t len)
+{
+  int ret = OB_SUCCESS;
+  bool mac_addr_found = false;
+  if (OB_ISNULL(node) || OB_UNLIKELY(NODE_LENGTH != len)) {
+    ret = OB_INVALID_ARGUMENT;
+    LOG_WARN("invalid argument", K(ret), KP(node), K(len));
+  } else {
+#ifdef __EMSCRIPTEN__
+  // Browsers expose no hardware MAC.
+  ret = OB_NOT_SUPPORTED;
 #elif defined(_WIN32)
   ULONG buf_len = 15000;
   PIP_ADAPTER_ADDRESSES addresses = NULL;
-  bool mac_addr_found = false;
   addresses = (IP_ADAPTER_ADDRESSES *)malloc(buf_len);
   if (OB_ISNULL(addresses)) {
     ret = OB_ALLOCATE_MEMORY_FAILED;
-  } else if (GetAdaptersAddresses(AF_UNSPEC, 0, NULL, addresses, &buf_len) == NO_ERROR) {
-    for (PIP_ADAPTER_ADDRESSES addr = addresses; addr && !mac_addr_found; addr = addr->Next) {
-      if (addr->PhysicalAddressLength == 6 && addr->IfType != IF_TYPE_SOFTWARE_LOOPBACK) {
-        MEMCPY(mac_addr_, addr->PhysicalAddress, 6);
-        mac_addr_found = true;
-      }
-    }
-    if (!mac_addr_found) {
-      ret = OB_ERR_UNEXPECTED;
-    } else {
-      is_inited_ = true;
-    }
+    LOG_WARN("failed to allocate adapter addresses", K(ret));
   } else {
-    ret = OB_ERR_UNEXPECTED;
-  }
-  if (addresses) { free(addresses); }
-#elif defined(__APPLE__)
-  // macOS: Use getifaddrs to get network interface information
-  struct ifaddrs *ifaddrs_list = nullptr;
-  struct ifaddrs *ifa = nullptr;
-  bool mac_addr_found = false;
-  
-  if (getifaddrs(&ifaddrs_list) != 0) {
-    ret = OB_ERR_UNEXPECTED;
-  } else {
-    for (ifa = ifaddrs_list; ifa != nullptr && OB_SUCC(ret) && !mac_addr_found; ifa = ifa->ifa_next) {
-      if (ifa->ifa_addr == nullptr) {
-        continue;
-      }
-      // Check if it's a link-level address (MAC address)
-      if (ifa->ifa_addr->sa_family == AF_LINK) {
-        // Skip loopback interface
-        if ((ifa->ifa_flags & IFF_LOOPBACK) == 0) {
-          struct sockaddr_dl *sdl = (struct sockaddr_dl *)ifa->ifa_addr;
-          if (sdl->sdl_alen == 6) {  // MAC address is 6 bytes
-            MEMCPY(mac_addr_, LLADDR(sdl), 6);
-            mac_addr_found = true;
-          }
-        }
-      }
-    }
-    freeifaddrs(ifaddrs_list);
-    
-    if (OB_FAIL(ret)) {
-      // Error already logged
-    } else if (!mac_addr_found) {
-      ret = OB_ERR_UNEXPECTED;
+    ULONG err = GetAdaptersAddresses(AF_UNSPEC, 0, NULL, addresses, &buf_len);
+    if (NO_ERROR != err) {
+      ret = OB_ERR_SYS;
+      LOG_WARN("GetAdaptersAddresses failed", K(ret), K(err));
     } else {
-      is_inited_ = true;
-    }
-  }
-#elif defined(__ANDROID__)
-  // Android: Use getifaddrs with AF_PACKET + sockaddr_ll
-  {
-    struct ifaddrs *ifaddr = NULL;
-    bool mac_addr_found = false;
-    if (getifaddrs(&ifaddr) == -1) {
-      ret = OB_ERR_UNEXPECTED;
-    } else {
-      for (struct ifaddrs *ifa = ifaddr; ifa != NULL && !mac_addr_found; ifa = ifa->ifa_next) {
-        if (ifa->ifa_addr == NULL) continue;
-        if (ifa->ifa_addr->sa_family != AF_PACKET) continue;
-        if (ifa->ifa_flags & IFF_LOOPBACK) continue;
-        struct sockaddr_ll *sll = (struct sockaddr_ll *)ifa->ifa_addr;
-        if (sll->sll_halen == 6) {
-          MEMCPY(mac_addr_, sll->sll_addr, 6);
+      for (PIP_ADAPTER_ADDRESSES addr = addresses; addr && !mac_addr_found; addr = addr->Next) {
+        if (addr->PhysicalAddressLength == NODE_LENGTH && addr->IfType != IF_TYPE_SOFTWARE_LOOPBACK
+            && is_usable_mac_address(addr->PhysicalAddress, NODE_LENGTH)) {
+          MEMCPY(node, addr->PhysicalAddress, NODE_LENGTH);
           mac_addr_found = true;
         }
       }
-      freeifaddrs(ifaddr);
     }
-    if (OB_SUCC(ret) && !mac_addr_found) {
-      // RFC 4122 section 4.5: when MAC address is unavailable (Android sandbox),
-      // use random bytes with the multicast bit set as the node ID.
-      int fd = open("/dev/urandom", O_RDONLY);
-      if (fd >= 0 && read(fd, mac_addr_, 6) == 6) {
-        mac_addr_[0] |= 0x01;  // set multicast bit
+    free(addresses);
+  }
+#elif defined(__APPLE__) || defined(__ANDROID__)
+  // Use getifaddrs: AF_LINK + sockaddr_dl on macOS, AF_PACKET + sockaddr_ll on Android
+  struct ifaddrs *ifaddrs_list = nullptr;
+  if (getifaddrs(&ifaddrs_list) != 0) {
+    const int err = errno;
+    ret = OB_ERR_SYS;
+    LOG_WARN("getifaddrs failed", K(ret), K(err));
+  } else {
+    for (struct ifaddrs *ifa = ifaddrs_list; ifa != nullptr && !mac_addr_found; ifa = ifa->ifa_next) {
+      const unsigned char *mac = nullptr;
+      if (ifa->ifa_addr == nullptr || (ifa->ifa_flags & IFF_LOOPBACK) != 0) {
+        continue;
+      }
+#if defined(__APPLE__)
+      if (ifa->ifa_addr->sa_family == AF_LINK) {
+        struct sockaddr_dl *sdl = (struct sockaddr_dl *)ifa->ifa_addr;
+        if (sdl->sdl_alen == NODE_LENGTH) {
+          mac = reinterpret_cast<const unsigned char *>(LLADDR(sdl));
+        }
+      }
+#else
+      if (ifa->ifa_addr->sa_family == AF_PACKET) {
+        struct sockaddr_ll *sll = (struct sockaddr_ll *)ifa->ifa_addr;
+        if (sll->sll_halen == NODE_LENGTH) {
+          mac = sll->sll_addr;
+        }
+      }
+#endif
+      if (mac != nullptr && is_usable_mac_address(mac, NODE_LENGTH)) {
+        MEMCPY(node, mac, NODE_LENGTH);
         mac_addr_found = true;
-        LOG_INFO("using random UUID node ID (no MAC available on Android)");
-      } else {
-        ret = OB_ERR_UNEXPECTED;
-      }
-      if (fd >= 0) {
-        close(fd);
       }
     }
-    if (OB_SUCC(ret) && mac_addr_found) {
-      is_inited_ = true;
-    }
+    freeifaddrs(ifaddrs_list);
   }
 #else
   // Linux: Use ioctl to get MAC address
   struct ifreq ifr;
   struct ifconf ifc;
   char buf[1024];
-  int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
+  int sock = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, IPPROTO_IP);
   if (sock == -1) {
-    ret = OB_ERR_UNEXPECTED;
-    LOG_ERROR("socket failed", K(ret), K(errno));
+    const int err = errno;
+    ret = OB_ERR_SYS;
+    LOG_WARN("socket failed", K(ret), K(err));
   } else {
     ifc.ifc_len = sizeof(buf);
     ifc.ifc_buf = buf;
     if (ioctl(sock, SIOCGIFCONF, &ifc) < 0) {
-      ret = OB_ERR_UNEXPECTED;
+      const int err = errno;
+      ret = OB_ERR_SYS;
+      LOG_WARN("ioctl failed, SIOCGIFCONF", K(ret), K(err));
     } else {
       ifreq *it = ifc.ifc_req;
       ifreq *end = it + (ifc.ifc_len / sizeof(ifreq));
-      bool mac_addr_found = false;
-      for (; it != end && OB_SUCC(ret); ++it) {
-        if (OB_ISNULL(it) || OB_ISNULL(it->ifr_name) || OB_ISNULL(ifr.ifr_name)) {
-          continue;
-        } else {
-          strncpy(ifr.ifr_name, it->ifr_name, IFNAMSIZ - 1);
-          if (ioctl(sock, SIOCGIFFLAGS, &ifr) == 0) {
-            if (!(ifr.ifr_flags & IFF_LOOPBACK)) {
-              if (ioctl(sock, SIOCGIFHWADDR, &ifr) == 0) {
-                MEMCPY(mac_addr_, ifr.ifr_hwaddr.sa_data, 6);
-                mac_addr_found = true;
-                break;
-              } else {
-                LOG_WARN("ioctl failed, SIOCGIFHWADDR", K(errno), K(it->ifr_name));
-              }
-            }
-          } else {
-            LOG_WARN("ioctl failed, SIOCGIFFLAGS", K(errno), K(it->ifr_name));
-          }
+      for (; it != end && !mac_addr_found; ++it) {
+        MEMSET(&ifr, 0, sizeof(ifr));
+        strncpy(ifr.ifr_name, it->ifr_name, IFNAMSIZ - 1);
+        if (ioctl(sock, SIOCGIFFLAGS, &ifr) != 0) {
+          const int err = errno;
+          LOG_WARN("ioctl failed, SIOCGIFFLAGS", K(err), K(ifr.ifr_name));
+        } else if (ifr.ifr_flags & IFF_LOOPBACK) {
+          // skip loopback interface
+        } else if (ioctl(sock, SIOCGIFHWADDR, &ifr) != 0) {
+          const int err = errno;
+          LOG_WARN("ioctl failed, SIOCGIFHWADDR", K(err), K(ifr.ifr_name));
+        } else if (is_usable_mac_address(reinterpret_cast<const unsigned char *>(ifr.ifr_hwaddr.sa_data),
+                                         NODE_LENGTH)) {
+          MEMCPY(node, ifr.ifr_hwaddr.sa_data, NODE_LENGTH);
+          mac_addr_found = true;
         }
-      }//end for
-      if (OB_FAIL(ret)) {
-      } else if (!mac_addr_found) {
-        ret = OB_ERR_UNEXPECTED;
-      } else {
-        is_inited_ = true;
       }
     }
     close(sock);
   }
 #endif
+  }
+  if (OB_SUCC(ret) && !mac_addr_found) {
+    ret = OB_ENTRY_NOT_EXIST;
+    LOG_WARN("no usable MAC address found", K(ret));
+  }
   return ret;
 }
-
 
 int ObUUIDTime::get_time(uint64_t &time, uint16_t &seq)
 {

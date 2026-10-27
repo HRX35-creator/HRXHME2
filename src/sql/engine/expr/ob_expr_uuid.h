@@ -36,10 +36,37 @@ private :
 
 struct ObUUIDNode
 {
+  static constexpr int64_t NODE_LENGTH = 6;
+  // Fills a NODE_LENGTH-byte UUID node.
+  typedef int (*NodeProvider)(unsigned char *node, const int64_t len);
+  // Fills len bytes of cryptographically secure random data.
+  typedef int (*EntropyProvider)(unsigned char *buf, const int64_t len);
+
   ObUUIDNode();
+  // Uses the hardware MAC address, or a process-wide random multicast node
+  // when no usable MAC address is available.
   int init();
-  unsigned char mac_addr_[6];
+  // Same as init() with injectable providers; the node is published and
+  // is_inited_ is set only on success.
+  int init(NodeProvider get_mac, NodeProvider get_random_node);
+
+  static int get_mac_address(unsigned char *node, const int64_t len);
+  static int get_process_random_node(unsigned char *node, const int64_t len);
+  // Random node with the multicast bit set (RFC 9562 section 6.10).
+  static int gen_random_node(EntropyProvider get_entropy, unsigned char *node, const int64_t len);
+  static int get_os_entropy(unsigned char *buf, const int64_t len);
+#if !defined(_WIN32)
+  // Reads exactly len bytes, retrying on EINTR and partial reads.
+  static int read_fully(const int fd, unsigned char *buf, const int64_t len);
+#endif
+
+  unsigned char mac_addr_[NODE_LENGTH];
   bool is_inited_;
+
+private:
+  static common::ObLatch random_node_lock_;
+  static unsigned char random_node_[NODE_LENGTH];
+  static bool has_random_node_;
 };
 
 class ObUUIDTime
