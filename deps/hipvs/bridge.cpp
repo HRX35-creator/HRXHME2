@@ -62,6 +62,37 @@ struct TemporaryIndex {
   }
   ~TemporaryIndex() { if (fd != -1) { close(fd); unlink(path); } }
 };
+
+// Iterative CAGRA construction includes each row itself in the base graph on
+// the tested hipVS image. A self edge carries no connectivity and is invalid
+// for the native mutable HNSW. Remove only those edges during conversion;
+// retain every non-self edge, all vectors/labels and the full upper hierarchy.
+// The core importer still validates every edge before publishing the index.
+void remove_base_self_links(uint8_t *bytes, size_t length, const SeekdbHipvsBuildRequestV1 &request)
+{
+  const auto read64 = [](const uint8_t *p) { uint64_t value; std::memcpy(&value, p, sizeof(value)); return value; };
+  const auto read32 = [](const uint8_t *p) { uint32_t value; std::memcpy(&value, p, sizeof(value)); return value; };
+  const auto write32 = [](uint8_t *p, uint32_t value) { std::memcpy(p, &value, sizeof(value)); };
+  const uint64_t degree = 2 * request.max_degree;
+  const uint64_t stride = 4 + degree * 4 + uint64_t(request.dimension) * 4 + 8;
+  if (length < 96 || read64(bytes + 16) != request.rows || read64(bytes + 24) != stride
+      || request.rows > (length - 96) / stride) {
+    throw std::runtime_error("cannot normalize an invalid hipVS HNSW base layer");
+  }
+  for (uint64_t i = 0; i < request.rows; ++i) {
+    uint8_t *record = bytes + 96 + i * stride;
+    const uint32_t count = read32(record);
+    if (count > degree) { throw std::runtime_error("invalid hipVS base-layer link count"); }
+    uint32_t kept = 0;
+    for (uint32_t j = 0; j < count; ++j) {
+      const uint32_t neighbor = read32(record + 4 + j * 4);
+      if (neighbor >= request.rows) { throw std::runtime_error("invalid hipVS base-layer link target"); }
+      if (neighbor != i) { write32(record + 4 + kept++ * 4, neighbor); }
+    }
+    for (uint32_t j = kept; j < count; ++j) { write32(record + 4 + j * 4, 0); }
+    write32(record, kept);
+  }
+}
 }  // namespace
 
 extern "C" void seekdb_hipvs_free_v1(void *buffer) { std::free(buffer); }
@@ -105,8 +136,9 @@ extern "C" int seekdb_hipvs_build_hnsw_v1(const SeekdbHipvsBuildRequestV1 *reque
     handles.cagra_params->metric = cuvsDistanceType::L2Expanded;
     handles.cagra_params->graph_degree = 2 * request->max_degree;
     handles.cagra_params->intermediate_graph_degree = std::max<uint32_t>(64, 4 * request->max_degree);
-    handles.cagra_params->build_algo = cuvsCagraGraphBuildAlgo::NN_DESCENT;
-    handles.cagra_params->nn_descent_niter = 20;
+    // NN-Descent on the supplied image uses half-precision scratch vectors.
+    // The iterative construction kernels retain float32 dataset/distances.
+    handles.cagra_params->build_algo = cuvsCagraGraphBuildAlgo::ITERATIVE_CAGRA_SEARCH;
     handles.cagra_params->compression = nullptr;
     handles.hnsw_params->hierarchy = cuvsHnswHierarchy::CPU;
     handles.hnsw_params->ef_construction = int(request->ef_construction);
@@ -120,7 +152,8 @@ extern "C" int seekdb_hipvs_build_hnsw_v1(const SeekdbHipvsBuildRequestV1 *reque
     tensor.dl_tensor.shape = shape;
     const auto build_start = Clock::now();
     // The host tensor is copied by hipVS. Build and synchronization stay inside
-    // this measured interval; no GPU search or first-query lazy build is used.
+    // this measured interval. Iterative CAGRA uses search internally to build
+    // the graph; serving queries and first-query lazy builds are not used.
     checked(cuvsCagraBuild(handles.resources, handles.cagra_params, &tensor, handles.cagra), "cuvsCagraBuild");
     checked(cuvsStreamSync(handles.resources), "cuvsStreamSync after CAGRA build");
     result->cagra_build_ms = milliseconds(build_start);
@@ -147,8 +180,9 @@ extern "C" int seekdb_hipvs_build_hnsw_v1(const SeekdbHipvsBuildRequestV1 *reque
       if (count <= 0) { throw std::runtime_error("cannot read completed hipVS HNSW index"); }
       offset += size_t(count);
     }
+    remove_base_self_links(buffer.get(), size_t(info.st_size), *request);
     result->hierarchy_serialize_ms = milliseconds(hierarchy_start);
-    result->nn_descent_iterations = 20;
+    result->nn_descent_iterations = 0;
     result->hnsw_bytes = uint64_t(info.st_size);
     result->hnsw_data = buffer.release();
     return 0;

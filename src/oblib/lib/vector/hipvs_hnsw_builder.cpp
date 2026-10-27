@@ -74,7 +74,7 @@ bool build_hipvs_hnsw(const HipvsHnswSource &source, uint32_t cpu_threads,
   SeekdbHipvsBuildResultV1 result{};
   result.abi_version = 1; result.struct_size = sizeof(result);
   const int status = build(&request, &result);
-  const auto free_buffer = [library, release](int8_t *p) { (void)library; release(p); };
+  auto free_buffer = [library, release](int8_t *p) { (void)library; release(p); };
   std::unique_ptr<int8_t[], decltype(free_buffer)> bytes(reinterpret_cast<int8_t *>(result.hnsw_data), free_buffer);
   if (result.abi_version != 1 || result.struct_size != sizeof(result)) { return reject("hipVS bridge returned a different ABI layout"); }
   if (status != 0) {

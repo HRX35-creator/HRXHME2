@@ -231,6 +231,7 @@ int HnswIndexHandler::build_index(const vsag::DatasetPtr &base)
     if (index_type_ == HNSW_TYPE && mode != HipvsBuildMode::DISABLED) {
       const auto start = std::chrono::steady_clock::now();
       HipvsBuildReport report;
+      const auto backend_version = vsag::version();
       const auto import = [&]() -> int {
         if (mode == HipvsBuildMode::INVALID) {
           report.error = "SEEKDB_HIPVS_BUILD must be off, auto or required";
@@ -243,9 +244,9 @@ int HnswIndexHandler::build_index(const vsag::DatasetPtr &base)
           report.error = "hipVS bulk build supports only an empty float32 L2 HNSW without extra columns";
           return OB_NOT_SUPPORTED;
         }
-        // The importer is verified against this packaged VSAG layout. A new
-        // backend version must pass the native interoperability test first.
-        if (vsag::version().rfind("129b82c", 0) != 0) {
+        // These packaged macOS/Linux layouts passed native interoperability.
+        // A new backend must pass the native interoperability test first.
+        if (backend_version.rfind("129b82c", 0) != 0 && backend_version.rfind("012a0f2", 0) != 0) {
           report.error = "VSAG version has not been verified for hipVS HNSW import";
           return OB_NOT_SUPPORTED;
         }
@@ -280,6 +281,7 @@ int HnswIndexHandler::build_index(const vsag::DatasetPtr &base)
           "device", report.device.c_str(), "architecture", report.architecture.c_str(),
           "cagra_build_wall_ms", report.cagra_build_ms, "hierarchy_serialize_wall_ms", report.hierarchy_serialize_ms,
           "adapter_build_total_ms", total_ms, "serialized_bytes", report.bytes,
+          "vsag_version", backend_version.c_str(),
           "nn_descent_iterations", report.nn_descent_iterations, "cpu_fallback", false);
         return OB_SUCCESS;
       }

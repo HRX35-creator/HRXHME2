@@ -5,11 +5,14 @@
 #include "vsag/factory.h"
 #include "vsag/options.h"
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <cstdlib>
+#include <fstream>
 #include <iostream>
 #include <random>
 #include <stdexcept>
+#include <unordered_set>
 #include <vector>
 
 using oceanbase::common::obvsag::HipvsHnswSource;
@@ -22,6 +25,19 @@ void check(bool condition, const char *message)
 uint64_t u64(const uint8_t *p) { uint64_t v; std::memcpy(&v, p, 8); return v; }
 void put32(uint8_t *p, uint32_t v) { std::memcpy(p, &v, 4); }
 void put64(uint8_t *p, uint64_t v) { std::memcpy(p, &v, 8); }
+
+std::vector<uint8_t> read_file(const char *path)
+{
+  std::ifstream stream(path, std::ios::binary | std::ios::ate);
+  check(stream.is_open(), "cannot open external GPU fixture");
+  const auto length = stream.tellg();
+  check(length > 0 && length < 100000000, "invalid external GPU fixture length");
+  std::vector<uint8_t> bytes(static_cast<size_t>(length));
+  stream.seekg(0);
+  stream.read(reinterpret_cast<char *>(bytes.data()), bytes.size());
+  check(stream.good(), "cannot read complete external GPU fixture");
+  return bytes;
+}
 
 std::shared_ptr<vsag::Index> empty_index()
 {
@@ -58,11 +74,60 @@ void query(std::shared_ptr<vsag::Index> index, const std::vector<float> &vectors
     check(found.value()->GetDistances()[0] < 1e-5f, "native VSAG changed source vectors");
   }
 }
+
+void independent_recall(std::shared_ptr<vsag::Index> baseline, std::shared_ptr<vsag::Index> imported,
+                        const std::vector<float> &vectors, const std::vector<int64_t> &ids)
+{
+  std::mt19937 random(20261028);
+  std::uniform_real_distribution<float> uniform(-1.0f, 1.0f);
+  size_t cpu_hits = 0, imported_hits = 0;
+  for (size_t q = 0; q < 200; ++q) {
+    float values[16];
+    for (float &v : values) { v = uniform(random); }
+    std::vector<std::pair<double, size_t>> distances(ids.size());
+    for (size_t i = 0; i < ids.size(); ++i) {
+      double distance = 0;
+      for (size_t j = 0; j < 16; ++j) {
+        const double delta = double(vectors[i * 16 + j]) - double(values[j]);
+        distance += delta * delta;
+      }
+      distances[i] = {distance, i};
+    }
+    std::partial_sort(distances.begin(), distances.begin() + 10, distances.end());
+    std::unordered_set<int64_t> truth_ordinals, truth_ids;
+    for (size_t j = 0; j < 10; ++j) {
+      truth_ordinals.insert(int64_t(distances[j].second));
+      truth_ids.insert(ids[distances[j].second]);
+    }
+    auto input = vsag::Dataset::Make()->Dim(16)->NumElements(1)->Float32Vectors(values)->Owner(false);
+    const auto hits = [&](std::shared_ptr<vsag::Index> index, const std::unordered_set<int64_t> &truth) {
+      auto found = index->KnnSearch(input, 10, R"({"hnsw":{"ef_search":100}})");
+      check(found.has_value() && found.value()->GetDim() == 10, "independent query lost neighbors");
+      size_t count = 0;
+      std::unordered_set<int64_t> seen;
+      for (size_t j = 0; j < 10; ++j) {
+        const int64_t id = found.value()->GetIds()[j];
+        check(seen.insert(id).second, "independent query returned duplicate IDs");
+        check(std::isfinite(found.value()->GetDistances()[j]) && found.value()->GetDistances()[j] >= 0,
+              "independent query returned an invalid distance");
+        count += truth.count(id);
+      }
+      return count;
+    };
+    cpu_hits += hits(baseline, truth_ordinals);
+    imported_hits += hits(imported, truth_ids);
+  }
+  std::cout << "Independent Recall@10 (200 queries, float64 exact L2): CPU="
+    << double(cpu_hits) / 2000 << ", imported=" << double(imported_hits) / 2000 << '\n';
+  // A local small-fixture regression floor, not the competition acceptance threshold.
+  check(cpu_hits >= 1900 && imported_hits >= 1900, "independent Recall@10 fell below the local 0.95 regression floor");
+}
 }  // namespace
 
-int main()
+int main(int argc, char **argv)
 {
   try {
+    check(argc == 1 || argc == 3, "usage: test_hipvs_hnsw_format [5000x16-float32-vectors hnsw-blob]");
     constexpr size_t N = 5000;
     vsag::Options::Instance().set_num_threads_building(2);
     std::mt19937 random(20261027);
@@ -70,6 +135,11 @@ int main()
     std::vector<float> vectors(N * 16), reversed(N * 16);
     std::vector<int64_t> ordinals(N), ids(N);
     for (float &v : vectors) { v = uniform(random); }
+    if (argc == 3) {
+      const auto bytes = read_file(argv[1]);
+      check(bytes.size() == vectors.size() * sizeof(float), "external vector fixture has the wrong shape");
+      std::memcpy(vectors.data(), bytes.data(), bytes.size());
+    }
     for (size_t i = 0; i < N; ++i) {
       const size_t ordinal = N - i - 1;
       ordinals[i] = int64_t(ordinal);
@@ -84,8 +154,12 @@ int main()
     auto binary = serialized.value().Get(vsag::HNSW_DATA);
     std::vector<uint8_t> raw(binary.size);
     std::memcpy(raw.data(), binary.data.get(), raw.size());
+    if (argc == 3) { raw = read_file(argv[2]); }
+    check(raw.size() >= 96, "external HNSW fixture is shorter than its header");
     const auto stride = u64(raw.data() + 24), label = u64(raw.data() + 32), vector_offset = u64(raw.data() + 40);
-    check(u64(raw.data() + 96 + label) != 0, "fixture did not exercise reordered internal nodes");
+    if (argc == 1) {
+      check(u64(raw.data() + 96 + label) != 0, "fixture did not exercise reordered internal nodes");
+    }
     HipvsHnswSource source{vectors.data(), ids.data(), N, 16, 8, 80};
     std::string error;
     auto converted = raw;
@@ -93,6 +167,7 @@ int main()
     auto imported = empty_index(); load(imported, converted);
     check(imported->GetNumElements() == N, "native VSAG lost imported rows");
     query(imported, vectors, ids);
+    independent_recall(original, imported, vectors, ids);
     auto saved = imported->Serialize();
     check(saved.has_value(), "native imported index serialization failed");
     auto restored = empty_index();
@@ -134,8 +209,10 @@ int main()
     check(!oceanbase::common::obvsag::build_hipvs_hnsw(source, 2, missing_output, missing_report), "missing bridge was counted as a GPU build");
     check(!missing_report.error.empty() && missing_output.GetKeys().empty(), "missing bridge returned an index");
     std::cout << "PASS native VSAG " << vsag::version() << ": " << N
-      << " reordered rows, 400 exact self queries, signed/wide VIDs, persistence, mutation, "
-      << rejected << " corrupt inputs rejected. GPU execution not tested.\n";
+      << " rows, 400 exact self queries, signed/wide VIDs, persistence, mutation, "
+      << rejected << " corrupt inputs rejected. "
+      << (argc == 3 ? "External AMD bridge artifact; execution provenance recorded separately.\n"
+                    : "Reordered CPU fixture; GPU execution not tested.\n");
   } catch (const std::exception &e) {
     std::cerr << "FAIL: " << e.what() << '\n'; return 1;
   }
