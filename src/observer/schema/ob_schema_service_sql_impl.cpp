@@ -1302,6 +1302,23 @@ int ObSchemaServiceSQLImpl::get_sys_variable_schema(
       ObSysVarClassType sys_var_id = ObSysVariables::get_sys_var_id(i);
       const ObSysVarSchema *sys_var = NULL;
       if (OB_FAIL(sys_variable_schema.get_sysvar_schema(sys_var_id, sys_var))) {
+        if (ret == OB_ERR_SYS_VARIABLE_UNKNOWN) {
+          // An older store has no history row for a newly registered variable.
+          // Supply only that missing default; retain every persisted override.
+          ret = OB_SUCCESS;
+          ObSysVarSchema added;
+          const ObString value = sys_var_id == SYS_VAR_LOWER_CASE_TABLE_NAMES
+              ? ObString::make_string("2") : ObSysVariables::get_value(i);
+          added.set_data_type(ObSysVariables::get_type(i));
+          added.set_flags(ObSysVariables::get_flags(i));
+          added.set_schema_version(fetch_version);
+          if (OB_FAIL(added.set_name(ObSysVariables::get_name(i)))) {
+          } else if (OB_FAIL(added.set_value(value))) {
+          } else if (OB_FAIL(added.set_min_val(ObSysVariables::get_min(i)))) {
+          } else if (OB_FAIL(added.set_max_val(ObSysVariables::get_max(i)))) {
+          } else if (OB_FAIL(added.set_info(ObSysVariables::get_info(i)))) {
+          } else { ret = sys_variable_schema.add_sysvar_schema(added); }
+        }
       } else if (OB_ISNULL(sys_var)) {
         ret = OB_ERR_UNEXPECTED;
       } else {
