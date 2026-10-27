@@ -317,35 +317,26 @@ private:
 };
 typedef ObMalloc ObTCMalloc;
 
-// Allocations must be explicitly freed before the owning allocator is destroyed.
 class MemoryContextMalloc final : public ObIAllocator
 {
 public:
-  MemoryContextMalloc(ObIAllocator &allocator,
-                      const ObMemAttr &attr)
-    : allocator_(&allocator),
-      attr_(attr),
+  explicit MemoryContextMalloc(const ObMemAttr &attr)
+    : allocator_(attr),
       live_bytes_(0)
   {}
   ~MemoryContextMalloc() override = default;
 
   void *alloc(const int64_t size) override
   {
-    return alloc(size, attr_);
+    void *ptr = allocator_.alloc(size);
+    account_alloc(ptr);
+    return ptr;
   }
 
   void *alloc(const int64_t size, const ObMemAttr &attr) override
   {
-    void *ptr = nullptr;
-    if (size > 0 && size <= INT64_MAX - static_cast<int64_t>(sizeof(Header))) {
-      const int64_t raw_size = size + sizeof(Header);
-      void *raw_ptr = allocator_->alloc(raw_size, attr);
-      if (nullptr != raw_ptr) {
-        Header *header = new (raw_ptr) Header(this, allocation_size(raw_ptr, raw_size));
-        live_bytes_.fetch_add(header->allocation_size_, std::memory_order_relaxed);
-        ptr = header + 1;
-      }
-    }
+    void *ptr = allocator_.alloc(size, attr);
+    account_alloc(ptr);
     return ptr;
   }
 
@@ -357,15 +348,24 @@ public:
   void *realloc(void *ptr, const int64_t old_size, const int64_t new_size) override
   {
     UNUSED(old_size);
-    return realloc_with_attr(ptr, new_size, attr_);
+    if (nullptr != ptr && 0 == new_size) {
+      free(ptr);
+      return nullptr;
+    }
+    const int64_t old_usable_size = usable_size(ptr);
+    void *new_ptr = allocator_.realloc(ptr, old_size, new_size);
+    if (nullptr != new_ptr) {
+      account_realloc(old_usable_size, usable_size(new_ptr));
+    }
+    return new_ptr;
   }
 
   void free(void *ptr) override
   {
     if (nullptr != ptr) {
-      Header *header = to_header(ptr);
-      abort_unless(header->is_valid());
-      header->owner_->free_owned(header);
+      const int64_t allocation_size = usable_size(ptr);
+      allocator_.free(ptr);
+      live_bytes_.fetch_sub(allocation_size, std::memory_order_relaxed);
     }
   }
 
@@ -373,90 +373,39 @@ public:
   int64_t used() const override { return total(); }
 
 private:
-  struct alignas(std::max_align_t) Header
-  {
-    static constexpr uint64_t MAGIC = 0x4d434d414c4c4f43ULL;
-
-    Header(MemoryContextMalloc *owner, const int64_t allocation_size)
-      : magic_(MAGIC),
-        owner_(owner),
-        allocation_size_(allocation_size)
-    {}
-
-    bool is_valid() const
-    {
-      return MAGIC == magic_ && nullptr != owner_ && allocation_size_ > 0;
-    }
-
-    void invalidate()
-    {
-      magic_ = 0;
-      owner_ = nullptr;
-      allocation_size_ = 0;
-    }
-
-    uint64_t magic_;
-    MemoryContextMalloc *owner_;
-    int64_t allocation_size_;
-  };
-
-  static_assert(0 == sizeof(Header) % alignof(std::max_align_t),
-                "MemoryContextMalloc must preserve malloc alignment");
-
   void *realloc_with_attr(void *ptr, const int64_t size, const ObMemAttr &attr)
   {
-    void *new_ptr = nullptr;
-    if (nullptr == ptr) {
-      new_ptr = alloc(size, attr);
-    } else if (0 == size) {
+    if (nullptr != ptr && 0 == size) {
       free(ptr);
-    } else if (size > 0 && size <= INT64_MAX - static_cast<int64_t>(sizeof(Header))) {
-      Header *header = to_header(ptr);
-      abort_unless(header->is_valid());
-      new_ptr = header->owner_->realloc_owned(header, size, attr);
+      return nullptr;
+    }
+    const int64_t old_usable_size = usable_size(ptr);
+    void *new_ptr = allocator_.realloc(ptr, size, attr);
+    if (nullptr != new_ptr) {
+      account_realloc(old_usable_size, usable_size(new_ptr));
     }
     return new_ptr;
   }
 
-  void *realloc_owned(Header *header, const int64_t size, const ObMemAttr &attr)
+  void account_alloc(void *ptr)
   {
-    abort_unless(nullptr != header && header->is_valid() && this == header->owner_);
-    const int64_t old_allocation_size = header->allocation_size_;
-    const int64_t raw_size = size + sizeof(Header);
-    void *raw_ptr = allocator_->realloc(header, raw_size, attr);
-    if (nullptr == raw_ptr) {
-      return nullptr;
+    if (nullptr != ptr) {
+      live_bytes_.fetch_add(usable_size(ptr), std::memory_order_relaxed);
     }
-
-    Header *new_header = new (raw_ptr) Header(this, allocation_size(raw_ptr, raw_size));
-    live_bytes_.fetch_add(new_header->allocation_size_ - old_allocation_size,
-                         std::memory_order_relaxed);
-    return new_header + 1;
   }
 
-  void free_owned(Header *header)
+  void account_realloc(const int64_t old_usable_size, const int64_t new_usable_size)
   {
-    abort_unless(nullptr != header && header->is_valid() && this == header->owner_);
-    const int64_t old_allocation_size = header->allocation_size_;
-    live_bytes_.fetch_sub(old_allocation_size, std::memory_order_relaxed);
-    header->invalidate();
-    allocator_->free(header);
+    live_bytes_.fetch_add(new_usable_size - old_usable_size, std::memory_order_relaxed);
   }
 
-  static Header *to_header(void *ptr)
+  int64_t usable_size(void *ptr) const
   {
-    return static_cast<Header *>(ptr) - 1;
-  }
-
-  static int64_t allocation_size(void *raw_ptr, const int64_t requested_size)
-  {
-    const int64_t usable_size = ob_malloc_usable_size(raw_ptr);
-    return usable_size > 0 ? usable_size : requested_size;
+    return ob_malloc_usable_size(ptr);
   }
 
 private:
-  ObIAllocator *allocator_;
-  ObMemAttr attr_;
+  ObMalloc allocator_;
   std::atomic<int64_t> live_bytes_;
 };
 

@@ -430,7 +430,7 @@ public:
   {
     p_alloc_ = new (&page_malloc_alloc_) common::ObMalloc(attr_);
     p_freeable_malloc_alloc_ = new (&freeable_malloc_alloc_)
-        common::MemoryContextMalloc(*p_alloc_, attr_);
+        common::MemoryContextMalloc(attr_);
     freeable_alloc_ = p_freeable_malloc_alloc_;
     return common::OB_SUCCESS;
   }
