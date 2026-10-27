@@ -37,6 +37,11 @@
 #include <unistd.h>
 #endif
 #endif
+#if defined(__linux__)
+#include <fcntl.h>
+#include <unistd.h>
+#include <errno.h>
+#endif
 #include "sql/engine/expr/ob_expr_uuid.h"
 #include "sql/engine/ob_exec_context.h"
 #include "lib/time/ob_time_utility.h"
@@ -47,6 +52,84 @@ namespace oceanbase
 {
 namespace sql
 {
+
+#if defined(__linux__)
+namespace
+{
+
+const int64_t UUID_NODE_LENGTH = 6;
+
+bool is_usable_node_id(const unsigned char *node)
+{
+  bool usable = false;
+  if (NULL != node) {
+    for (int64_t i = 0; !usable && i < UUID_NODE_LENGTH; ++i) {
+      usable = (0 != node[i]);
+    }
+  }
+  return usable;
+}
+
+// MAC discovery is best-effort: a restricted sandbox can deny access to
+// interface information, and a UUIDv1 built on a synthetic node id is still
+// correct and unique. Fill the node from the OS CSPRNG instead of failing
+// startup. RFC 9562 section 6.10 requires the multicast bit to be set so a
+// synthetic node never collides with a real IEEE 802 address.
+int init_uuid_node_without_mac(const int discovery_ret,
+                               unsigned char *node,
+                               const int64_t node_len)
+{
+  int ret = OB_SUCCESS;
+  int fd = -1;
+  int64_t offset = 0;
+  if (OB_SUCCESS != discovery_ret) {
+    LOG_WARN("MAC address discovery failed, falling back to a random UUID node",
+             K(discovery_ret));
+  } else {
+    LOG_WARN("no usable MAC address found, falling back to a random UUID node");
+  }
+  if (OB_ISNULL(node) || OB_UNLIKELY(node_len <= 0)) {
+    ret = OB_INVALID_ARGUMENT;
+    LOG_WARN("invalid argument", K(ret), KP(node), K(node_len));
+  }
+  while (OB_SUCC(ret)) {
+    fd = ::open("/dev/urandom", O_RDONLY | O_CLOEXEC);
+    if (fd >= 0) {
+      break;
+    } else if (EINTR == errno) {
+      continue;
+    } else {
+      ret = OB_ERR_UNEXPECTED;
+      LOG_ERROR("failed to open /dev/urandom for the UUID node", K(ret), K(errno));
+    }
+  }
+  while (OB_SUCC(ret) && offset < node_len) {
+    const ssize_t n = ::read(fd, node + offset, static_cast<size_t>(node_len - offset));
+    if (n > 0) {
+      offset += n;
+    } else if (0 == n) {
+      ret = OB_ERR_UNEXPECTED;
+      LOG_ERROR("unexpected end of file while reading the UUID node", K(ret), K(offset));
+    } else if (EINTR == errno) {
+      continue;
+    } else {
+      ret = OB_ERR_UNEXPECTED;
+      LOG_ERROR("failed to read OS entropy for the UUID node", K(ret), K(errno));
+    }
+  }
+  if (fd >= 0) {
+    ::close(fd);
+    fd = -1;
+  }
+  if (OB_SUCC(ret)) {
+    node[0] |= 0x01;
+    LOG_INFO("initialized the UUID node from OS entropy");
+  }
+  return ret;
+}
+
+}  // namespace
+#endif  // __linux__
 
 int ObBigEndian::put_uint16(unsigned char *b, uint16_t v)
 {
@@ -199,34 +282,46 @@ int ObUUIDNode::init()
     }
   }
 #else
-  // Linux: Use ioctl to get MAC address
+  // Linux: Use ioctl to get MAC address. Interface discovery is best-effort:
+  // restricted containers and sandboxes can deny access to interface
+  // information, in which case a random node id keeps UUIDv1 generation
+  // working instead of blocking server startup.
   struct ifreq ifr;
   struct ifconf ifc;
   char buf[1024];
+  bool mac_addr_found = false;
+  int discovery_ret = OB_SUCCESS;
   int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
   if (sock == -1) {
-    ret = OB_ERR_UNEXPECTED;
-    LOG_ERROR("socket failed", K(ret), K(errno));
+    discovery_ret = OB_ERR_UNEXPECTED;
+    LOG_WARN("create socket for MAC discovery failed", K(discovery_ret), K(errno));
   } else {
     ifc.ifc_len = sizeof(buf);
     ifc.ifc_buf = buf;
     if (ioctl(sock, SIOCGIFCONF, &ifc) < 0) {
-      ret = OB_ERR_UNEXPECTED;
+      discovery_ret = OB_ERR_UNEXPECTED;
+      LOG_WARN("ioctl failed, SIOCGIFCONF", K(discovery_ret), K(errno));
     } else {
       ifreq *it = ifc.ifc_req;
       ifreq *end = it + (ifc.ifc_len / sizeof(ifreq));
-      bool mac_addr_found = false;
-      for (; it != end && OB_SUCC(ret); ++it) {
-        if (OB_ISNULL(it) || OB_ISNULL(it->ifr_name) || OB_ISNULL(ifr.ifr_name)) {
+      for (; it != end && !mac_addr_found; ++it) {
+        if (OB_ISNULL(it) || OB_ISNULL(it->ifr_name)) {
           continue;
         } else {
           strncpy(ifr.ifr_name, it->ifr_name, IFNAMSIZ - 1);
+          ifr.ifr_name[IFNAMSIZ - 1] = '\0';
           if (ioctl(sock, SIOCGIFFLAGS, &ifr) == 0) {
             if (!(ifr.ifr_flags & IFF_LOOPBACK)) {
               if (ioctl(sock, SIOCGIFHWADDR, &ifr) == 0) {
-                MEMCPY(mac_addr_, ifr.ifr_hwaddr.sa_data, 6);
-                mac_addr_found = true;
-                break;
+                const unsigned char *mac =
+                    reinterpret_cast<const unsigned char *>(ifr.ifr_hwaddr.sa_data);
+                if (is_usable_node_id(mac)) {
+                  MEMCPY(mac_addr_, mac, UUID_NODE_LENGTH);
+                  mac_addr_found = true;
+                  break;
+                } else {
+                  LOG_WARN("ignore an unusable MAC address", K(it->ifr_name));
+                }
               } else {
                 LOG_WARN("ioctl failed, SIOCGIFHWADDR", K(errno), K(it->ifr_name));
               }
@@ -236,14 +331,14 @@ int ObUUIDNode::init()
           }
         }
       }//end for
-      if (OB_FAIL(ret)) {
-      } else if (!mac_addr_found) {
-        ret = OB_ERR_UNEXPECTED;
-      } else {
-        is_inited_ = true;
-      }
     }
     close(sock);
+  }
+  if (mac_addr_found) {
+    is_inited_ = true;
+  } else if (OB_FAIL(init_uuid_node_without_mac(discovery_ret, mac_addr_, UUID_NODE_LENGTH))) {
+  } else {
+    is_inited_ = true;
   }
 #endif
   return ret;
