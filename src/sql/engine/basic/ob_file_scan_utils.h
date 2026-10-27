@@ -423,5 +423,138 @@ private:
   }
 };
 
+class ObFileCsvReader
+{
+public:
+  ObFileCsvReader()
+      : in_(),
+        options_(),
+        peek_(-1),
+        eof_(true)
+  {
+  }
+
+  ~ObFileCsvReader()
+  {
+    if (in_.is_open()) {
+      in_.close();
+    }
+  }
+
+  int open(const common::ObString &path, const ObFileSqlOptions &options)
+  {
+    int ret = common::OB_SUCCESS;
+    options_ = options;
+    peek_ = -1;
+    eof_ = false;
+    in_.clear();
+    in_.open(std::string(path.ptr(), path.length()), std::ios::binary);
+    if (!in_.is_open()) {
+      ret = common::OB_FILE_NOT_EXIST;
+      eof_ = true;
+    }
+    return ret;
+  }
+
+  int reset()
+  {
+    int ret = common::OB_SUCCESS;
+    in_.clear();
+    in_.seekg(0, std::ios::beg);
+    peek_ = -1;
+    eof_ = !in_.is_open();
+    return ret;
+  }
+
+  int next(std::vector<std::string> &record)
+  {
+    int ret = common::OB_SUCCESS;
+    record.clear();
+    if (eof_) {
+      ret = common::OB_ITER_END;
+    } else {
+      std::string field;
+      bool in_quotes = false;
+      bool any = false;
+      while (true) {
+        char ch = '\0';
+        if (OB_FAIL(next_char_(ch))) {
+          break;
+        }
+        any = true;
+        if (in_quotes) {
+          if (ch == options_.quote_) {
+            char next = '\0';
+            int next_ret = next_char_(next);
+            if (common::OB_SUCCESS == next_ret && next == options_.quote_) {
+              field.push_back(options_.quote_);
+            } else {
+              if (common::OB_SUCCESS == next_ret) {
+                unget_char_(next);
+              }
+              in_quotes = false;
+            }
+          } else {
+            field.push_back(ch);
+          }
+        } else if (ch == options_.quote_) {
+          in_quotes = true;
+        } else if (ch == options_.delimiter_) {
+          record.push_back(field);
+          field.clear();
+        } else if (ch == '\n') {
+          record.push_back(field);
+          break;
+        } else if (ch == '\r') {
+          char next = '\0';
+          int next_ret = next_char_(next);
+          if (common::OB_SUCCESS == next_ret && next != '\n') {
+            unget_char_(next);
+          }
+          record.push_back(field);
+          break;
+        } else {
+          field.push_back(ch);
+        }
+      }
+      if (OB_FAIL(ret)) {
+        if (common::OB_ITER_END == ret && !any) {
+          eof_ = true;
+        }
+      }
+    }
+    return ret;
+  }
+
+private:
+  int next_char_(char &ch)
+  {
+    int ret = common::OB_SUCCESS;
+    if (peek_ >= 0) {
+      ch = static_cast<char>(peek_);
+      peek_ = -1;
+    } else {
+      int c = in_.get();
+      if (c == std::char_traits<char>::eof()) {
+        ret = common::OB_ITER_END;
+      } else {
+        ch = static_cast<char>(c);
+      }
+    }
+    return ret;
+  }
+
+  void unget_char_(char ch)
+  {
+    peek_ = static_cast<unsigned char>(ch);
+  }
+
+private:
+  std::ifstream in_;
+  ObFileSqlOptions options_;
+  int peek_;
+  bool eof_;
+};
+
 } // namespace sql
 } // namespace oceanbase
