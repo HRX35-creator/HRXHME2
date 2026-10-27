@@ -770,6 +770,7 @@ int ObInnerSQLConnection::query(sqlclient::ObIExecutor &executor,
         res.set_is_read(true);
         if (retry_cnt > 0) { // reset result set
           bool is_user_sql = res.result_set().is_user_sql();
+          const bool ai_column_internal_write = res.sql_ctx().ai_column_internal_write_;
           res.~ObInnerSQLResult();
           new (&res) ObInnerSQLResult(
               get_session(), ob_sql_->get_plan_cache_access_service(),
@@ -777,6 +778,7 @@ int ObInnerSQLConnection::query(sqlclient::ObIExecutor &executor,
           if (OB_FAIL(res.init())) {
           } else {
             res.result_set().set_user_sql(is_user_sql);
+            res.sql_ctx().ai_column_internal_write_ = ai_column_internal_write;
             res.set_is_read(true);
           }
         }
@@ -1073,8 +1075,20 @@ int ObInnerSQLConnection::execute_proc(ObIAllocator &allocator,
   return ret;
 }
 
+int ObInnerSQLConnection::execute_ai_column_write(const ObString &sql, int64_t &affected_rows)
+{
+  // A privileged plan must never enter, or be obtained from, the user's plan
+  // cache. Nested trigger statements get fresh result contexts with no grant.
+  const bool cache = get_session().get_local_ob_enable_plan_cache();
+  get_session().set_local_ob_enable_plan_cache(false);
+  auto execute = [&]() { return execute_write_inner(sql, affected_rows, false, true); };
+  const int ret = execute_with_timeout(execute);
+  get_session().set_local_ob_enable_plan_cache(cache);
+  return ret;
+}
+
 int ObInnerSQLConnection::execute_write_inner(const ObString &sql,
-    int64_t &affected_rows, bool is_user_sql)
+    int64_t &affected_rows, bool is_user_sql, bool ai_column_internal_write)
 {
   int ret = OB_SUCCESS;
   ObSqlQueryExecutor executor(sql);
@@ -1092,6 +1106,7 @@ int ObInnerSQLConnection::execute_write_inner(const ObString &sql,
     if (OB_FAIL(ret)) {
     } else {
       res.result_set().set_user_sql(is_user_sql);
+      res.sql_ctx().ai_column_internal_write_ = ai_column_internal_write;
       if (OB_FAIL(query(executor, res))) {
       } else if (FALSE_IT(affected_rows = res.result_set().get_affected_rows())) {
       } else if (OB_FAIL(res.close())) {

@@ -471,6 +471,8 @@ public:
   bool plan_cache_hit_;
   bool self_add_plan_; //used for retry query, and add plan to plan cache in this query;
   int  disable_privilege_check_;  //internal user set disable privilege check
+  // Granted only by the native AI worker API for this one result/statement.
+  bool ai_column_internal_write_;
   bool force_print_trace_; // [OUT]if the trace log is enabled by hint
   bool is_show_trace_stmt_;  // [OUT]
   int64_t retry_times_;

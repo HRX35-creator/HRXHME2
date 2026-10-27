@@ -1359,7 +1359,8 @@ int ObAIFuncUtils::get_ai_func_info(ObIAllocator &allocator, const ObString &mod
   return ret;
 }
 
-int ObAIFuncModel::call_completion(ObString &prompt, ObJsonObject *config, ObString &result, int64_t max_retry_times)
+int ObAIFuncModel::call_completion(ObString &prompt, ObJsonObject *config, ObString &result,
+    int64_t max_retry_times, const std::atomic<bool> *cancellation)
 {
   int ret = OB_SUCCESS;
   ObArray<ObString> headers;
@@ -1385,6 +1386,8 @@ int ObAIFuncModel::call_completion(ObString &prompt, ObJsonObject *config, ObStr
   ObString result_str;
   ObAIFuncClient client;
   if (max_retry_times >= 0) { client.set_max_retry_times(max_retry_times); }
+  client.set_cancellation(cancellation);
+  if (cancellation != nullptr) { client.set_response_limit(4 * 1024 * 1024); }
   ObString unencrypted_access_key;
   ObString request_model_name = get_request_model_name();
   if (OB_FAIL(ret)) {
@@ -1455,7 +1458,8 @@ int ObAIFuncModel::call_completion_vector(ObArray<ObString> &prompts, ObJsonObje
   return ret;
 }
 
-int ObAIFuncModel::call_dense_embedding(ObString &content, ObJsonObject *config, ObString &result)
+int ObAIFuncModel::call_dense_embedding(ObString &content, ObJsonObject *config, ObString &result,
+    int64_t max_retry_times, const std::atomic<bool> *cancellation)
 {
   int ret = OB_SUCCESS;
   ObArray<ObString> contents;
@@ -1467,7 +1471,7 @@ int ObAIFuncModel::call_dense_embedding(ObString &content, ObJsonObject *config,
     ret = OB_INVALID_ARGUMENT;
     LOG_USER_ERROR(OB_INVALID_ARGUMENT, "ai_embed, info type is not dense embedding");
   } else if (OB_FAIL(contents.push_back(content))) {
-  } else if (OB_FAIL(call_dense_embedding_vector_v2(contents, config, results))) {
+  } else if (OB_FAIL(call_dense_embedding_vector_v2(contents, config, results, max_retry_times, cancellation))) {
   } else if (results.count() != 1) {
     ret = OB_ERR_UNEXPECTED;
   } else {
@@ -1522,7 +1526,8 @@ int ObAIFuncModel::call_dense_embedding_vector(ObArray<ObString> &contents, ObJs
 }
 
 
-int ObAIFuncModel::call_dense_embedding_vector_v2(ObArray<ObString> &content, ObJsonObject *config, ObArray<ObString> &results)
+int ObAIFuncModel::call_dense_embedding_vector_v2(ObArray<ObString> &content, ObJsonObject *config, ObArray<ObString> &results,
+    int64_t max_retry_times, const std::atomic<bool> *cancellation)
 {
   int ret = OB_SUCCESS;
   ObArray<ObString> headers;
@@ -1532,6 +1537,9 @@ int ObAIFuncModel::call_dense_embedding_vector_v2(ObArray<ObString> &content, Ob
   ObAIFuncIEmbed *embed_provider = nullptr;
   ObString result_str;
   ObAIFuncClient client;
+  if (max_retry_times >= 0) { client.set_max_retry_times(max_retry_times); }
+  client.set_cancellation(cancellation);
+  if (cancellation != nullptr) { client.set_response_limit(4 * 1024 * 1024); }
   int64_t dimension = 0;
   if (OB_NOT_NULL(config)) {
     ObJsonNode *dimension_node = config->get_value("dimensions");

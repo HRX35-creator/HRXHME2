@@ -2056,6 +2056,7 @@ int ObSql::generate_stmt(ParseResult &parse_result,
     resolver_ctx.schema_checker_ = schema_checker;
     resolver_ctx.secondary_namespace_ = context.secondary_namespace_;
     resolver_ctx.session_info_ = context.session_info_;
+    resolver_ctx.ai_column_internal_write_ = context.ai_column_internal_write_;
     bind_resolver_runtime_services(resolver_ctx);
     resolver_ctx.expr_factory_ = result.get_exec_context().get_expr_factory();
     resolver_ctx.stmt_factory_ = result.get_exec_context().get_stmt_factory();

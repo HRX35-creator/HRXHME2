@@ -201,6 +201,7 @@ int ObDelUpdResolver::build_ai_request_expr(ObRawExpr *&expr)
 int ObDelUpdResolver::resolve_ai_column_assignments(ObIArray<ObTableAssignment> &tables)
 {
   int ret = OB_SUCCESS;
+  if (params_.ai_column_internal_write_) { return ret; }
   for (int64_t t = 0; OB_SUCC(ret) && t < tables.count(); ++t) {
     ObTableAssignment &assigns = tables.at(t);
     const TableItem *item = get_stmt()->get_table_item_by_id(assigns.table_id_);

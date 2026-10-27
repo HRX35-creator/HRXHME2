@@ -145,6 +145,7 @@ public:
                            common::ObISQLClient::ReadResult &res, bool is_user_sql = false) override;
   virtual int execute_write(const ObString &sql,
                             int64_t &affected_rows, bool is_user_sql = false) override;
+  int execute_ai_column_write(const ObString &sql, int64_t &affected_rows) override;
   virtual int execute_proc(ObIAllocator &allocator,
                           ParamStore &params,
                           ObString &sql,
@@ -291,7 +292,7 @@ private:
   int execute_read_inner(const ObString &sql,
                          common::ObISQLClient::ReadResult &res, bool is_user_sql = false);
   int execute_write_inner(const ObString &sql, int64_t &affected_rows,
-      bool is_user_sql = false);
+      bool is_user_sql = false, bool ai_column_internal_write = false);
   int start_transaction_inner(bool with_snap_shot = false);
   template <typename T>
   int execute_with_timeout(T function);

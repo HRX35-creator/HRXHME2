@@ -17,6 +17,7 @@
 #ifndef OB_AI_FUNC_UTILS_H_
 #define OB_AI_FUNC_UTILS_H_
 
+#include <atomic>
 #include "ob_ai_func.h"
 #include "share/json/ob_json_helper.h"
 #include "lib/encode/ob_base64_encode.h"
@@ -352,12 +353,15 @@ public:
   {}
    virtual ~ObAIFuncModel() {}
    // completion
-   int call_completion(ObString &prompt, ObJsonObject *config, ObString &result, int64_t max_retry_times = -1);
+   int call_completion(ObString &prompt, ObJsonObject *config, ObString &result,
+       int64_t max_retry_times = -1, const std::atomic<bool> *cancellation = nullptr);
    int call_completion_vector(ObArray<ObString> &prompts, ObJsonObject *config, ObArray<ObString> &results);
    // dense_embedding
-   int call_dense_embedding(ObString &content, ObJsonObject *config, ObString &result);
+   int call_dense_embedding(ObString &content, ObJsonObject *config, ObString &result,
+       int64_t max_retry_times = -1, const std::atomic<bool> *cancellation = nullptr);
    int call_dense_embedding_vector(ObArray<ObString> &contents, ObJsonObject *config, ObArray<ObString> &results);
-   int call_dense_embedding_vector_v2(ObArray<ObString> &contents, ObJsonObject *config, ObArray<ObString> &results);
+   int call_dense_embedding_vector_v2(ObArray<ObString> &contents, ObJsonObject *config, ObArray<ObString> &results,
+       int64_t max_retry_times = -1, const std::atomic<bool> *cancellation = nullptr);
    // rerank
    int call_rerank(ObString &query, ObJsonArray *contents, ObJsonArray *&results);
  private:
