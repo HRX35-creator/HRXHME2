@@ -35,6 +35,9 @@
 #include <linux/if_packet.h>
 #include <fcntl.h>
 #include <unistd.h>
+#else
+#include <fcntl.h>
+#include <unistd.h>
 #endif
 #endif
 #include "sql/engine/expr/ob_expr_uuid.h"
@@ -244,6 +247,24 @@ int ObUUIDNode::init()
       }
     }
     close(sock);
+  }
+  if (!is_inited_) {
+    // RFC 4122 section 4.5: when the environment exposes no usable MAC
+    // address (for example a restricted sandbox or container), fall back to
+    // random bytes with the multicast bit set instead of failing startup.
+    int urandom_fd = open("/dev/urandom", O_RDONLY);
+    if (urandom_fd >= 0 && read(urandom_fd, mac_addr_, 6) == 6) {
+      mac_addr_[0] |= 0x01;  // set multicast bit
+      is_inited_ = true;
+      ret = OB_SUCCESS;
+      LOG_INFO("using random UUID node ID (no MAC available)");
+    } else {
+      ret = OB_ERR_UNEXPECTED;
+      LOG_WARN("failed to generate random UUID node", K(ret), K(errno));
+    }
+    if (urandom_fd >= 0) {
+      close(urandom_fd);
+    }
   }
 #endif
   return ret;
