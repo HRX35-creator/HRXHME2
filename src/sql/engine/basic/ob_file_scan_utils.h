@@ -1110,5 +1110,119 @@ private:
   std::string path_;
 };
 
+inline bool snappy_read_varint_(const uint8_t *input,
+                                size_t input_len,
+                                size_t &pos,
+                                uint64_t &value)
+{
+  value = 0;
+  int shift = 0;
+  while (pos < input_len && shift < 64) {
+    uint8_t byte = input[pos++];
+    value |= static_cast<uint64_t>(byte & 0x7f) << shift;
+    if ((byte & 0x80) == 0) {
+      return true;
+    }
+    shift += 7;
+  }
+  return false;
+}
+
+inline int snappy_decompress(const char *input,
+                             const size_t input_len,
+                             std::vector<char> &output)
+{
+  int ret = common::OB_SUCCESS;
+  output.clear();
+  if (OB_ISNULL(input) || input_len == 0) {
+    ret = common::OB_INVALID_ARGUMENT;
+  } else {
+    const uint8_t *in = reinterpret_cast<const uint8_t *>(input);
+    size_t pos = 0;
+    uint64_t uncompressed_len = 0;
+    if (!snappy_read_varint_(in, input_len, pos, uncompressed_len) ||
+        uncompressed_len > static_cast<uint64_t>(INT64_MAX)) {
+      ret = common::OB_INVALID_DATA;
+    } else {
+      output.reserve(static_cast<size_t>(uncompressed_len));
+      while (OB_SUCC(ret) && pos < input_len &&
+             output.size() < static_cast<size_t>(uncompressed_len)) {
+        const uint8_t tag = in[pos++];
+        const uint8_t type = tag & 0x03;
+        if (0 == type) {
+          uint64_t literal_len = (tag >> 2);
+          if (literal_len < 60) {
+            literal_len += 1;
+          } else {
+            const uint64_t extra_len = literal_len - 59;
+            literal_len = 0;
+            if (extra_len > 4 || pos + extra_len > input_len) {
+              ret = common::OB_INVALID_DATA;
+            } else {
+              for (uint64_t i = 0; i < extra_len; ++i) {
+                literal_len |= static_cast<uint64_t>(in[pos++]) << (8 * i);
+              }
+              literal_len += 1;
+            }
+          }
+          if (OB_SUCC(ret) && (pos + literal_len > input_len ||
+                               output.size() + literal_len > uncompressed_len)) {
+            ret = common::OB_INVALID_DATA;
+          } else if (OB_SUCC(ret)) {
+            output.insert(output.end(), input + pos, input + pos + literal_len);
+            pos += literal_len;
+          }
+        } else {
+          uint64_t copy_len = 0;
+          uint64_t offset = 0;
+          if (1 == type) {
+            if (pos >= input_len) {
+              ret = common::OB_INVALID_DATA;
+            } else {
+              copy_len = ((tag >> 2) & 0x07) + 4;
+              offset = ((tag & 0xe0) << 3) | in[pos++];
+            }
+          } else if (2 == type) {
+            if (pos + 2 > input_len) {
+              ret = common::OB_INVALID_DATA;
+            } else {
+              copy_len = (tag >> 2) + 1;
+              offset = static_cast<uint64_t>(in[pos]) |
+                       (static_cast<uint64_t>(in[pos + 1]) << 8);
+              pos += 2;
+            }
+          } else {
+            if (pos + 4 > input_len) {
+              ret = common::OB_INVALID_DATA;
+            } else {
+              copy_len = (tag >> 2) + 1;
+              offset = static_cast<uint64_t>(in[pos]) |
+                       (static_cast<uint64_t>(in[pos + 1]) << 8) |
+                       (static_cast<uint64_t>(in[pos + 2]) << 16) |
+                       (static_cast<uint64_t>(in[pos + 3]) << 24);
+              pos += 4;
+            }
+          }
+          if (OB_SUCC(ret)) {
+            if (0 == offset || offset > output.size() ||
+                output.size() + copy_len > uncompressed_len) {
+              ret = common::OB_INVALID_DATA;
+            } else {
+              const size_t copy_start = output.size() - static_cast<size_t>(offset);
+              for (uint64_t i = 0; i < copy_len; ++i) {
+                output.push_back(output[copy_start + i]);
+              }
+            }
+          }
+        }
+      }
+      if (OB_SUCC(ret) && output.size() != static_cast<size_t>(uncompressed_len)) {
+        ret = common::OB_INVALID_DATA;
+      }
+    }
+  }
+  return ret;
+}
+
 } // namespace sql
 } // namespace oceanbase
