@@ -4081,6 +4081,21 @@ int ObDMLResolver::resolve_function_table_item(const ParseNode &parse_tree,
         if (OB_FAIL(get_static_file_path(function_table_expr->get_param_expr(0), file_path))) {
           LOG_USER_ERROR(OB_NOT_SUPPORTED, "file sql path must be a constant string");
           ret = OB_NOT_SUPPORTED;
+        } else {
+          bool enable_file_sql = false;
+          ObString secure_file_priv;
+          if (OB_ISNULL(session_info_)) {
+            ret = OB_ERR_UNEXPECTED;
+          } else if (OB_FAIL(session_info_->get_sys_variable(
+                                 share::SYS_VAR_ENABLE_FILE_SQL, enable_file_sql))) {
+          } else if (!enable_file_sql) {
+            ret = OB_NOT_SUPPORTED;
+            LOG_USER_ERROR(OB_NOT_SUPPORTED, "enable_file_sql is disabled");
+          } else if (OB_FAIL(session_info_->get_secure_file_priv(secure_file_priv))) {
+          } else if (OB_FAIL(ObResolverUtils::check_secure_path(secure_file_priv, file_path))) {
+          }
+        }
+        if (OB_FAIL(ret)) {
         } else if (OB_FAIL(ObFileSqlUtils::infer_schema(*allocator_, file_path, file_format,
                                                          file_options, file_columns, error_msg))) {
           if (!error_msg.empty()) {
