@@ -14,6 +14,7 @@ public:
   ~AIColumnWorker() override;
   int start();
   void stop() override;
+  void wait() override;
   void run1() override;
 private:
   struct Group;
@@ -33,6 +34,7 @@ private:
   common::ObString prefix_;
   std::atomic<bool> cancellation_;
   std::atomic<int> reclaimed_;
+  bool started_;
   DISALLOW_COPY_AND_ASSIGN(AIColumnWorker);
 };
 } }

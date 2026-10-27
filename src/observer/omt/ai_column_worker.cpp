@@ -58,6 +58,56 @@ int table_name(ObSchemaGetterGuard &guard, const ObTableSchema &table, ObSqlStri
   return ret;
 }
 
+int lock_request_group(ObMySQLTransaction &transaction, const ObString &qualified,
+    const ObString &predicate, uint64_t table_id, const ObString &request,
+    int64_t epoch, const ObString &owner, bool &row_exists)
+{
+  int ret = OB_SUCCESS;
+  row_exists = false;
+  // Business DML uses this same order. Never lock a task/group and then wait
+  // for a business row, including when merely saving a completed HTTP outcome.
+  if (!qualified.empty()) {
+    ObSqlString query;
+    if (OB_FAIL(query.append_fmt("SELECT 1 FROM %.*s WHERE %.*s FOR UPDATE",
+            qualified.length(), qualified.ptr(), predicate.length(), predicate.ptr()))) {
+    } else {
+      SMART_VAR(ObMySQLProxy::MySQLResult, result) {
+        if (OB_FAIL(transaction.read(result, query.ptr()))) {
+        } else if (result.get_result() == nullptr) { ret = OB_ERR_UNEXPECTED;
+        } else if (OB_FAIL(result.get_result()->next())) {
+          if (ret == OB_ITER_END) { ret = OB_SUCCESS; }
+        } else { row_exists = true; }
+      }
+    }
+  }
+  if (OB_SUCC(ret)) {
+    ObSqlString query;
+    if (OB_FAIL(query.append_fmt("SELECT lease_epoch FROM oceanbase.__all_ai_column_group WHERE table_id=%lu AND request_id=", table_id))) {
+    } else if (OB_FAIL(hex_literal(query, request))) {
+    } else if (OB_FAIL(query.append_fmt(" AND lease_epoch=%ld AND lease_until>NOW(6) AND lease_owner=", epoch))) {
+    } else if (OB_FAIL(hex_literal(query, owner))) {
+    } else if (OB_FAIL(query.append(" FOR UPDATE"))) {
+    } else {
+      SMART_VAR(ObMySQLProxy::MySQLResult, result) {
+        if (OB_FAIL(transaction.read(result, query.ptr()))) {
+        } else if (result.get_result() == nullptr) { ret = OB_ERR_UNEXPECTED;
+        } else if (OB_FAIL(result.get_result()->next())) {
+          if (ret == OB_ITER_END) { ret = OB_EAGAIN; }
+        }
+      }
+    }
+  }
+  return ret;
+}
+
+bool output_conversion_error(int error)
+{
+  return error == OB_INVALID_DATA || error == OB_DATA_OUT_OF_RANGE
+      || error == OB_ERR_TRUNCATED_WRONG_VALUE_FOR_FIELD || error == OB_ERR_DATA_TOO_LONG
+      || error == OB_ERR_TRUNCATED_WRONG_VALUE || error == OB_ERR_INVALID_JSON_TEXT
+      || error == OB_ERR_INVALID_JSON_TEXT_IN_PARAM;
+}
+
 // Called while this result still owns its snapshot and LOB context. The copy
 // survives closing the result, which always precedes any HTTP request.
 int read_text(ObMySQLResult &result, const char *name, ObIAllocator &allocator,
@@ -149,11 +199,12 @@ struct AIColumnWorker::Task {
   bool eligible_ = true;
 };
 
-AIColumnWorker::AIColumnWorker() : sql_(nullptr), cancellation_(false), reclaimed_(0) {}
+AIColumnWorker::AIColumnWorker() : sql_(nullptr), cancellation_(false), reclaimed_(0), started_(false) {}
 AIColumnWorker::~AIColumnWorker() { stop(); wait(); }
 
 int AIColumnWorker::start()
 {
+  if (started_) { return OB_INIT_TWICE; }
   sql_ = observer::ObServer::get_instance().get_gctx().sql_proxy_;
   if (sql_ == nullptr) { return OB_NOT_INIT; }
   cancellation_.store(false);
@@ -164,14 +215,17 @@ int AIColumnWorker::start()
   owner_ = ObString::make_string(owner_buffer_);
   int ret = set_thread_count(2);
   if (OB_SUCC(ret)) { ret = share::ObThreadPool::start(); }
+  if (OB_SUCC(ret)) { started_ = true; }
+  else { stop(); wait(); }
   return ret;
 }
 void AIColumnWorker::stop() { cancellation_.store(true); share::ObThreadPool::stop(); }
+void AIColumnWorker::wait() { share::ObThreadPool::wait(); started_ = false; }
 
 void AIColumnWorker::run1()
 {
   lib::set_thread_name("AIColumn");
-  while (!has_set_stop()) {
+  while (!cancellation_.load()) {
     if (sql_ != nullptr) {
       int expected = 0;
       if (reclaimed_.compare_exchange_strong(expected, 1)) {
@@ -257,12 +311,30 @@ int AIColumnWorker::save_outcome(const Group &group, const Task &task, int error
     const ObString &outcome, int64_t max_retries)
 {
   int ret = OB_SUCCESS;
+  ObSchemaGetterGuard guard;
+  const ObTableSchema *table = nullptr;
+  ObSqlString qualified;
+  ObString database;
+  ObMySQLTransaction transaction;
+  bool row_exists = false;
+  auto *service = observer::ObServer::get_instance().get_gctx().schema_service_;
+  if (service == nullptr) { ret = OB_NOT_INIT;
+  } else if (OB_FAIL(service->get_runtime_schema_guard(guard))) {
+  } else if (OB_FAIL(guard.get_table_schema(group.table_id_, table))) {
+  } else if (table != nullptr && OB_FAIL(table_name(guard, *table, qualified, database))) {
+  }
+  if (OB_SUCC(ret)) { ret = transaction.start(sql_); }
+  if (OB_SUCC(ret)) {
+    ret = lock_request_group(transaction, qualified.string(), group.predicate_, group.table_id_,
+        group.request_, group.epoch_, owner_, row_exists);
+  }
   const bool retry = error != OB_SUCCESS && task.retries_ < max_retries;
   const int64_t retries = task.retries_ + (retry ? 1 : 0);
   const int64_t delay = retry ? (1LL << std::min<int64_t>(retries - 1, 5)) : 0;
   ObSqlString sql;
   int64_t affected = 0;
-  if (OB_FAIL(sql.append_fmt("UPDATE oceanbase.__all_ai_column_task SET state=%d,retry_count=%ld,error_code=%d,"
+  if (OB_FAIL(ret)) {
+  } else if (OB_FAIL(sql.append_fmt("UPDATE oceanbase.__all_ai_column_task SET state=%d,retry_count=%ld,error_code=%d,"
           "eligible_ts=TIMESTAMPADD(SECOND,%ld,NOW(6)),outcome=", error == OB_SUCCESS ? 1 : (retry ? 3 : 2), retries, error, delay))) {
   } else if (error == OB_SUCCESS ? OB_FAIL(hex_literal(sql, outcome)) : OB_FAIL(sql.append("NULL"))) {
   } else if (OB_FAIL(sql.append_fmt(" WHERE table_id=%lu AND column_id=%lu AND definition_version=%ld AND request_id=",
@@ -273,8 +345,12 @@ int AIColumnWorker::save_outcome(const Group &group, const Task &task, int error
   } else if (OB_FAIL(sql.append_fmt(" AND lease_epoch=%ld AND lease_owner=", group.epoch_))) {
   } else if (OB_FAIL(hex_literal(sql, owner_))) {
   } else if (OB_FAIL(sql.append(")"))) {
-  } else if (OB_FAIL(sql_->write(sql.ptr(), affected))) {
+  } else if (OB_FAIL(transaction.write(sql.ptr(), affected))) {
   } else if (affected != 1) { ret = OB_EAGAIN; }
+  if (transaction.is_started()) {
+    const int end_ret = transaction.end(OB_SUCC(ret));
+    if (OB_SUCC(ret)) { ret = end_ret; }
+  }
   return ret;
 }
 
@@ -491,37 +567,9 @@ int AIColumnWorker::finish_group(const Group &group)
   } else if (table != nullptr && OB_FAIL(table_name(guard, *table, qualified, database))) {
   }
   if (OB_SUCC(ret)) { ret = transaction.start(sql_); }
-  // Match the business DML lock order: business row, request group, tasks.
-  if (OB_SUCC(ret) && table != nullptr) {
-    ObSqlString query;
-    if (OB_FAIL(query.append_fmt("SELECT 1 FROM %s WHERE %.*s FOR UPDATE",
-            qualified.ptr(), group.predicate_.length(), group.predicate_.ptr()))) {
-    } else {
-      SMART_VAR(ObMySQLProxy::MySQLResult, result) {
-        if (OB_FAIL(transaction.read(result, query.ptr()))) {
-        } else if (result.get_result() == nullptr) { ret = OB_ERR_UNEXPECTED;
-        } else if (OB_FAIL(result.get_result()->next())) {
-          if (ret == OB_ITER_END) { ret = OB_SUCCESS; }
-        } else { row_exists = true; }
-      }
-    }
-  }
   if (OB_SUCC(ret)) {
-    ObSqlString query;
-    if (OB_FAIL(query.append_fmt("SELECT lease_epoch FROM oceanbase.__all_ai_column_group WHERE table_id=%lu AND request_id=", group.table_id_))) {
-    } else if (OB_FAIL(hex_literal(query, group.request_))) {
-    } else if (OB_FAIL(query.append_fmt(" AND lease_epoch=%ld AND lease_until>NOW(6) AND lease_owner=", group.epoch_))) {
-    } else if (OB_FAIL(hex_literal(query, owner_))) {
-    } else if (OB_FAIL(query.append(" FOR UPDATE"))) {
-    } else {
-      SMART_VAR(ObMySQLProxy::MySQLResult, result) {
-        if (OB_FAIL(transaction.read(result, query.ptr()))) {
-        } else if (result.get_result() == nullptr) { ret = OB_ERR_UNEXPECTED;
-        } else if (OB_FAIL(result.get_result()->next())) {
-          if (ret == OB_ITER_END) { ret = OB_EAGAIN; }
-        }
-      }
-    }
+    ret = lock_request_group(transaction, qualified.string(), group.predicate_, group.table_id_,
+        group.request_, group.epoch_, owner_, row_exists);
   }
   if (OB_SUCC(ret)) {
     ObSqlString query;
@@ -607,7 +655,7 @@ int AIColumnWorker::finish_group(const Group &group)
         if (connection == nullptr) { ret = OB_ERR_UNEXPECTED;
         } else {
           ret = connection->execute_ai_column_write(update.string(), affected);
-          if (ret != OB_SUCCESS) { failed_cast = true; }
+          if (output_conversion_error(ret)) { failed_cast = true; }
         }
       }
     }
