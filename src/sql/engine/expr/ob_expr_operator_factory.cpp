@@ -418,6 +418,7 @@
 #include "sql/engine/expr/ob_expr_ai/ob_expr_ai_embed.h"
 #include "sql/engine/expr/ob_expr_ai/ob_expr_ai_rerank.h"
 #include "sql/engine/expr/ob_expr_ai/ob_expr_ai_prompt.h"
+#include "sql/engine/expr/ob_expr_file_table.h"
 #include "sql/engine/expr/ob_expr_vector_similarity.h"
 #include "sql/engine/expr/ob_expr_lock_func.h"
 
@@ -1048,6 +1049,11 @@ void ObExprOperatorFactory::register_expr_operators()
     REG_OP(ObExprAIEmbed);
     REG_OP(ObExprAIRerank);
     REG_OP(ObExprAIPrompt);
+    REG_OP(ObExprReadCsv);
+    REG_OP(ObExprReadJson);
+    REG_SAME_OP(T_FUN_SYS_READ_JSON, T_FUN_SYS_READ_JSON, "read_ndjson", i);
+    REG_OP(ObExprReadParquet);
+    REG_OP(ObExprGlob);
   }();
 }
 
