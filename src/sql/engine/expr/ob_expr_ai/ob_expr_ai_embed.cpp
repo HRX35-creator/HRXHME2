@@ -176,6 +176,7 @@ int ObExprAIEmbed::eval_ai_embed_batch(const ObExpr &expr, ObEvalCtx &ctx,
     ObString model_id;
     int64_t dim = 0;
     bool request_initialized = false;
+    bool scalar_fallback = false;
     for (int64_t i = 0; OB_SUCC(ret) && i < batch_size; ++i) {
       if (skip.at(i) || eval_flags.at(i)) {
         continue;
@@ -215,8 +216,7 @@ int ObExprAIEmbed::eval_ai_embed_batch(const ObExpr &expr, ObEvalCtx &ctx,
           dim = row_dim;
           request_initialized = true;
         } else if (model_id != row_model_id || dim != row_dim) {
-          ret = OB_INVALID_ARGUMENT;
-          LOG_USER_ERROR(OB_INVALID_ARGUMENT, "ai_embed, model id and dimension must be consistent within a batch");
+          scalar_fallback = true;
         }
         if (OB_SUCC(ret)) {
           if (OB_FAIL(contents.push_back(content))) {
@@ -226,7 +226,18 @@ int ObExprAIEmbed::eval_ai_embed_batch(const ObExpr &expr, ObEvalCtx &ctx,
       }
     }
 
-    if (OB_SUCC(ret) && !contents.empty()) {
+    if (OB_SUCC(ret) && scalar_fallback) {
+      // Preserve scalar SQL semantics when model or dimension varies across rows.
+      for (int64_t i = 0; OB_SUCC(ret) && i < row_indexes.count(); ++i) {
+        const int64_t row = row_indexes.at(i);
+        batch_info_guard.set_batch_idx(row);
+        if (OB_FAIL(eval_ai_embed(expr, ctx, *res_datums.at(row)))) {
+        } else {
+          eval_flags.set(row);
+        }
+      }
+    }
+    if (OB_SUCC(ret) && !contents.empty() && !scalar_fallback) {
       ObJsonObject *config = nullptr;
       ObJsonInt *dim_json = nullptr;
       ObAIFuncExprInfo *info = nullptr;

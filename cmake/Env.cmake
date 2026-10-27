@@ -52,7 +52,9 @@ ob_define(USE_LTO_CACHE OFF)
 # 开源模式默认支持系统租户使用向量索引
 ob_define(OB_BUILD_SYS_VEC_IDX ON)
 
-if(WIN32)
+if(DEFINED ARCHITECTURE AND NOT "${ARCHITECTURE}" STREQUAL "")
+  # Respect an explicit architecture supplied by a non-interactive build.
+elseif(WIN32)
   EXECUTE_PROCESS(COMMAND powershell -NoProfile -Command "$env:PROCESSOR_ARCHITECTURE"
     OUTPUT_VARIABLE ARCHITECTURE)
   STRING(TOLOWER "${ARCHITECTURE}" ARCHITECTURE)
