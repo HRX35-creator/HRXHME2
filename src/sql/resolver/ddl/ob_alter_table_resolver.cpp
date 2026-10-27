@@ -3579,6 +3579,9 @@ int ObAlterTableResolver::resolve_alter_table_column_definition(AlterColumnSchem
               false,
               false,
               allow_has_default))) {
+  } else if (column.is_ai_column() && column.alter_type_ != OB_DDL_ADD_COLUMN) {
+    ret = OB_NOT_SUPPORTED;
+    LOG_USER_ERROR(OB_NOT_SUPPORTED, "modifying an existing column into an AI COLUMN");
   } else { // add column level constraint
     add_or_modify_check_cst_times_ += alter_table_schema.get_constraint_count() - cst_cnt;
   }

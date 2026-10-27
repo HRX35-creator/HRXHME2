@@ -7839,6 +7839,28 @@ static int append_ai_columns_after_alter(const ObTableSchema &origin,
     const AlterTableSchema &argument, ObTableSchema &table)
 {
   int ret = OB_SUCCESS;
+  // Existing expressions and durable row requests retain their resolved column
+  // names and types. Reject unsupported definition changes before persisting a
+  // schema that would leave those bindings dangling.
+  for (int64_t i = 0; OB_SUCC(ret) && i < origin.get_ai_column_count(); ++i) {
+    const AIColumnSchema &definition = *origin.get_ai_column_by_idx(i);
+    for (int64_t j = -1; OB_SUCC(ret) && j < definition.get_dependency_count(); ++j) {
+      const uint64_t id = j < 0 ? definition.column_id_ : definition.get_dependencies()[j];
+      const ObColumnSchemaV2 *previous = origin.get_column_schema(id);
+      const ObColumnSchemaV2 *current = table.get_column_schema(id);
+      bool same_type = false;
+      if (previous == nullptr) { ret = OB_ERR_UNEXPECTED;
+      } else if (current != nullptr
+          && OB_FAIL(ObTableSchema::check_is_exactly_same_type(*previous, *current, same_type))) {
+      } else if (current == nullptr || !same_type
+          || previous->get_column_name_str() != current->get_column_name_str()
+          || (j < 0 && (!current->is_ai_column() || !current->is_nullable()))) {
+        ret = OB_NOT_SUPPORTED;
+        LOG_USER_ERROR(OB_NOT_SUPPORTED,
+            "dropping, renaming or changing the type of an AI COLUMN or its dependencies");
+      }
+    }
+  }
   for (int64_t i = 0; OB_SUCC(ret) && i < argument.get_ai_column_count(); ++i) {
     AIColumnSchema definition;
     const AIColumnSchema &provisional = *argument.get_ai_column_by_idx(i);

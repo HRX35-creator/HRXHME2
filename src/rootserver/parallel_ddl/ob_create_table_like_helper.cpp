@@ -20,6 +20,7 @@
 #include "rootserver/parallel_ddl/ob_create_table_like_helper.h"
 #include "share/ob_debug_sync_point.h"
 #include "share/schema/ob_multi_version_schema_service.h"
+#include "share/schema/ai_column_schema.h"
 #include "rootserver/ob_domain_index_builder_util.h"
 #include "rootserver/ob_lob_meta_builder.h"
 #include "rootserver/ob_lob_piece_builder.h"
@@ -135,6 +136,19 @@ int ObCreateTableLikeHelper::generate_table_schema_()
       new_table_schema.set_table_name(arg_.new_table_name_);
       new_table_schema.set_database_id(new_database_id);
       new_table_schema.set_define_user_id(arg_.define_user_id_);
+      // A copied definition executes with the new creator's privileges. Rotate
+      // through owned copies so the source schema and its owners stay immutable.
+      const int64_t ai_column_count = new_table_schema.get_ai_column_count();
+      for (int64_t i = 0; OB_SUCC(ret) && i < ai_column_count; ++i) {
+        AIColumnSchema definition;
+        if (OB_FAIL(definition.assign(*new_table_schema.get_ai_column_by_idx(0)))) {
+        } else {
+          definition.owner_user_id_ = arg_.define_user_id_;
+          if (OB_FAIL(new_table_schema.remove_ai_column(definition.column_id_))) {
+          } else if (OB_FAIL(new_table_schema.add_ai_column(definition))) {
+          }
+        }
+      }
       new_table_schema.reset_foreign_key_infos();
       new_table_schema.reset_trigger_list();
       if (new_table_schema.has_constraint()) {
