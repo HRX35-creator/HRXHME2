@@ -402,6 +402,11 @@ int ObAlterTableResolver::resolve_action_list(const ParseNode &node)
       } else if (FALSE_IT(alter_table_stmt->inc_alter_table_action_count())) {
       } else {
         switch (action_node->type_) {
+        case T_AI_COLUMN_RETRY: {
+            // A sole RETRY is lowered to native DML by the parser.
+            ret = OB_NOT_SUPPORTED;
+            break;
+          }
         //deal with alter table option
         case T_ALTER_TABLE_OPTION: {
             alter_table_stmt->set_alter_table_option();

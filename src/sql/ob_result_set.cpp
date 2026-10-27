@@ -27,6 +27,9 @@
 #include "sql/monitor/show_trace/ob_show_trace.h"
 #include "sql/engine/table/ob_table_scan_op.h"
 #include "share/ob_ddl_checksum.h"
+#include "share/schema/ai_column_schema.h"
+#include "sql/session/ob_inner_sql_connection.h"
+#include "query/session/ob_inner_sql_connection_access.h"
 
 using namespace oceanbase::sql;
 using namespace oceanbase::common;
@@ -41,6 +44,92 @@ namespace sql
 {
 namespace
 {
+int append_ai_identifier(ObSqlString &sql, const ObString &name)
+{
+  int ret = sql.append("`");
+  for (int64_t i = 0; OB_SUCC(ret) && i < name.length(); ++i) {
+    ret = name.ptr()[i] == '`' ? sql.append("``") : sql.append(name.ptr() + i, 1);
+  }
+  if (OB_SUCC(ret)) { ret = sql.append("`"); }
+  return ret;
+}
+
+int check_ai_column_reads(ObExecContext &ctx, const ObPhysicalPlan &plan)
+{
+  int ret = OB_SUCCESS;
+  bool strict = false;
+  ObSQLSessionInfo *session = ctx.get_my_session();
+  if (plan.get_ai_column_reads().empty()) { return ret; }
+  if (session == nullptr || ctx.get_sql_ctx() == nullptr || ctx.get_sql_ctx()->schema_guard_ == nullptr) {
+    return OB_ERR_UNEXPECTED;
+  }
+  if (OB_FAIL(session->get_sys_variable(SYS_VAR_AI_COLUMN_STRICT_READ, strict)) || !strict) { return ret; }
+  ObSchemaGetterGuard &guard = *ctx.get_sql_ctx()->schema_guard_;
+  common::sqlclient::ObISQLConnectionGuard connection;
+  common::sqlclient::ObISQLConnection *previous = session->get_inner_conn();
+  ObIInnerSQLConnection *inner = as_inner_sql_connection(previous);
+  bool installed = false;
+  bool nested = false;
+  const bool previous_iter = ctx.get_das_ctx().iter_uncommitted_row_;
+  ctx.get_das_ctx().iter_uncommitted_row_ = true;
+  ObSQLSessionInfo::StmtSavedValue saved_session;
+  ObIInnerSQLConnection::SavedValue saved_connection;
+  if (inner != nullptr) {
+  } else if (OB_FAIL(query::ObInnerSQLConnectionAccess::create_connection_with_external_session(session, connection))) {
+  } else if ((inner = as_inner_sql_connection(connection.get_ptr())) == nullptr) { ret = OB_ERR_UNEXPECTED;
+  } else {
+    session->set_inner_conn(connection.get_ptr());
+    installed = true;
+  }
+  if (OB_SUCC(ret)) {
+    if (OB_FAIL(inner->begin_nested_session(saved_session, saved_connection, true))) {
+    } else { nested = true; }
+  }
+  for (int64_t i = 0; OB_SUCC(ret) && i < plan.get_ai_column_reads().count(); ++i) {
+    const auto &ref = plan.get_ai_column_reads().at(i);
+    const ObTableSchema *table = nullptr;
+    const ObDatabaseSchema *database = nullptr;
+    const AIColumnSchema *ai = nullptr;
+    const ObColumnSchemaV2 *state = nullptr;
+    ObSqlString sql;
+    if (OB_FAIL(guard.get_table_schema(ref.first, table))) {
+    } else if (table == nullptr || (ai = table->get_ai_column(ref.second)) == nullptr
+        || (state = table->get_column_schema(ai->state_column_id_)) == nullptr) { ret = OB_SCHEMA_EAGAIN;
+    } else if (OB_FAIL(guard.get_database_schema(table->get_database_id(), database))) {
+    } else if (database == nullptr) { ret = OB_SCHEMA_EAGAIN;
+    } else if (OB_FAIL(sql.append("SELECT 1 FROM "))) {
+    } else if (OB_FAIL(append_ai_identifier(sql, database->get_database_name_str()))) {
+    } else if (OB_FAIL(sql.append("."))) {
+    } else if (OB_FAIL(append_ai_identifier(sql, table->get_table_name_str()))) {
+    } else if (OB_FAIL(sql.append(" WHERE "))) {
+    } else if (OB_FAIL(append_ai_identifier(sql, state->get_column_name_str()))) {
+    } else if (OB_FAIL(sql.append(" IS NULL OR "))) {
+    } else if (OB_FAIL(append_ai_identifier(sql, state->get_column_name_str()))) {
+    } else if (OB_FAIL(sql.append("<>1 LIMIT 1"))) {
+    }
+    SMART_VAR(ObMySQLProxy::MySQLResult, result) {
+      if (OB_FAIL(ret)) {
+      } else if (OB_FAIL(inner->execute_read(sql.ptr(), result))) {
+      } else if (result.get_result() == nullptr) { ret = OB_ERR_UNEXPECTED;
+      } else if (OB_FAIL(result.get_result()->next())) {
+        if (ret == OB_ITER_END) { ret = OB_SUCCESS; }
+      } else {
+        ret = OB_AI_COLUMN_UNFINISHED;
+        LOG_USER_ERROR(OB_AI_COLUMN_UNFINISHED, ref.first, ref.second);
+      }
+      const int close_ret = result.close();
+      if (OB_SUCC(ret)) { ret = close_ret; }
+    }
+  }
+  if (nested) {
+    const int end_ret = inner->end_nested_session(saved_session, saved_connection);
+    if (OB_SUCC(ret)) { ret = end_ret; }
+  }
+  ctx.get_das_ctx().iter_uncommitted_row_ = previous_iter;
+  if (installed) { session->set_inner_conn(previous); }
+  return ret;
+}
+
 int find_table_scan_table_id(const ObOpSpec *spec, uint64_t &table_id)
 {
   int ret = OB_SUCCESS;
@@ -462,6 +551,7 @@ OB_INLINE int ObResultSet::do_open_plan(ObExecContext &ctx)
 
   if (OB_FAIL(ret)) {
   } else if (OB_FAIL(start_stmt())) {
+  } else if (OB_FAIL(check_ai_column_reads(ctx, *physical_plan_))) {
   } else {
     /* Set exec_result_ to the executor's runtime environment for returning data */
     /* execute plan,

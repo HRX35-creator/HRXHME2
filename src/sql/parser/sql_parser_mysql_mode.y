@@ -314,7 +314,7 @@ END_P SET_VAR DELIMITER
         MAX_UPDATES_PER_HOUR MAX_USER_CONNECTIONS MEDIUM MEMORY MEMTABLE MESSAGE_TEXT META MICROSECOND
         MIN MIN_MAX MIN_NGRAM_SIZE MIN_TOKEN_SIZE MINOR MIN_ROWS MINUS MINUTE MISMATCH MODE
         MODIFY MODULE MONTH MOVE MODEL MULTILINESTRING MULTIPOINT MULTIPOLYGON MULTIVALUE MUTEX
-        MYSQL_ERRNO MAXIMIZE MEMBER MINVALUE MY_NAME
+        MYSQL_ERRNO MAXIMIZE MEMBER MINVALUE MY_NAME RETRY
 
         NAME NAMES NAMESPACE NATIONAL NCHAR NDB NDBCLUSTER NESTED NEW NEXT NO NOAUDIT NONE NORMAL NOW NOWAIT NEVER NGRAM_TOKEN_SIZE
         NO_WAIT NULLS NUMBER NVARCHAR NTILE NTH_VALUE NETWORK NOPARALLEL
@@ -14769,8 +14769,21 @@ alter_with_opt_hint TABLE relation_factor alter_table_actions
 {
   ParseNode *table_actions = NULL;
   merge_nodes(table_actions, result, T_ALTER_TABLE_ACTION_LIST, $4);
-  malloc_non_terminal_node($$, result->malloc_pool_, T_ALTER_TABLE, 4, $3, table_actions, NULL, $1);
-  $$->value_ = 0;
+  if (table_actions != NULL && table_actions->num_child_ == 1
+      && table_actions->children_[0]->type_ == T_AI_COLUMN_RETRY) {
+    ParseNode *table = NULL;
+    ParseNode *from_list = NULL;
+    ParseNode *retry = table_actions->children_[0];
+    malloc_non_terminal_node(table, result->malloc_pool_, T_ORG, 4, $3, NULL, NULL, NULL);
+    malloc_non_terminal_node(from_list, result->malloc_pool_, T_TABLE_REFERENCES, 1, table);
+    /* RETRY executes through transactional UPDATE, with a dedicated native AST marker. */
+    malloc_non_terminal_node($$, result->malloc_pool_, T_UPDATE, 11,
+                             NULL, from_list, retry, retry->children_[1], NULL, NULL,
+                             NULL, $1, NULL, NULL, NULL);
+  } else {
+    malloc_non_terminal_node($$, result->malloc_pool_, T_ALTER_TABLE, 4, $3, table_actions, NULL, $1);
+    $$->value_ = 0;
+  }
 }
 ;
 
@@ -14804,7 +14817,11 @@ alter_table_action
 ;
 
 alter_table_action:
-opt_set table_option_list_space_seperated
+RETRY AI COLUMN column_name opt_where
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_AI_COLUMN_RETRY, 2, $4, $5);
+}
+| opt_set table_option_list_space_seperated
 {
   (void)$1;
   merge_nodes($$, result, T_TABLE_OPTION_LIST, $2);
@@ -17895,6 +17912,7 @@ ACCOUNT
 |       MAP
 |       MASTER
 |       MASTER_AUTO_POSITION
+|       RETRY
 |       MASTER_CONNECT_RETRY
 |       MASTER_DELAY
 |       MASTER_HEARTBEAT_PERIOD

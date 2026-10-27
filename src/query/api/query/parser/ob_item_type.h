@@ -2278,6 +2278,7 @@ typedef enum ObItemType
   T_FLUSH_PRIVILEGES = 4920,
   T_AI_COLUMN = 4921,
   T_AI_COLUMN_OPTIONS = 4922,
+  T_AI_COLUMN_RETRY = 4923,
   T_MAX //Attention: add a new type before T_MAX
 } ObItemType;
 

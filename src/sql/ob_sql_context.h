@@ -554,6 +554,7 @@ struct ObQueryCtx
 public:
   ObQueryCtx()
     : question_marks_count_(0),
+      ai_column_reads_(),
       calculable_items_(),
       ab_param_exprs_(),
       fetch_cur_time_(true),
@@ -597,6 +598,7 @@ public:
   void reset()
   {
     question_marks_count_ = 0;
+    ai_column_reads_.reset();
     calculable_items_.reset();
     fetch_cur_time_ = true;
     is_contain_virtual_table_ = false;
@@ -674,6 +676,7 @@ public:
   typedef common::ObSEArray<ObHiddenColumnItem, CALCULABLE_EXPR_NUM, common::ModulePageAllocator, true> CalculableItems;
 public:
   int64_t question_marks_count_;
+  common::ObSEArray<std::pair<uint64_t, uint64_t>, 4> ai_column_reads_;
   CalculableItems calculable_items_;
   //array binding param exprs, mark the all array binding param expr in the batch stmt
   common::ObSEArray<ObRawExpr*, 4, common::ModulePageAllocator, true> ab_param_exprs_;

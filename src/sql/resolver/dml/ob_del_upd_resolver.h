@@ -243,6 +243,7 @@ private:
   bool is_column_specify_;
 protected:
   bool is_resolve_insert_update_;
+  uint64_t ai_retry_column_id_;
 };
 
 } /* namespace sql */

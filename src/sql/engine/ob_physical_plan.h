@@ -83,6 +83,9 @@ public:
   void set_contains_assignment(bool v) {is_contains_assignment_ = v;}
   int set_vars(const common::ObIArray<ObVarInfo> &vars);
   const common::ObIArray<ObVarInfo> &get_vars() const { return vars_; }
+  const common::ObIArray<std::pair<uint64_t, uint64_t>> &get_ai_column_reads() const { return ai_column_reads_; }
+  int set_ai_column_reads(const common::ObIArray<std::pair<uint64_t, uint64_t>> &reads)
+  { return ai_column_reads_.assign(reads); }
   /**
    *
    * @param[in] table_row_count_list  An array of row counts for tables involved in the plan, used solely to eliminate plans based on changes in table row counts
@@ -415,6 +418,7 @@ private:
   share::schema::ObStmtNeedPrivs stmt_need_privs_;
   // Involved system variables and user variables
   common::ObFixedArray<ObVarInfo, common::ObIAllocator> vars_;
+  common::ObFixedArray<std::pair<uint64_t, uint64_t>, common::ObIAllocator> ai_column_reads_;
   ObSqlExpressionFactory sql_expression_factory_;
   ObExprOperatorFactory expr_op_factory_;
   stmt::StmtType literal_stmt_type_; // meaning reference ObBasicStmt corresponding definition

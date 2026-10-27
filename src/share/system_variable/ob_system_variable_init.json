@@ -10988,5 +10988,18 @@
     "info_cn": "启用受 secure_file_priv 限制的本地文件 SQL",
     "background_cn": "本地文件扫描默认关闭",
     "ref_url": ""
+  },
+  "ai_column_strict_read": {
+    "id": 10755,
+    "name": "ai_column_strict_read",
+    "default_value": "0",
+    "base_value": "0",
+    "data_type": "bool",
+    "info": "reject reads of AI columns with pending or failed rows",
+    "flags": "GLOBAL | SESSION | NEED_SERIALIZE | INFLUENCE_PLAN | MYSQL_ONLY",
+    "publish_version": "",
+    "info_cn": "读取 AI 列前检查整列状态",
+    "background_cn": "默认关闭；开启后只检查语句引用的 AI 列",
+    "ref_url": ""
   }
 }

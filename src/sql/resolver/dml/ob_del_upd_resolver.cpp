@@ -61,7 +61,8 @@ ObDelUpdResolver::ObDelUpdResolver(ObResolverParams &params)
   : ObDMLResolver(params),
     insert_column_ids_(),
     is_column_specify_(false),
-    is_resolve_insert_update_(false)
+    is_resolve_insert_update_(false),
+    ai_retry_column_id_(OB_INVALID_ID)
 {
   // TODO Auto-generated constructor stub
 }
@@ -222,7 +223,10 @@ int ObDelUpdResolver::resolve_ai_column_assignments(ObTableAssignment &assigns)
     for (int64_t a = 0; OB_SUCC(ret) && a < schema->get_ai_column_count(); ++a) {
       const AIColumnSchema &ai = *schema->get_ai_column_by_idx(a);
       ObRawExpr *changed = nullptr;
-      for (int64_t i = 0; OB_SUCC(ret) && i < explicit_count; ++i) {
+      if (ai_retry_column_id_ == ai.column_id_) {
+        ret = ObRawExprUtils::build_const_bool_expr(params_.expr_factory_, changed, true);
+      }
+      for (int64_t i = 0; OB_SUCC(ret) && ai_retry_column_id_ == OB_INVALID_ID && i < explicit_count; ++i) {
         const ObAssignment &assignment = assigns.assignments_.at(i);
         const uint64_t id = assignment.column_expr_->get_column_id();
         const ObColumnSchemaV2 *col = schema->get_column_schema(id);
@@ -708,7 +712,7 @@ int ObDelUpdResolver::resolve_additional_assignments(ObIArray<ObTableAssignment>
           continue;
         } else if (ai_table && !generated_phase &&
                    (column_schema->is_ai_column() || column_schema->is_hidden()
-                    || params_.ai_column_internal_write_)) {
+                    || params_.ai_column_internal_write_ || ai_retry_column_id_ != OB_INVALID_ID)) {
           continue;
         } else if (FALSE_IT(column_id = column_schema->get_column_id())) {
           //do nothing
