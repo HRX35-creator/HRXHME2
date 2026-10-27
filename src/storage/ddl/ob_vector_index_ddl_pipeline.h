@@ -458,7 +458,9 @@ void ObVectorIndexBuildAndWritePipeline<BuildOp, WriteOp>::postprocess(int &ret_
   if (OB_SUCCESS != ret_code && OB_NOT_NULL(get_dag())) {
     ObDDLIndependentDag *dag = static_cast<ObDDLIndependentDag *>(get_dag());
     dag->set_ret_code(ret_code);
-    ret_code = OB_SUCCESS;
+    // The scheduler uses the task result to fail the DAG. Keeping only the
+    // auxiliary DDL ret_code_ lets a failed vector build publish an empty
+    // snapshot and report CREATE INDEX success.
   }
 }
 
