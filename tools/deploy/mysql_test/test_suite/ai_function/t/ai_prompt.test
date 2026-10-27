@@ -7,8 +7,7 @@ connection default;
 # 正确
 select ai_prompt('{0}+{1}={2} 吗？请回答true或false','1');
 
-# not support
---error 1235 
+# JSON arguments
 select ai_prompt('{0}+{1}={2} 吗？请回答true或false',json_object("a","1"));
 
 
@@ -62,13 +61,9 @@ insert into t1 values(7, 'AA', 'bb', 'CC', 'dd');
 
 --error 5083
 select ai_prompt(nr) from t1;
---error 5083
 select ai_prompt(a) from t1;
---error 5083
 select ai_prompt(b) from t1;
---error 5083
 select ai_prompt(c) from t1;
---error 5083
 select ai_prompt(d) from t1;
 
 drop table t1;
@@ -236,3 +231,10 @@ WITH t3 AS (
 SELECT * FROM t3;
 
 drop table t1;
+# JSON arrays and nested prompt values survive SQL JSON serialization.
+select json_length(json_extract(ai_prompt('{0}', json_array(1,2)), '$.args[0]')) as array_size;
+select json_unquote(json_extract(ai_prompt('{0}', ai_prompt('hello {0}', 'world')), '$.args[0].template')) as nested_template;
+create table ai_prompt_lob (template text, value longtext);
+insert into ai_prompt_lob values ('Unicode 你好 {0}', repeat('x', 70000));
+select length(json_unquote(json_extract(ai_prompt(template,value), '$.args[0]'))) as argument_length from ai_prompt_lob;
+drop table ai_prompt_lob;

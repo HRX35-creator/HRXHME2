@@ -1,0 +1,61 @@
+# Requires the committee Mock AI Service on 127.0.0.1:8000.
+# Responses must be deterministic for a given model/input/dimension.
+connection default;
+--disable_query_log
+call DBMS_AI_SERVICE.CREATE_AI_MODEL('enh_complete', '{"type": "completion", "model_name": "mock-complete"}');
+call DBMS_AI_SERVICE.CREATE_AI_MODEL_ENDPOINT('enh_complete_ep', '{"ai_model_name": "enh_complete", "url": "http://127.0.0.1:8000/v1/chat/completions", "provider": "openai", "access_key": "mock-key"}');
+call DBMS_AI_SERVICE.CREATE_AI_MODEL('enh_embed', '{"type": "dense_embedding", "model_name": "mock-embed"}');
+call DBMS_AI_SERVICE.CREATE_AI_MODEL_ENDPOINT('enh_embed_ep', '{"ai_model_name": "enh_embed", "url": "http://127.0.0.1:8000/v1/embeddings", "provider": "openai", "access_key": "mock-key"}');
+call DBMS_AI_SERVICE.CREATE_AI_MODEL('enh_rerank', '{"type": "rerank", "model_name": "mock-rerank"}');
+call DBMS_AI_SERVICE.CREATE_AI_MODEL_ENDPOINT('enh_rerank_ep', '{"ai_model_name": "enh_rerank", "url": "http://127.0.0.1:8000/v1/rerank", "provider": "cohere", "access_key": "mock-key"}');
+call DBMS_AI_SERVICE.CREATE_AI_MODEL('enh_ollama', '{"type": "completion", "model_name": "mock-ollama"}');
+call DBMS_AI_SERVICE.CREATE_AI_MODEL_ENDPOINT('enh_ollama_ep', '{"ai_model_name": "enh_ollama", "url": "http://127.0.0.1:8000/api/generate", "provider": "oLlAmA", "access_key": ""}');
+call DBMS_AI_SERVICE.CREATE_AI_MODEL('enh_ollama_embed', '{"type": "dense_embedding", "model_name": "mock-ollama_embed"}');
+call DBMS_AI_SERVICE.CREATE_AI_MODEL_ENDPOINT('enh_ollama_embed_ep', '{"ai_model_name": "enh_ollama_embed", "url": "http://127.0.0.1:8000/api/embed", "provider": "ollama", "access_key": ""}');
+select length(ai_complete('enh_complete', 'hello')) > 0 as plain_completion;
+select length(ai_complete('enh_complete', 'hello', NULL)) > 0 as null_config;
+select length(ai_complete('enh_complete', 'hello', json_object('temperature', 0, 'max_tokens', 16))) > 0 as json_config;
+select length(ai_complete('enh_complete', ai_prompt('{0} {0} {1}', json_array(1, 2), ai_prompt('nested {0}', json_object('x', 'y'))))) > 0 as nested_json_prompt;
+create table enh_text(template text, content longtext);
+insert into enh_text values ('{0}{0}', repeat('x', 70000));
+select length(ai_complete('enh_complete', ai_prompt(template, content))) > 0 as long_prompt from enh_text;
+select json_length(ai_embed('enh_embed', 'hello')) > 0 as default_dimension;
+select json_length(ai_embed('enh_embed', 'hello', 4)) = 4 as explicit_dimension;
+select ai_embed('enh_embed', NULL) is NULL as null_embedding;
+select length(ai_complete('enh_ollama', 'hello')) > 0 as native_completion;
+select json_length(ai_embed('enh_ollama_embed', 'hello')) > 0 as native_embedding;
+call DBMS_AI_SERVICE.ALTER_AI_MODEL_ENDPOINT('enh_ollama_ep', '{"provider":"OLLAMA"}');
+select count(*) = 1 as endpoint_alter from oceanbase.DBA_OB_AI_MODEL_ENDPOINTS where endpoint_name = 'enh_ollama_ep' and upper(provider) = 'OLLAMA';
+select json_length(ai_rerank('enh_rerank', 'hello', json_array('hello', 'world'))) = 2 as string_rerank;
+select json_length(ai_rerank('enh_rerank', 'hello', json_array(json_object('id', 7, 'text', 'hello'), json_object('id', 9, 'text', 'world')), 'text')) = 2 as object_rerank;
+create table enh_digits(n int primary key);
+insert into enh_digits values (0),(1),(2),(3),(4),(5),(6),(7),(8),(9);
+# Compare both rerank paths across the 20-document request boundary.
+set @docs = (select json_arrayagg(json_object('id', a.n + b.n * 10 + 100, 'text', concat('doc-', a.n + b.n * 10))) from enh_digits a, enh_digits b where a.n + b.n * 10 < 25);
+set @texts = json_extract(@docs, '$[*].text');
+set @string_ranks = ai_rerank('enh_rerank', 'hello', @texts);
+set @object_ranks = ai_rerank('enh_rerank', 'hello', @docs, 'text');
+select json_length(@string_ranks) = 25 and json_length(@object_ranks) = 25 as rerank_multiple_batches;
+select count(*) = 0 as rerank_original_ids from enh_digits a, enh_digits b where a.n + b.n * 10 < 25 and not (json_extract(@object_ranks, concat('$[', a.n + b.n * 10, '].id')) <=> json_extract(@docs, concat('$[', json_unquote(json_extract(@string_ranks, concat('$[', a.n + b.n * 10, '].index'))), '].id')));
+select count(*) = 0 as rerank_descending from enh_digits a, enh_digits b where a.n + b.n * 10 < 24 and cast(json_extract(@string_ranks, concat('$[', a.n + b.n * 10, '].relevance_score')) as double) < cast(json_extract(@string_ranks, concat('$[', a.n + b.n * 10 + 1, '].relevance_score')) as double);
+create table enh_rows(id int primary key, content longtext, dim int);
+insert into enh_rows select a.n + b.n * 10 + c.n * 100, if(mod(a.n + b.n * 10 + c.n * 100, 7) = 0, NULL, concat('input-', a.n + b.n * 10 + c.n * 100)), 4 + mod(a.n + b.n * 10 + c.n * 100, 3) from enh_digits a, enh_digits b, enh_digits c where a.n + b.n * 10 + c.n * 100 < 260;
+create table enh_vectors as select id, ai_embed('enh_embed', content, dim) as vector from enh_rows;
+select count(*) = 260 as batch_count from enh_vectors;
+select count(*) = 0 as batch_null_mapping from enh_rows r join enh_vectors v using(id) where (r.content is NULL) <> (v.vector is NULL);
+select count(*) = 0 as batch_dimensions from enh_vectors v join enh_rows r using(id) where vector is not NULL and json_length(vector) <> r.dim;
+create table enh_filtered as select id, ai_embed('enh_embed', content, dim) as vector from enh_rows where mod(id, 3) = 0 order by id limit 23;
+select count(*) = 23 as filtered_limit from enh_filtered;
+select count(*) = 0 as batch_row_mapping from enh_filtered f join enh_vectors v using(id) where not (f.vector <=> v.vector);
+drop table enh_filtered, enh_vectors, enh_rows, enh_digits, enh_text;
+call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('enh_complete_ep');
+call DBMS_AI_SERVICE.DROP_AI_MODEL('enh_complete');
+call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('enh_embed_ep');
+call DBMS_AI_SERVICE.DROP_AI_MODEL('enh_embed');
+call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('enh_rerank_ep');
+call DBMS_AI_SERVICE.DROP_AI_MODEL('enh_rerank');
+call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('enh_ollama_ep');
+call DBMS_AI_SERVICE.DROP_AI_MODEL('enh_ollama');
+call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('enh_ollama_embed_ep');
+call DBMS_AI_SERVICE.DROP_AI_MODEL('enh_ollama_embed');
+--enable_query_log

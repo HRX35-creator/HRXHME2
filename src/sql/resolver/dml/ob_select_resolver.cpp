@@ -16,6 +16,7 @@
 
 #define USING_LOG_PREFIX SQL_RESV
 #include "sql/resolver/dml/ob_select_resolver.h"
+#include "sql/engine/basic/file_scan_utils.h"
 #include "sql/resolver/dml/ob_del_upd_resolver.h"
 #include "share/ob_time_utility2.h"
 #include "sql/resolver/dml/ob_aggr_expr_push_up_analyzer.h"
@@ -3105,7 +3106,66 @@ int ObSelectResolver::resolve_into_clause(const ParseNode *node)
       new(into_item) ObSelectIntoItem();
       into_item->into_type_ = node->type_;
       if (T_INTO_OUTFILE == node->type_) { // into outfile
-        if (is_in_set_query()) {
+        if (node->value_ == 1) {
+          bool enabled = false;
+          file_sql::Options options;
+          if (OB_FAIL(session_info_->get_sys_variable(share::SYS_VAR_ENABLE_FILE_SQL, enabled))) {
+          } else if (!enabled) {
+            ret = OB_NOT_SUPPORTED;
+            LOG_USER_ERROR(OB_NOT_SUPPORTED, "COPY requires enable_file_sql");
+          } else if (OB_FAIL(resolve_into_const_node(node->children_[0], into_item->outfile_name_))) {
+          }
+          std::vector<std::string> seen;
+          size_t option_nodes = 0;
+          auto visit = [&](auto &&self, const ParseNode *n) -> void {
+            if (OB_FAIL(ret) || !n) return;
+            if (++option_nodes > 32) { ret = OB_INVALID_ARGUMENT; return; }
+            if (n->type_ != T_LINK_NODE || n->num_child_ != 2 || !n->children_[0] || !n->children_[1]) { ret = OB_INVALID_ARGUMENT; return; }
+            if (n->children_[0]->type_ == T_LINK_NODE) { self(self, n->children_[0]); self(self, n->children_[1]); return; }
+            std::string key(n->children_[0]->str_value_, n->children_[0]->str_len_);
+            for (char &c : key) if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
+            if (key == "delim") key = "delimiter";
+            if (key == "null") key = "nullstr";
+            for (const auto &old : seen) if (old == key) ret = OB_INVALID_ARGUMENT;
+            seen.push_back(key);
+            const ParseNode *v = n->children_[1];
+            if (OB_FAIL(ret)) return;
+            if (key == "header") {
+              if ((v->type_ != T_BOOL && v->type_ != T_INT) || (v->value_ != 0 && v->value_ != 1)) ret = OB_INVALID_ARGUMENT;
+              else options.header = v->value_ != 0;
+            } else {
+              ObString value;
+              if (v->type_ != T_VARCHAR) ret = OB_INVALID_ARGUMENT;
+              else if (OB_FAIL(resolve_str_const(*v, value))) {
+              } else if (key == "nullstr") options.null_text.assign(value.ptr(), value.length());
+              else if (key == "format" && value.case_compare("csv") == 0) {
+              } else if (value.length() != 1) ret = OB_INVALID_ARGUMENT;
+              else if (key == "delimiter") options.delimiter = value.ptr()[0];
+              else if (key == "quote") options.quote = value.ptr()[0];
+              else if (key == "escape") options.escape = value.ptr()[0];
+              else ret = OB_INVALID_ARGUMENT;
+            }
+          };
+          visit(visit, node->children_[1]);
+          // OUTFILE never has user variables. This serialized configuration is
+          // reserved for COPY and travels through the native SELECT INTO plan.
+          std::vector<std::string> config = {"file_sql_copy", options.header ? "1" : "0",
+            std::string(1, options.delimiter), std::string(1, options.quote),
+            std::string(1, options.escape), options.null_text};
+          for (int64_t i = 0; i < select_stmt->get_select_item_size(); ++i) {
+            const auto &item = select_stmt->get_select_item(i);
+            const ObString &name = item.alias_name_.empty() ? item.expr_name_ : item.alias_name_;
+            config.emplace_back(name.ptr(), name.length());
+          }
+          for (const auto &part : config) {
+            ObString copy;
+            if (OB_FAIL(ret)) break;
+            if (OB_FAIL(ob_write_string(*allocator_, ObString(static_cast<int32_t>(part.size()), part.data()), copy))) {
+            } else if (OB_FAIL(into_item->user_vars_.push_back(copy))) {
+            }
+          }
+          params_.query_ctx_->has_file_sql_ = true;
+        } else if (is_in_set_query()) {
           ret = OB_INAPPROPRIATE_INTO;
         } else if (node->num_child_ == 3 && NULL != node->children_[1]
             && T_EXTERNAL_FILE_FORMAT == node->children_[1]->type_) { // Handle with `FORMAT`

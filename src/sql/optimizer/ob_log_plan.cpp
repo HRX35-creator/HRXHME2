@@ -6824,6 +6824,17 @@ int ObLogPlan::allocate_select_into_as_top(ObLogicalOperator *&old_top)
       select_into->set_outfile_name(into_item->outfile_name_);
       select_into->set_field_str(into_item->field_str_);
       select_into->set_line_str(into_item->line_str_);
+      if (into_item->into_type_ == T_INTO_OUTFILE && !into_item->user_vars_.empty()
+          && into_item->user_vars_.at(0) == "file_sql_copy") {
+        // Set-query output names are finalized after resolving its INTO clause.
+        // Refresh names from the final SELECT list before generating the plan.
+        while (into_item->user_vars_.count() > 6) into_item->user_vars_.pop_back();
+        for (int64_t i = 0; OB_SUCC(ret) && i < stmt->get_select_item_size(); ++i) {
+          const auto &item = stmt->get_select_item(i);
+          const ObString &name = item.alias_name_.empty() ? item.expr_name_ : item.alias_name_;
+          if (OB_FAIL(into_item->user_vars_.push_back(name))) {}
+        }
+      }
       select_into->set_user_vars(into_item->user_vars_);
       select_into->set_is_optional(into_item->is_optional_);
       select_into->set_closed_cht(into_item->closed_cht_);

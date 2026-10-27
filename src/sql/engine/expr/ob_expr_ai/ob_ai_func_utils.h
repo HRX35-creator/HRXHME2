@@ -284,6 +284,9 @@ public:
   static bool is_completion_type(const ObAIFuncExprInfo *info) {return info->type_ == share::EndpointType::COMPLETION;}
   static bool is_dense_embedding_type(const ObAIFuncExprInfo *info) {return info->type_ == share::EndpointType::DENSE_EMBEDDING;}
   static bool is_rerank_type(const ObAIFuncExprInfo *info) {return info->type_ == share::EndpointType::RERANK;}
+  static int validate_embeddings(ObIJsonBase *value, int64_t count = -1, int64_t dimension = 0);
+  static int validate_rerank(ObIAllocator &allocator, ObIJsonBase *value,
+                             int64_t count, ObJsonArray *&result);
   static int check_info_type_completion(const ObAIFuncExprInfo *info);
   static int check_info_type_dense_embedding(const ObAIFuncExprInfo *info);
   static int check_info_type_rerank(const ObAIFuncExprInfo *info);

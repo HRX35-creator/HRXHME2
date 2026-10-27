@@ -16,6 +16,8 @@
 
 #define USING_LOG_PREFIX SQL_ENG
 #include "ob_json_table_op.h"
+#include "file_scan_utils.h"
+#include <new>
 #include "sql/engine/expr/ob_expr_multi_mode_func_helper.h"
 #include "sql/engine/expr/ob_expr_json_value.h"
 #include "sql/engine/expr/ob_expr_json_query.h"
@@ -335,6 +337,8 @@ OB_DEF_SERIALIZE(ObJsonTableSpec)
     }
   }
   
+  OB_UNIS_ENCODE(table_type_);
+  OB_UNIS_ENCODE(namespace_def_);
   return ret;
 }
 
@@ -362,6 +366,8 @@ OB_DEF_SERIALIZE_SIZE(ObJsonTableSpec)
       OB_UNIS_ADD_LEN(value_exprs_.at(i));
     }
   }
+  OB_UNIS_ADD_LEN(table_type_);
+  OB_UNIS_ADD_LEN(namespace_def_);
   return len;
 }
 
@@ -416,6 +422,8 @@ OB_DEF_DESERIALIZE(ObJsonTableSpec)
   } else if (OB_FAIL(value_exprs_.init(1))) {
   } else if (OB_FAIL(value_exprs_.push_back(value_expr))) {
   }
+  OB_UNIS_DECODE(table_type_);
+  OB_UNIS_DECODE(namespace_def_);
   return ret;
 }
 
@@ -581,12 +589,107 @@ int ObJsonTableOp::generate_column_trees(JtColTreeNode*& root)
   return ret;
 }
 
+
+int ObJsonTableOp::open_file()
+{
+  int ret = OB_SUCCESS;
+  bool enabled = false;
+  ObString allowed;
+  auto session = get_exec_ctx().get_my_session();
+  const auto &config = MY_SPEC.namespace_def_;
+  if (!session || config.count() != 8 || config.at(4).length() != 1
+      || config.at(5).length() != 1 || config.at(6).length() != 1) {
+    ret = OB_INVALID_ARGUMENT;
+  } else if (OB_FAIL(session->get_sys_variable(share::SYS_VAR_ENABLE_FILE_SQL, enabled))) {
+  } else if (!enabled) {
+    ret = OB_NOT_SUPPORTED;
+    LOG_USER_ERROR(OB_NOT_SUPPORTED, "file SQL is disabled");
+  } else if (OB_FAIL(session->get_secure_file_priv(allowed))) {
+  } else {
+    file_sql::Options options;
+    options.header = config.at(3) == "1";
+    options.delimiter = config.at(4).ptr()[0];
+    options.quote = config.at(5).ptr()[0];
+    options.escape = config.at(6).ptr()[0];
+    options.null_text.assign(config.at(7).ptr(), config.at(7).length());
+    file_reader_ = new (std::nothrow) file_sql::Reader(config.at(2) == "0"
+        ? file_sql::Reader::Format::Csv : config.at(2) == "3"
+          ? file_sql::Reader::Format::Glob : config.at(2) == "2"
+            ? file_sql::Reader::Format::Parquet : file_sql::Reader::Format::Jsonl, options);
+    if (file_reader_) file_reader_->set_cancel_check([this]() { return get_exec_ctx().check_status() != OB_SUCCESS; });
+    if (!file_reader_) ret = OB_ALLOCATE_MEMORY_FAILED;
+    else if (!file_reader_->open(std::string(config.at(0).ptr(), config.at(0).length()),
+                                std::string(allowed.ptr(), allowed.length()))
+             || file_reader_->identity() != std::string(config.at(1).ptr(), config.at(1).length())
+             || !file_reader_->infer()) {
+      ret = OB_INVALID_ARGUMENT;
+      LOG_USER_ERROR(OB_NOT_SUPPORTED, "file changed or access denied since schema inference");
+    } else {
+      std::vector<size_t> projection;
+      for (int64_t i = 0; i < MY_SPEC.cols_def_.count(); ++i) {
+        auto col = MY_SPEC.cols_def_.at(i);
+        if (col && col->output_column_idx_ >= 0) {
+          for (size_t j = 0; j < file_reader_->columns().size(); ++j) {
+            const auto &name = file_reader_->columns()[j].name;
+            if (col->col_name_ == ObString(static_cast<int32_t>(name.size()), name.data())) projection.push_back(j);
+          }
+        }
+      }
+      file_reader_->project(projection);
+    }
+  }
+  return ret;
+}
+
+int ObJsonTableOp::next_file_row()
+{
+  int ret = OB_SUCCESS;
+  std::vector<file_sql::Cell> row;
+  if (!file_reader_) ret = OB_ERR_UNEXPECTED;
+  else if (!file_reader_->next(row)) {
+    if (file_reader_->error().message.empty()) ret = OB_ITER_END;
+    else {
+      ret = OB_NOT_SUPPORTED;
+      LOG_WARN("file SQL scan failed", "reason", file_reader_->error().message.c_str(),
+               "row", file_reader_->error().row, "column", file_reader_->error().column);
+      LOG_USER_ERROR(OB_NOT_SUPPORTED, file_reader_->error().diagnostic().c_str());
+    }
+  } else if (OB_FAIL(root_->reset(&jt_ctx_))) {
+  } else {
+    jt_ctx_.row_alloc_.reuse();
+    clear_evaluated_flag();
+    reset_columns();
+    std::string json = "[";
+    for (size_t i = 0; i < row.size(); ++i) {
+      if (i) json += ',';
+      if (row[i].type == file_sql::Type::Null) json += "null";
+      else if (file_reader_->columns()[i].type == file_sql::Type::Boolean) {
+        json += row[i].text == "true" || row[i].text == "TRUE" ? "1" : "0";
+      } else json += file_sql::json_string(row[i].text);
+    }
+    json += ']';
+    ObIJsonBase *input = nullptr;
+    MultimodeAlloctor allocator(jt_ctx_.row_alloc_);
+    if (OB_FAIL(ObJsonBaseFactory::get_json_base(&allocator,
+          ObString(static_cast<int32_t>(json.size()), json.data()), ObJsonInType::JSON_TREE,
+          ObJsonInType::JSON_TREE, input, ObJsonParser::JSN_DEFAULT_FLAG,
+          ObJsonExprHelper::get_json_max_depth_config()))) {
+    } else {
+      input_ = input;
+      bool is_null = false;
+      ret = root_->get_next_row(input_, &jt_ctx_, is_null);
+    }
+  }
+  return ret;
+}
+
 int ObJsonTableOp::inner_open()
 {
   INIT_SUCC(ret);
   if (OB_FAIL(init())) {
   } else if (MY_SPEC.value_exprs_.empty()) {
     ret = OB_ERR_UNEXPECTED;
+  } else if (MY_SPEC.table_type_ == FILE_TABLE_TYPE && OB_FAIL(open_file())) {
   } else if (OB_FAIL(root_->open(&jt_ctx_))) {
   } else {
     is_evaled_ = false;
@@ -598,7 +701,9 @@ int ObJsonTableOp::inner_open()
 int ObJsonTableOp::inner_rescan()
 {
   int ret = OB_SUCCESS;
-  if (OB_FAIL(ObOperator::inner_rescan())) {
+  if (file_reader_ && !file_reader_->rescan()) {
+    ret = OB_INVALID_ARGUMENT;
+  } else if (OB_FAIL(ObOperator::inner_rescan())) {
   } else {
     jt_ctx_.row_alloc_.reuse();
   }
@@ -685,6 +790,8 @@ int ObJsonTableOp::init()
 int ObJsonTableOp::inner_close()
 {
   INIT_SUCC(ret);
+  delete file_reader_;
+  file_reader_ = nullptr;
   if (OB_NOT_NULL(root_)) {
     if (OB_FAIL(root_->reset(&jt_ctx_))) {
     }
@@ -722,6 +829,8 @@ void ScanNode::reset_reg_columns(JtScanCtx* ctx)
 
 void ObJsonTableOp::destroy()
 {
+  delete file_reader_;
+  file_reader_ = nullptr;
   ObOperator::destroy();
 }
 
@@ -1402,6 +1511,9 @@ int ObJsonTableOp::inner_get_next_row()
 {
   INIT_SUCC(ret);
   bool is_root_null = false;
+  if (MY_SPEC.table_type_ == FILE_TABLE_TYPE) {
+    return next_file_row();
+  }
   if (!(jt_ctx_.is_json_table_func()
         || jt_ctx_.is_unnest_table_func())) {
     ret = OB_ERR_UNEXPECTED;

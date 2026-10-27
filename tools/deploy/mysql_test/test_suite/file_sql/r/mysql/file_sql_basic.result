@@ -1,0 +1,40 @@
+id	name	active	day	missing
+1	上海	1	2024-02-29	NULL
+2	quote "two"	0	2024-03-01	NULL
+3	line
+break	1	2024-03-02	NULL
+count(*)	sum(amount)	avg(amount)	min(amount)	max(amount)
+3	30.5	15.25	10.5	20.0
+active	count(*)
+0	1
+1	2
+column_name	column_type	null	key	default	extra
+id	BIGINT	YES	NULL	NULL	NULL
+name	VARCHAR	YES	NULL	NULL	NULL
+amount	DOUBLE	YES	NULL	NULL	NULL
+active	BOOLEAN	YES	NULL	NULL	NULL
+day	DATE	YES	NULL	NULL	NULL
+missing	NULL	YES	NULL	NULL	NULL
+id	city	extra
+1	北京	NULL
+3	Paris	1
+4	NULL	NULL
+count(*)	sum(id)	sum(amount)
+5	15	3.75
+id	city
+1	北京
+2	NULL
+3	Paris
+id	name
+1	one
+2	NULL
+3	three
+count(*)
+1
+id	name
+1	上海
+2	quote "two"
+3	line
+break
+ordinary_sql
+1

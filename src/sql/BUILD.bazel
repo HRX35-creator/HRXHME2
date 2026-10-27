@@ -421,3 +421,27 @@ cc_library(
     tags = ["manual"],
     visibility = ["//src/observer:__pkg__"],
 )
+
+cc_library(
+    name = "ai_function_test_headers",
+    testonly = True,
+    deps = _SQL_RUNTIME_IMPLEMENTATION_DEPS,
+    tags = ["manual"],
+    visibility = ["//unittest/sql/engine/expr:__pkg__"],
+)
+
+cc_library(
+    name = "file_scan_utils",
+    srcs = ["engine/basic/file_scan_utils.cpp", "engine/basic/file_parquet_reader.cpp"],
+    hdrs = ["engine/basic/file_scan_utils.h", "engine/basic/file_parquet_reader.h"],
+    includes = [".."],
+    visibility = ["//unittest/sql/engine/basic:__pkg__"],
+)
+
+cc_library(
+    name = "file_sql_test_headers",
+    testonly = True,
+    deps = _SQL_RUNTIME_IMPLEMENTATION_DEPS,
+    tags = ["manual"],
+    visibility = ["//unittest/sql/parser:__pkg__"],
+)

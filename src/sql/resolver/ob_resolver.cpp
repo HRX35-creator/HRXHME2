@@ -1,3 +1,5 @@
+#include "sql/parser/ob_parser.h"
+#include <string>
 /*
  * Copyright (c) 2025 OceanBase.
  *
@@ -473,7 +475,64 @@ int ObResolver::resolve(IsPrepared if_prepared, const ParseNode &parse_tree, ObS
         break;
       }
       case T_EXPLAIN: {
-        REGISTER_STMT_RESOLVER(Explain);
+        bool contains_file = false;
+        auto inspect = [&](auto &&self, const ParseNode *n) -> void {
+          if (!n || contains_file) return;
+          if (n->type_ == T_FILE_TABLE_EXPRESSION) contains_file = true;
+          else for (int i = 0; i < n->num_child_; ++i) self(self, n->children_[i]);
+        };
+        if (real_parse_tree->str_len_ == 8 && real_parse_tree->str_value_
+            && MEMCMP(real_parse_tree->str_value_, "DESCRIBE", 8) == 0) inspect(inspect, real_parse_tree);
+        if (!contains_file) {
+          REGISTER_STMT_RESOLVER(Explain);
+        } else if (real_parse_tree->num_child_ != 5 || !real_parse_tree->children_[4]
+                   || real_parse_tree->children_[4]->type_ != T_SELECT) {
+          ret = OB_INVALID_ARGUMENT;
+        } else {
+          ObStmt *query = nullptr;
+          if (OB_FAIL(select_stmt_resolver_func<ObSelectResolver>(params_, *real_parse_tree->children_[4], query))) {
+          } else if (!query || !query->is_select_stmt()) {
+            ret = OB_ERR_UNEXPECTED;
+          } else {
+            // Only metadata is materialized. The described query is bound, never executed.
+            auto select = static_cast<ObSelectStmt *>(query);
+            std::string metadata;
+            auto literal = [](const ObString &value) {
+              const char digits[] = "0123456789abcdef";
+              std::string out = "CONVERT(X'";
+              for (int64_t j = 0; j < value.length(); ++j) {
+                unsigned char c = value.ptr()[j]; out += digits[c >> 4]; out += digits[c & 15];
+              }
+              return out + "' USING utf8mb4)";
+            };
+            for (int64_t i = 0; i < select->get_select_item_size(); ++i) {
+              const auto &item = select->get_select_item(i);
+              const char *type = "VARCHAR";
+              switch (item.expr_->get_result_type().get_type()) {
+                case ObIntType: type = "BIGINT"; break;
+                case ObTinyIntType: type = "BOOLEAN"; break;
+                case ObDoubleType: type = "DOUBLE"; break;
+                case ObMySQLDateType: case ObDateType: type = "DATE"; break;
+                case ObMySQLDateTimeType: case ObDateTimeType: type = "DATETIME"; break;
+                case ObNullType: type = "NULL"; break;
+                default: break;
+              }
+              if (i) metadata += " UNION ALL ";
+              metadata += "SELECT " + literal(item.alias_name_.empty() ? item.expr_name_ : item.alias_name_)
+                  + " AS column_name, '" + type + "' AS column_type, 'YES' AS `null`,"
+                    " NULL AS `key`, NULL AS `default`, NULL AS extra";
+            }
+            ObParser parser(*params_.allocator_, params_.session_info_->get_sql_mode(),
+                            params_.session_info_->get_charsets4parser());
+            ParseResult parsed;
+            if (OB_FAIL(parser.parse(ObString(static_cast<int32_t>(metadata.size()), metadata.data()), parsed))) {
+            } else if (!parsed.result_tree_ || parsed.result_tree_->num_child_ != 1) {
+              ret = OB_ERR_UNEXPECTED;
+            } else {
+              ret = select_stmt_resolver_func<ObSelectResolver>(params_, *parsed.result_tree_->children_[0], stmt);
+            }
+          }
+        }
         break;
       }
       case T_ALTER_SYSTEM_SET: {
