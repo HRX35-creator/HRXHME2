@@ -20,7 +20,7 @@ The repository's `build.py` downloads the Bazel version pinned in `.bazelversion
 ./build.py build seekdb
 ```
 
-`init` prepares platform dependencies; run it on the first build or after dependency metadata changes. For incremental builds, repeat only the `build` command. The resulting binary is `build/bin/src/observer/seekdb`.
+`init` prepares Rust and platform dependencies; run it on the first build or after dependency metadata or `rust/rust-toolchain.toml` changes. For incremental builds, repeat only the `build` command. The resulting binary is `build/bin/src/observer/seekdb`.
 
 Put all options after the command, including Bazel startup options such as `--batch` and `--bazelrc`. `build.py` reads the installed Bazel's option definitions on each invocation and moves startup options before the command internally. Keep Bazel's original option names, including underscores.
 
@@ -46,7 +46,7 @@ Specify your REAPI service address and concurrency:
 ./build.py build --remote_executor=grpc://HOST:PORT --jobs=100 seekdb
 ```
 
-The default strategies in `.bazelrc` prefer remote execution for C++ compilation and use local execution when no remote executor is configured. Set `--remote_executor` without adding `--config=remote`. Cargo, generators, and linking run locally. The default local strategy order is `worker,sandboxed,local`, preserving the preference for sandboxing. Explicit execution strategies on the command line override these defaults. If the service requires an SSH tunnel, establish the tunnel separately.
+The default strategies in `.bazelrc` prefer remote execution for C++ compilation and use local execution when no remote executor is configured. Set `--remote_executor` without adding `--config=remote`. Cargo, generators, and linking run locally. The default local strategy order is `worker,sandboxed,local` on Linux and macOS, and `worker,local` on Windows, where Bazel does not support sandboxing. Explicit execution strategies on the command line override these defaults. If the service requires an SSH tunnel, establish the tunnel separately.
 
 With `--config=remote` or a nonempty `--remote_executor` on the command line, `--jobs` only controls total concurrency. Bazel still detects the local CPU budget automatically unless you set it separately with `--local_resources=cpu=N`.
 

@@ -15,7 +15,7 @@
  */
 
 
-#include "config_bridge.h"
+#include "rust/config.h"
 #include "ob_trans_service.h"
 #include "lib/alloc/alloc_func.h"
 #include "ob_ts_mgr.h"

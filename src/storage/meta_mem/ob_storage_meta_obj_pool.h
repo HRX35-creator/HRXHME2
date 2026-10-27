@@ -18,7 +18,7 @@
 #define OCEANBASE_STORAGE_OB_STORAGE_META_OBJ_POOL_H_
 
 #include "share/rc/ob_server_runtime.h"
-#include "config_bridge.h"
+#include "rust/config.h"
 #include "lib/objectpool/ob_resource_pool.h"
 
 #include "share/config/ob_server_config.h"

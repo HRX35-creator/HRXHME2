@@ -128,7 +128,7 @@ int ObInnerSQLResult::open()
       if (opened_) {
         ret = OB_INIT_TWICE;
       } else if (OB_FAIL(result_set_->open())) {
-        result_set_->refresh_location_cache_by_errno(true, ret);
+        result_set_->get_exec_context().get_das_ctx().record_access_error(ret);
         // move after precess_retry().
 //        result_set_->close();
       } else if (is_read_&& is_select) {
@@ -139,7 +139,7 @@ int ObInnerSQLResult::open()
             iter_end_ = true;
             ret = OB_SUCCESS;
           } else {
-            result_set_->refresh_location_cache_by_errno(true, ret);
+            result_set_->get_exec_context().get_das_ctx().record_access_error(ret);
           }
         } else {
           store_first_row_ = true;
@@ -187,7 +187,7 @@ int ObInnerSQLResult::inner_close()
 
   WITH_CONTEXT(mem_context_) {
     if (OB_FAIL(result_set_->close())) {
-      result_set_->refresh_location_cache_by_errno(true, ret);
+      result_set_->get_exec_context().get_das_ctx().record_access_error(ret);
     }
   }
   opened_ = false;
@@ -214,7 +214,7 @@ int ObInnerSQLResult::next()
     WITH_CONTEXT(mem_context_) {
       if (OB_FAIL(result_set_->get_next_row(row_))) {
         if (OB_ITER_END != ret) {
-          result_set_->refresh_location_cache_by_errno(true, ret);
+          result_set_->get_exec_context().get_das_ctx().record_access_error(ret);
         }
       }
 

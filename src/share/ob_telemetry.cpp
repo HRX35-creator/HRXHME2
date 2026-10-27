@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "config_bridge.h"
+#include "rust/config.h"
 #include "lib/utility/utility.h"
 #include "lib/alloc/alloc_func.h"
 #include "lib/time/ob_time_utility.h"

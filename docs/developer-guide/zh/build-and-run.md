@@ -20,11 +20,13 @@ cd seekdb
 ./build.py build seekdb
 ```
 
-`init` 准备平台依赖，首次编译或依赖定义变化后执行。后续增量编译只需重复 `build` 命令。产物位于 `build/bin/src/observer/seekdb`。
+`init` 准备 Rust 和平台依赖，首次编译、依赖定义或 `rust/rust-toolchain.toml` 变化后执行。后续增量编译只需重复 `build` 命令。产物位于 `build/bin/src/observer/seekdb`。
 
 所有参数都放在命令后，包括 `--batch`、`--bazelrc` 等 Bazel 启动参数。`build.py` 每次读取当前 Bazel 的参数定义，在内部将启动参数移到命令前。参数名称保留 Bazel 原生拼写，多词参数用下划线连接。
 
 Windows 使用 `python build.py`，命令参数相同。C++ 测试目标参见[编写与运行单元测试](unittest.md)。修改 Rust 依赖时，一并提交更新后的 `rust/Cargo.lock`。
+
+Rust 的 CXX 接口由 Bazel 自动生成，头文件路径为 `rust/<Bazel target name>.h`，例如 `#include "rust/local.h"`。C++ 编译只等待所需头文件，不等待 Rust 静态库。只想查看接口时执行 `./build.py build //rust:generated_headers`，文件位于 `build/bin/rust/`；该目标不编译 Rust 业务库。配置 YAML 由 Python 生成配置源码和 `config_checkers.h`，生成文件无需入库。
 
 ## 设置编译并发
 
@@ -46,7 +48,7 @@ Bazel 默认按本机可用 CPU 数量设置并发。显式指定本地编译并
 ./build.py build --remote_executor=grpc://HOST:PORT --jobs=100 seekdb
 ```
 
-`.bazelrc` 默认让 C++ 编译优先使用远程执行；未配置远程执行器时，使用本地执行策略。指定 `--remote_executor` 即可，无需再加 `--config=remote`。Cargo、生成器和链接仍在本机运行。默认本地策略顺序为 `worker,sandboxed,local`，保留沙箱优先级。命令行显式指定的执行策略可覆盖默认值。如果服务需要 SSH 隧道，先单独建立隧道。
+`.bazelrc` 默认让 C++ 编译优先使用远程执行；未配置远程执行器时，使用本地执行策略。指定 `--remote_executor` 即可，无需再加 `--config=remote`。Cargo、生成器和链接仍在本机运行。Linux 和 macOS 的默认本地策略顺序为 `worker,sandboxed,local`；Windows 使用 `worker,local`，因为 Bazel 在 Windows 上不支持沙箱。命令行显式指定的执行策略可覆盖默认值。如果服务需要 SSH 隧道，先单独建立隧道。
 
 命令行指定 `--config=remote` 或非空 `--remote_executor` 时，`--jobs` 只控制总并发，本地 CPU 额度仍由 Bazel 自动识别或通过 `--local_resources=cpu=N` 单独设置。
 

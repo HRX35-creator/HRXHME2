@@ -109,7 +109,7 @@ int ObMPConnect::deserialize()
       LOG_DEBUG("database name", K(hsr_.get_database()));
     }
     // get_user_tenant() is an earlier consumer of the same Rust login view and
-    // ObMPConnect is the final one, but neither releases it: nio_commit_request
+    // ObMPConnect is the final one, but neither releases it: oceanbase::nio::commit_request
     // frees unclaimed login metadata when the request completes, making commit
     // the single owner instead of a comment-enforced "last consumer releases"
     // protocol spread across three files.

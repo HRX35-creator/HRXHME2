@@ -16,8 +16,8 @@
 
 #define USING_LOG_PREFIX SERVER
 
-#include "config_bridge.h"
-#include "nio.h"
+#include "rust/config.h"
+#include "rust/sql_nio.h"
 
 #include "obmp_stmt_execute.h"
 #include "lib/ob_running_mode.h"
@@ -966,19 +966,19 @@ int ObMPStmtExecute::request_standard_params(ObSQLSessionInfo *session,
   handled = false;
   const int64_t param_count = ps_session_info.get_param_count();
   const int64_t tail_len = analysis_checker_.remain_len();
-  NioMysqlExecuteParamMeta *cached = NULL;
-  NioMysqlExecuteParam *parsed = NULL;
+  oceanbase::nio::NioMysqlExecuteParamMeta *cached = NULL;
+  oceanbase::nio::NioMysqlExecuteParam *parsed = NULL;
   uint8_t *long_data = NULL;
-  NioMysqlExecuteParseResult parse_result = {};
+  oceanbase::nio::NioMysqlExecuteParseResult parse_result = {};
   const ParamTypeArray &cached_types = ps_session_info.get_param_types();
   const ParamTypeFlagArray &cached_flags =
       ps_session_info.get_param_type_flags();
 
-  static_assert(sizeof(NioMysqlExecuteParamMeta) == 4,
+  static_assert(sizeof(oceanbase::nio::NioMysqlExecuteParamMeta) == 4,
                 "execute parameter meta ABI mismatch");
-  static_assert(sizeof(NioMysqlExecuteParam) == 40,
+  static_assert(sizeof(oceanbase::nio::NioMysqlExecuteParam) == 40,
                 "execute parameter descriptor ABI mismatch");
-  static_assert(sizeof(NioMysqlExecuteParseResult) == 8,
+  static_assert(sizeof(oceanbase::nio::NioMysqlExecuteParseResult) == 8,
                 "execute parse result ABI mismatch");
 
   if (OB_ISNULL(session) || param_count < 0 || tail_len < 0 ||
@@ -987,9 +987,9 @@ int ObMPStmtExecute::request_standard_params(ObSQLSessionInfo *session,
   } else if (param_count > INT64_MAX / static_cast<int64_t>(sizeof(*parsed))) {
     ret = OB_SIZE_OVERFLOW;
   } else if (param_count > 0 &&
-             (OB_ISNULL(parsed = static_cast<NioMysqlExecuteParam *>(
+             (OB_ISNULL(parsed = static_cast<oceanbase::nio::NioMysqlExecuteParam *>(
                             alloc.alloc(param_count * sizeof(*parsed)))) ||
-              OB_ISNULL(cached = static_cast<NioMysqlExecuteParamMeta *>(
+              OB_ISNULL(cached = static_cast<oceanbase::nio::NioMysqlExecuteParamMeta *>(
                             alloc.alloc(param_count * sizeof(*cached)))) ||
               OB_ISNULL(long_data = static_cast<uint8_t *>(
                             alloc.alloc(param_count))))) {
@@ -1013,25 +1013,25 @@ int ObMPStmtExecute::request_standard_params(ObSQLSessionInfo *session,
     }
   }
 
-  int parse_ret = NIO_MYSQL_EXECUTE_PARSE_INVALID_ARGUMENT;
+  int parse_ret = static_cast<int32_t>(oceanbase::nio::ExecuteStatus::InvalidArgument);
   if (OB_SUCC(ret)) {
     const int64_t cached_count = cached_types.count() == param_count &&
                                          cached_flags.count() == param_count
                                      ? param_count
                                      : 0;
-    parse_ret = nio_parse_mysql_execute_params(
+    parse_ret = oceanbase::nio::parse_mysql_execute_params(
         tail, tail_len, param_count, cached, cached_count, long_data,
         param_count, parsed, param_count, &parse_result);
-    if (NIO_MYSQL_EXECUTE_PARSE_UNSUPPORTED == parse_ret) {
+    if (static_cast<int32_t>(oceanbase::nio::ExecuteStatus::Unsupported) == parse_ret) {
       handled = false;
     } else {
       handled = true;
-      if (NIO_MYSQL_EXECUTE_PARSE_MALFORMED == parse_ret) {
+      if (static_cast<int32_t>(oceanbase::nio::ExecuteStatus::Malformed) == parse_ret) {
         ret = OB_ERR_MALFORMED_PS_PACKET;
         LOG_USER_ERROR(OB_ERR_MALFORMED_PS_PACKET);
-      } else if (NIO_MYSQL_EXECUTE_PARSE_CAPACITY == parse_ret) {
+      } else if (static_cast<int32_t>(oceanbase::nio::ExecuteStatus::Capacity) == parse_ret) {
         ret = OB_SIZE_OVERFLOW;
-      } else if (NIO_MYSQL_EXECUTE_PARSE_OK != parse_ret) {
+      } else if (static_cast<int32_t>(oceanbase::nio::ExecuteStatus::Ok) != parse_ret) {
         ret = OB_ERR_UNEXPECTED;
       }
       if (OB_FAIL(ret)) {
@@ -1051,11 +1051,11 @@ int ObMPStmtExecute::request_standard_params(ObSQLSessionInfo *session,
   ParamTypeArray new_types;
   ParamTypeFlagArray new_flags;
   for (int64_t i = 0; OB_SUCC(ret) && handled && i < param_count; ++i) {
-    const NioMysqlExecuteParam &desc = parsed[i];
+    const oceanbase::nio::NioMysqlExecuteParam &desc = parsed[i];
     const EMySQLFieldType mysql_type =
         static_cast<EMySQLFieldType>(desc.mysql_type);
     const bool is_unsigned =
-        0 != (desc.flags & NIO_MYSQL_EXECUTE_PARAM_UNSIGNED);
+        0 != (desc.flags & static_cast<uint8_t>(oceanbase::nio::ExecuteFlag::Unsigned));
     ObObjParam &param = params_->at(i);
     ObObjType ob_type = ObMaxType;
     param.reset();
@@ -1065,18 +1065,18 @@ int ObMPStmtExecute::request_standard_params(ObSQLSessionInfo *session,
     }
 
     if (OB_FAIL(ret)) {
-    } else if (NIO_MYSQL_EXECUTE_VALUE_NULL == desc.kind) {
+    } else if (static_cast<uint8_t>(oceanbase::nio::ExecuteKind::Null) == desc.kind) {
       param.set_null();
       if (ob_is_accuracy_length_valid_tc(ob_type)) {
         param.set_collation_type(cs_conn);
         param.set_collation_level(CS_LEVEL_COERCIBLE);
       }
-    } else if (NIO_MYSQL_EXECUTE_VALUE_LONG_DATA == desc.kind) {
+    } else if (static_cast<uint8_t>(oceanbase::nio::ExecuteKind::LongData) == desc.kind) {
       if (OB_FAIL(materialize_standard_long_data(alloc, *session, mysql_type,
                                                  charset, cs_conn, i, param))) {
       }
-    } else if (NIO_MYSQL_EXECUTE_VALUE_I64 == desc.kind ||
-               NIO_MYSQL_EXECUTE_VALUE_U64 == desc.kind) {
+    } else if (static_cast<uint8_t>(oceanbase::nio::ExecuteKind::I64) == desc.kind ||
+               static_cast<uint8_t>(oceanbase::nio::ExecuteKind::U64) == desc.kind) {
       const int64_t signed_value = static_cast<int64_t>(desc.value);
       switch (mysql_type) {
       case MYSQL_TYPE_TINY:
@@ -1103,23 +1103,23 @@ int ObMPStmtExecute::request_standard_params(ObSQLSessionInfo *session,
         ret = OB_ERR_ILLEGAL_TYPE;
         break;
       }
-    } else if (NIO_MYSQL_EXECUTE_VALUE_F32_BITS == desc.kind) {
+    } else if (static_cast<uint8_t>(oceanbase::nio::ExecuteKind::F32Bits) == desc.kind) {
       const uint32_t bits = static_cast<uint32_t>(desc.value);
       float value = 0;
       MEMCPY(&value, &bits, sizeof(value));
       param.set_float(value);
-    } else if (NIO_MYSQL_EXECUTE_VALUE_F64_BITS == desc.kind) {
+    } else if (static_cast<uint8_t>(oceanbase::nio::ExecuteKind::F64Bits) == desc.kind) {
       double value = 0;
       MEMCPY(&value, &desc.value, sizeof(value));
       param.set_double(value);
-    } else if (NIO_MYSQL_EXECUTE_VALUE_YEAR == desc.kind) {
+    } else if (static_cast<uint8_t>(oceanbase::nio::ExecuteKind::Year) == desc.kind) {
       uint8_t year = 0;
       if (OB_FAIL(ObTimeConverter::int_to_year(static_cast<int64_t>(desc.value),
                                                year))) {
       } else {
         param.set_year(year);
       }
-    } else if (NIO_MYSQL_EXECUTE_VALUE_BYTES == desc.kind) {
+    } else if (static_cast<uint8_t>(oceanbase::nio::ExecuteKind::Bytes) == desc.kind) {
       if (desc.value_off < 0 || desc.value_len < 0 ||
           desc.value_off > tail_len ||
           desc.value_len > tail_len - desc.value_off) {
@@ -1132,18 +1132,18 @@ int ObMPStmtExecute::request_standard_params(ObSQLSessionInfo *session,
                                              cs_conn, bytes, param))) {
         }
       }
-    } else if (NIO_MYSQL_EXECUTE_VALUE_DATE == desc.kind ||
-               NIO_MYSQL_EXECUTE_VALUE_DATETIME == desc.kind ||
-               NIO_MYSQL_EXECUTE_VALUE_TIMESTAMP == desc.kind) {
+    } else if (static_cast<uint8_t>(oceanbase::nio::ExecuteKind::Date) == desc.kind ||
+               static_cast<uint8_t>(oceanbase::nio::ExecuteKind::Datetime) == desc.kind ||
+               static_cast<uint8_t>(oceanbase::nio::ExecuteKind::Timestamp) == desc.kind) {
       if (OB_FAIL(set_standard_timestamp_param(
               mysql_type, desc.year, desc.month, desc.day, desc.hour,
               desc.minute, desc.second, desc.microseconds, 0 == desc.value_len,
               session->get_timezone_info(), param))) {
       }
-    } else if (NIO_MYSQL_EXECUTE_VALUE_TIME == desc.kind) {
+    } else if (static_cast<uint8_t>(oceanbase::nio::ExecuteKind::Time) == desc.kind) {
       if (OB_FAIL(set_standard_time_param(
               desc.days, desc.hour, desc.minute, desc.second, desc.microseconds,
-              0 != (desc.flags & NIO_MYSQL_EXECUTE_PARAM_NEGATIVE),
+              0 != (desc.flags & static_cast<uint8_t>(oceanbase::nio::ExecuteFlag::Negative)),
               0 == desc.value_len, param))) {
       }
     } else {
@@ -1153,13 +1153,13 @@ int ObMPStmtExecute::request_standard_params(ObSQLSessionInfo *session,
     }
 
     if (OB_SUCC(ret)) {
-      if (NIO_MYSQL_EXECUTE_VALUE_NULL != desc.kind) {
+      if (static_cast<uint8_t>(oceanbase::nio::ExecuteKind::Null) != desc.kind) {
         // Preserve the legacy binary-protocol parameter coercibility used by
         // expression type deduction and string comparison.
         param.set_collation_level(CS_LEVEL_COERCIBLE);
       }
       param.set_param_meta();
-      if (NIO_MYSQL_EXECUTE_VALUE_NULL != desc.kind) {
+      if (static_cast<uint8_t>(oceanbase::nio::ExecuteKind::Null) != desc.kind) {
         param.set_length(param.get_val_len());
       }
       if (1 == parse_result.new_params_bound_flag) {
