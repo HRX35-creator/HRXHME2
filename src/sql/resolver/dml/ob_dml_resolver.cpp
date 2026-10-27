@@ -4096,6 +4096,16 @@ int ObDMLResolver::resolve_function_table_item(const ParseNode &parse_tree,
           }
         }
         if (OB_FAIL(ret)) {
+        } else if (ObFileSqlFormat::GLOB == file_format) {
+          ObFileSqlColumn file_col;
+          common::ObString file_col_name("file");
+          file_col.name_ = file_col_name;
+          file_col.type_ = ObVarcharType;
+          file_col.nullable_ = false;
+          file_col.precision_ = -1;
+          file_col.scale_ = -1;
+          if (OB_FAIL(file_columns.push_back(file_col))) {
+          }
         } else if (OB_FAIL(ObFileSqlUtils::infer_schema(*allocator_, file_path, file_format,
                                                          file_options, file_columns, error_msg))) {
           if (!error_msg.empty()) {

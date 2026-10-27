@@ -21,6 +21,7 @@
 #include "sql/engine/ob_exec_context.h"
 #include "sql/engine/expr/ob_expr_lob_utils.h"
 #include "common/timezone/ob_time_convert.h"
+#include <glob.h>
 
 
 namespace oceanbase
@@ -56,6 +57,24 @@ int ObFunctionTableOp::inner_open()
       } else if (static_cast<int64_t>(ObFileSqlFormat::JSONL) == MY_SPEC.file_format_ ||
                  static_cast<int64_t>(ObFileSqlFormat::NDJSON) == MY_SPEC.file_format_) {
         ret = jsonl_reader_.open(path_datum->get_string());
+      } else if (static_cast<int64_t>(ObFileSqlFormat::GLOB) == MY_SPEC.file_format_) {
+        glob_files_.clear();
+        glob_idx_ = 0;
+        glob_t glob_result;
+        memset(&glob_result, 0, sizeof(glob_result));
+        std::string pattern(path_datum->get_string().ptr(),
+                            path_datum->get_string().length());
+        int glob_ret = glob(pattern.c_str(), 0, nullptr, &glob_result);
+        if (glob_ret != 0) {
+          ret = OB_FILE_NOT_EXIST;
+        } else {
+          for (size_t i = 0; i < glob_result.gl_pathc; ++i) {
+            glob_files_.push_back(std::string(glob_result.gl_pathv[i]));
+          }
+        }
+        if (glob_result.gl_pathv != nullptr) {
+          globfree(&glob_result);
+        }
       } else {
         ret = OB_NOT_SUPPORTED;
       }
@@ -133,6 +152,18 @@ int ObFunctionTableOp::inner_get_next_row_file_scan()
   int ret = OB_SUCCESS;
   clear_evaluated_flag();
   if (OB_FAIL(ctx_.check_status())) {
+  } else if (static_cast<int64_t>(ObFileSqlFormat::GLOB) == MY_SPEC.file_format_) {
+    if (glob_idx_ >= glob_files_.size()) {
+      ret = OB_ITER_END;
+    } else if (MY_SPEC.column_exprs_.count() < 1) {
+      ret = OB_ERR_UNEXPECTED;
+    } else {
+      ObExpr *column_expr = MY_SPEC.column_exprs_.at(0);
+      ObDatum &datum = column_expr->locate_datum_for_write(eval_ctx_);
+      const std::string &file = glob_files_[glob_idx_++];
+      datum.set_string(file.data(), static_cast<uint32_t>(file.size()));
+      column_expr->set_evaluated_projected(eval_ctx_);
+    }
   } else {
     std::vector<std::string> *record = nullptr;
     std::vector<bool> *nulls = nullptr;

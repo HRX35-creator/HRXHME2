@@ -89,6 +89,8 @@ private:
   ObFileJsonlReader jsonl_reader_;
   std::vector<std::string> jsonl_record_;
   std::vector<bool> jsonl_nulls_;
+  std::vector<std::string> glob_files_;
+  size_t glob_idx_;
   int (ObFunctionTableOp::*next_row_func_)();
 };
 
