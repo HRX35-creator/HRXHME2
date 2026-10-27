@@ -2692,7 +2692,11 @@ int ObRawExprUtils::try_add_cast_expr_above(ObRawExprFactory *expr_factory,
         && !ignore_dup_cast_error
         && !((src_type.is_collection_sql_type()
                   && (dst_type.is_character_type() || dst_type.is_null()))
-            || (src_type.is_character_type() && dst_type.is_character_type())))
+            || (src_type.is_character_type() && dst_type.is_character_type())
+            // A widened integer cast above an existing implicit integer cast is
+            // exact and is the shape IFNULL reaches after a bool rewrite adds a
+            // bool expression whose deduced type is narrower than the merged one.
+            || (ob_is_integer_type(src_type.get_type()) && ob_is_integer_type(dst_type.get_type()))))
       {
       ret = OB_ERR_UNEXPECTED;
 #ifdef DEBUG
