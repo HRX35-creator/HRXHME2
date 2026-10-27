@@ -405,6 +405,7 @@ int ObAlterTableResolver::resolve_action_list(const ParseNode &node)
         case T_AI_COLUMN_RETRY: {
             // A sole RETRY is lowered to native DML by the parser.
             ret = OB_NOT_SUPPORTED;
+            LOG_USER_ERROR(OB_NOT_SUPPORTED, "combining AI COLUMN RETRY with another ALTER action");
             break;
           }
         //deal with alter table option

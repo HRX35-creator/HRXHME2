@@ -2239,6 +2239,14 @@ int ObDmlCgService::convert_normal_triggers(ObLogDelUpd &log_op,
 {
   int ret = OB_SUCCESS;
   ObLogPlan *log_plan = log_op.get_plan();
+  if (log_plan != nullptr) {
+    const ObExecContext *exec_ctx = log_plan->get_optimizer_context().get_exec_ctx();
+    const ObSqlCtx *sql_ctx = exec_ctx == nullptr ? nullptr : exec_ctx->get_sql_ctx();
+    // Recompute/refresh is internal maintenance. Business triggers run once for
+    // the user's actual row change, without a second input mutation at publish.
+    if ((sql_ctx != nullptr && sql_ctx->ai_column_internal_write_)
+        || log_plan->get_stmt()->get_query_ctx()->ai_column_retry_) { return ret; }
+  }
   ObSchemaGetterGuard *schema_guard = NULL;
   const ObTableSchema *table_schema = NULL;
   ObDASDMLBaseCtDef &das_ctdef = dml_ctdef.das_base_ctdef_;
@@ -2328,7 +2336,9 @@ int ObDmlCgService::convert_normal_triggers(ObLogDelUpd &log_op,
           ret = OB_ERR_UNEXPECTED;
         } else {
           is_hidden = column_schema->is_hidden();
-          is_gen_col = column_schema->is_generated_column();
+          // Re-evaluate AI invalidation after BEFORE triggers have supplied
+          // all ordinary NEW values; never restore its pre-trigger result.
+          is_gen_col = column_schema->is_generated_column() || column_schema->is_ai_column();
           is_gen_col_dep = column_schema->has_generated_column_deps();
           is_update = has_exist_in_array(updated_column_ids, column_schema->get_column_id());
           if (!has_exist_in_array(column_ids, column_schema->get_column_id(), &col_idx)) {

@@ -204,8 +204,10 @@ int ObUpdateResolver::resolve_ai_retry_assignment(const ParseNode &retry, ObIArr
           ObString(retry.children_[0]->str_len_, retry.children_[0]->str_value_))) == nullptr
       || (ai = table->get_ai_column(column->get_column_id())) == nullptr) {
     ret = OB_NOT_SUPPORTED;
+    LOG_USER_ERROR(OB_NOT_SUPPORTED, "retrying a column that is not an AI column");
   } else {
     ai_retry_column_id_ = ai->column_id_;
+    params_.query_ctx_->ai_column_retry_ = true;
     ObTableAssignment assignment;
     assignment.table_id_ = item->table_id_;
     ret = assigns.push_back(assignment);

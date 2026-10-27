@@ -250,7 +250,10 @@ void AIColumnWorker::run1()
 {
   lib::set_thread_name("AIColumn");
   while (!cancellation_.load()) {
-    if (sql_ != nullptr) {
+    const auto &context = observer::ObServer::get_instance().get_gctx();
+    // Modules start before log replay / schema publication finishes. A missing
+    // business schema during bootstrap must never retire recovered work.
+    if (sql_ != nullptr && !context.in_bootstrap_ && context.start_service_time_ > 0) {
       int expected = 0;
       if (reclaimed_.compare_exchange_strong(expected, 1)) {
         const int ret = reclaim_previous_boot();
