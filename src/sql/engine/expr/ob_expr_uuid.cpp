@@ -238,8 +238,23 @@ int ObUUIDNode::init()
       }//end for
       if (OB_FAIL(ret)) {
       } else if (!mac_addr_found) {
-        ret = OB_ERR_UNEXPECTED;
-      } else {
+        // RFC 9562 section 6.10: when MAC discovery fails (restricted
+        // containers / sandboxes without iface access), fall back to a
+        // random node ID with the multicast bit set, same as Android.
+        int fd = open("/dev/urandom", O_RDONLY);
+        if (fd >= 0 && read(fd, mac_addr_, 6) == 6) {
+          mac_addr_[0] |= 0x01;
+          mac_addr_found = true;
+          LOG_WARN("UUID MAC discovery unavailable, using random node ID", K(errno));
+        } else {
+          ret = OB_ERR_UNEXPECTED;
+          LOG_ERROR("failed to read entropy for random UUID node", K(ret), K(errno));
+        }
+        if (fd >= 0) {
+          close(fd);
+        }
+      }
+      if (OB_SUCC(ret) && mac_addr_found) {
         is_inited_ = true;
       }
     }
