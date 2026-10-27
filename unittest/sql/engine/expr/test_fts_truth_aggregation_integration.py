@@ -102,9 +102,15 @@ class FTSTruthAggregationIntegrationTest(unittest.TestCase):
                 self.compare_count('quasar nebula', suffix)
         # Force a normal-index access path so MATCH is evaluated by lookup.
         direct = ('SELECT /*+ INDEX(docs idx_bucket) */ COUNT(*) FROM docs '
-                  'WHERE bucket=1 AND MATCH(body) AGAINST(%s)')
+                  'WHERE bucket=%s AND MATCH(body) AGAINST(%s)')
         scored = direct + ' > 0'
-        self.assertEqual(self.rows(scored, ('quasar',)), self.rows(direct, ('quasar',)))
+        # Include domains with no matching postings, NULL bodies and empty
+        # bodies; presence must remain false for each unsuccessful lookup.
+        for bucket in range(5):
+            for query in ['quasar', 'dwarf', 'nohitword', None]:
+                with self.subTest(bucket=bucket, query=query):
+                    args = (bucket, query)
+                    self.assertEqual(self.rows(scored, args), self.rows(direct, args))
 
     def test_long_query_taat_fallback_deduplicates_ids_without_statistics(self):
         alphabet = string.ascii_lowercase
