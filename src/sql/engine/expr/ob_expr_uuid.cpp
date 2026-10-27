@@ -27,14 +27,14 @@
 #else
 #include <sys/ioctl.h>
 #include <net/if.h>
+#include <fcntl.h>
+#include <unistd.h>
 #ifdef __APPLE__
 #include <ifaddrs.h>
 #include <net/if_dl.h>
 #elif defined(__ANDROID__)
 #include <ifaddrs.h>
 #include <linux/if_packet.h>
-#include <fcntl.h>
-#include <unistd.h>
 #endif
 #endif
 #include "sql/engine/expr/ob_expr_uuid.h"
@@ -203,30 +203,33 @@ int ObUUIDNode::init()
   struct ifreq ifr;
   struct ifconf ifc;
   char buf[1024];
+  bool mac_addr_found = false;
   int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
   if (sock == -1) {
-    ret = OB_ERR_UNEXPECTED;
-    LOG_ERROR("socket failed", K(ret), K(errno));
+    LOG_WARN("UUID node interface socket failed", K(errno));
   } else {
     ifc.ifc_len = sizeof(buf);
     ifc.ifc_buf = buf;
     if (ioctl(sock, SIOCGIFCONF, &ifc) < 0) {
-      ret = OB_ERR_UNEXPECTED;
+      LOG_WARN("UUID node interface enumeration failed", K(errno));
     } else {
       ifreq *it = ifc.ifc_req;
       ifreq *end = it + (ifc.ifc_len / sizeof(ifreq));
-      bool mac_addr_found = false;
       for (; it != end && OB_SUCC(ret); ++it) {
         if (OB_ISNULL(it) || OB_ISNULL(it->ifr_name) || OB_ISNULL(ifr.ifr_name)) {
           continue;
         } else {
           strncpy(ifr.ifr_name, it->ifr_name, IFNAMSIZ - 1);
+          ifr.ifr_name[IFNAMSIZ - 1] = '\0';
           if (ioctl(sock, SIOCGIFFLAGS, &ifr) == 0) {
             if (!(ifr.ifr_flags & IFF_LOOPBACK)) {
               if (ioctl(sock, SIOCGIFHWADDR, &ifr) == 0) {
-                MEMCPY(mac_addr_, ifr.ifr_hwaddr.sa_data, 6);
-                mac_addr_found = true;
-                break;
+                const unsigned char zero_mac[6] = {0};
+                if (MEMCMP(ifr.ifr_hwaddr.sa_data, zero_mac, sizeof(zero_mac)) != 0) {
+                  MEMCPY(mac_addr_, ifr.ifr_hwaddr.sa_data, 6);
+                  mac_addr_found = true;
+                  break;
+                }
               } else {
                 LOG_WARN("ioctl failed, SIOCGIFHWADDR", K(errno), K(it->ifr_name));
               }
@@ -236,14 +239,36 @@ int ObUUIDNode::init()
           }
         }
       }//end for
-      if (OB_FAIL(ret)) {
-      } else if (!mac_addr_found) {
-        ret = OB_ERR_UNEXPECTED;
-      } else {
-        is_inited_ = true;
-      }
     }
     close(sock);
+  }
+  if (!mac_addr_found) {
+    int fd = open("/dev/urandom", O_RDONLY);
+    ssize_t total = 0;
+    if (fd < 0) {
+      ret = OB_ERR_UNEXPECTED;
+      LOG_WARN("cannot open random source for UUID node", K(ret), K(errno));
+    } else {
+      while (total < 6 && OB_SUCC(ret)) {
+        const ssize_t n = read(fd, mac_addr_ + total, 6 - total);
+        if (n > 0) {
+          total += n;
+        } else if (n < 0 && errno == EINTR) {
+          // Retry an interrupted read.
+        } else {
+          ret = OB_ERR_UNEXPECTED;
+          LOG_WARN("cannot read random UUID node", K(ret), K(n), K(errno));
+        }
+      }
+      close(fd);
+      if (OB_SUCC(ret)) {
+        mac_addr_[0] |= 0x01; // RFC 9562: mark a random node as multicast.
+        LOG_INFO("using random UUID node because no network MAC is available");
+      }
+    }
+  }
+  if (OB_SUCC(ret)) {
+    is_inited_ = true;
   }
 #endif
   return ret;
@@ -1040,3 +1065,4 @@ int ObExprBin2uuid::bin2uuid_batch(const ObExpr &expr,
 
 } //namespace sql
 } //namespace oceanbase
+
