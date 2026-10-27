@@ -80,7 +80,7 @@ public:
 public:
   sql::ObBitVector *get_skip() { return skip_; }
   int get_token_doc_cnt(int64_t &token_doc_cnt) const;
-  double get_max_token_relevance() const { return max_token_relevance_; }
+  double get_max_token_relevance() const { return nullptr != relevance_expr_ ? max_token_relevance_ : 1.0; }
 private:
   int init_calc_exprs_in_relevance_expr();
   void clear_batch_wise_evaluated_flag(const int64_t count);
