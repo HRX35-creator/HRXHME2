@@ -7832,6 +7832,12 @@ int ObDMLResolver::resolve_function_table_column_item_sys_func(const TableItem &
           }
           ObAccuracy accuracy = ObAccuracy::DDL_DEFAULT_ACCURACY[meta.get_type()];
           if (column.type_ == FileSqlType::TEXT) { accuracy.set_length(std::max<int64_t>(1, column.max_length_)); }
+          if (column.type_ == FileSqlType::DATETIME) {
+            // CSV/JSONL retain the longest timestamp lexeme (19 characters
+            // without fractions). Parquet has no lexeme and keeps microseconds.
+            accuracy.set_scale(column.max_length_ == 0 ? 6
+                : std::max<int64_t>(0, std::min<int64_t>(6, column.max_length_ - 20)));
+          }
           ObString name;
           if (OB_FAIL(ob_write_string(*allocator_, column.name_, name))) {
           } else if (OB_FAIL(resolve_function_table_column_item(table_item, meta, accuracy, name,

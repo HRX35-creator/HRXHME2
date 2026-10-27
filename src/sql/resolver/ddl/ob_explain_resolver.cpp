@@ -82,7 +82,8 @@ int ObExplainResolver::resolve_file_description(const ObSelectStmt &query)
   ObSqlString sql;
   if (OB_FAIL(ret)) {
   } else if (OB_FAIL(metadata.print(json, 0))) {
-  } else if (OB_FAIL(sql.append("SELECT t.`Field`,t.`Type`,t.`Null`,'' AS `Key`,NULL AS `Default`,'' AS `Extra` "
+  } else if (OB_FAIL(sql.append("SELECT t.`Field` AS column_name,t.`Type` AS column_type,t.`Null` AS `null`,"
+                "NULL AS `key`,NULL AS `default`,NULL AS extra "
                 "FROM JSON_TABLE(CONVERT(X'"))) {
   }
   // Encode the complete metadata document as a hex literal, including names.
