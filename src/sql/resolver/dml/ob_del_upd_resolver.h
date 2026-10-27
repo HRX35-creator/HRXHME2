@@ -74,7 +74,7 @@ protected:
                                      const ObStmtScope scope);
   int generate_wrapper_expr_for_assignemnts(common::ObIArray<ObAssignment> &assigns,
                                             bool has_before_trigger);
-  int resolve_ai_column_assignments(common::ObIArray<ObTableAssignment> &table_assigns);
+  int resolve_ai_column_assignments(ObTableAssignment &table_assign);
   int resolve_ai_column_insert_values(ObInsertTableInfo &table_info);
   int build_ai_request_expr(ObRawExpr *&expr);
 

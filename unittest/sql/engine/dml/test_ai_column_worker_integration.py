@@ -201,6 +201,77 @@ class AIColumnWorkerIntegrationTest(AISQLMockTestCase):
         self.assertEqual((), self.tasks(table))
         self.assertEqual(1, self.server.requests.qsize())
 
+    def test_implicit_timestamp_dependency_regenerates_without_writeback_side_effects(self):
+        table = self.create("implicit_time", "id INT PRIMARY KEY,payload VARCHAR(20),"
+                            "stamp TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),"
+                            f"result VARCHAR(100) AI COLUMN(AI_COMPLETE('{self.model}',CAST(stamp AS CHAR)))")
+        self.addCleanup(self.execute, "SET timestamp=0")
+        self.execute("SET timestamp=1700000000")
+        self.execute(f"INSERT INTO `{table}`(id,payload) VALUES(1,'first')")
+        self.execute("SET timestamp=0")
+        expected = self.execute(f"SELECT CONCAT('reply:',CAST(stamp AS CHAR)) FROM `{table}`")[0][0]
+        self.wait_value(table, expected)
+        self.assertEqual(((1700000000,),), self.execute(f"SELECT UNIX_TIMESTAMP(stamp) FROM `{table}`"))
+        self.execute("SET timestamp=1700000001")
+        self.execute(f"UPDATE `{table}` SET payload='second' WHERE id=1")
+        self.execute("SET timestamp=0")
+        updated = self.execute(f"SELECT CONCAT('reply:',CAST(stamp AS CHAR)) FROM `{table}`")[0][0]
+        self.assertNotEqual(expected, updated)
+        self.wait_value(table, updated)
+        self.assertEqual(((1700000001,),), self.execute(f"SELECT UNIX_TIMESTAMP(stamp) FROM `{table}`"))
+
+
+class AIColumnVectorIntegrationTest(AISQLMockTestCase):
+    MODEL_TYPE = "dense_embedding"
+
+    @staticmethod
+    def default_response(request):
+        return {"data": [{"index": i, "embedding": [int(value), 0, 0, 0]}
+                         for i, value in enumerate(request["input"])]}
+
+    def wait_embeddings(self, table, row, expected):
+        deadline = time.monotonic() + 12
+        while time.monotonic() < deadline:
+            value = self.execute(f"SELECT emb FROM `{table}` WHERE id=%s", (row,))[0][0]
+            if value is not None and json.loads(value) == expected:
+                return
+            time.sleep(0.05)
+        self.fail("AI vector did not publish")
+
+    def ann(self, table, limit=3):
+        return self.execute(f"SELECT id FROM `{table}` "
+                            f"ORDER BY l2_distance(emb,[0,0,0,0]) APPROXIMATE LIMIT {limit}")
+
+    def test_invalidation_rollback_and_regeneration_maintain_ann(self):
+        table = self.model + "_ann"
+        self.execute(f"CREATE TABLE `{table}`(id INT PRIMARY KEY,content VARCHAR(30),"
+                     f"emb VECTOR(4) AI COLUMN(AI_EMBED('{self.model}',content)))")
+        self.addCleanup(self.execute, f"DROP TABLE `{table}`")
+        self.execute(f"INSERT INTO `{table}`(id,content) VALUES(1,'0'),(2,'10'),(3,'20')")
+        for row, value in ((1, 0), (2, 10), (3, 20)):
+            self.wait_embeddings(table, row, [value, 0, 0, 0])
+        self.execute(f"CREATE VECTOR INDEX idx ON `{table}`(emb) "
+                     "WITH(distance=l2,type=hnsw,lib=vsag,m=10,ef_construction=12,ef_search=40)")
+        self.connection.begin()
+        try:
+            self.execute(f"UPDATE `{table}` SET content='0' WHERE id=2")
+            self.assertEqual(((None,),), self.execute(f"SELECT emb FROM `{table}` WHERE id=2"))
+            self.assertEqual({1, 3}, {row[0] for row in self.ann(table)})
+        finally:
+            self.connection.rollback()
+        self.assertEqual({1, 2, 3}, {row[0] for row in self.ann(table)})
+        self.assertEqual("[10,0,0,0]", self.execute(f"SELECT emb FROM `{table}` WHERE id=2")[0][0])
+        self.connection.begin()
+        try:
+            self.execute(f"INSERT INTO `{table}`(id,content) VALUES(2,'0') "
+                         "ON DUPLICATE KEY UPDATE content=VALUES(content)")
+            self.assertEqual({1, 3}, {row[0] for row in self.ann(table)})
+            self.connection.commit()
+        finally:
+            self.connection.rollback()
+        self.wait_embeddings(table, 2, [0, 0, 0, 0])
+        self.assertEqual({1, 2}, {row[0] for row in self.ann(table, 2)})
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

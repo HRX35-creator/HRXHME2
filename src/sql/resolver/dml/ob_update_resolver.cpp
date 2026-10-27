@@ -114,9 +114,6 @@ int ObUpdateResolver::resolve(const ParseNode &parse_tree)
 
   //add column for table scan, keep rowkey column in the head
   if (OB_SUCC(ret)) {
-    ret = resolve_ai_column_assignments(tables_assign);
-  }
-  if (OB_SUCC(ret)) {
     for (int64_t i = 0; OB_SUCC(ret) && i < tables_assign.count(); i++) {
       if (OB_FAIL(generate_update_table_info(tables_assign.at(i)))) {
       } else { /*do nothing*/ }
