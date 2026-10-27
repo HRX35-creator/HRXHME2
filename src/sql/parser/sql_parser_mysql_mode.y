@@ -11258,6 +11258,34 @@ relation_factor %prec LOWER_PARENS
 {
   malloc_non_terminal_node($$, result->malloc_pool_, T_TABLE_COLLECTION_EXPRESSION, 2, $3, $6);
 }
+| function_name '(' opt_expr_as_list ')' relation_name
+{
+  ParseNode *func_expr = NULL;
+  ParseNode *params = NULL;
+  if (OB_NOT_NULL($3)) {
+    merge_nodes(params, result, T_EXPR_LIST, $3);
+  }
+  malloc_non_terminal_node(func_expr, result->malloc_pool_, T_FUN_SYS, 2, $1, params);
+  if (OB_UNLIKELY(NULL == func_expr)) {
+    yyerror(NULL, result, "No more space for malloc\n");
+    YYABORT_NO_MEMORY;
+  }
+  malloc_non_terminal_node($$, result->malloc_pool_, T_TABLE_COLLECTION_EXPRESSION, 2, func_expr, $5);
+}
+| function_name '(' opt_expr_as_list ')'
+{
+  ParseNode *func_expr = NULL;
+  ParseNode *params = NULL;
+  if (OB_NOT_NULL($3)) {
+    merge_nodes(params, result, T_EXPR_LIST, $3);
+  }
+  malloc_non_terminal_node(func_expr, result->malloc_pool_, T_FUN_SYS, 2, $1, params);
+  if (OB_UNLIKELY(NULL == func_expr)) {
+    yyerror(NULL, result, "No more space for malloc\n");
+    YYABORT_NO_MEMORY;
+  }
+  malloc_non_terminal_node($$, result->malloc_pool_, T_TABLE_COLLECTION_EXPRESSION, 2, func_expr, NULL);
+}
 ;
 
 dml_table_name:
