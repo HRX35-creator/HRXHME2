@@ -1,0 +1,9 @@
+load("//bazel:seekdb_module_cc_test.bzl", "seekdb_module_cc_test")
+
+seekdb_module_cc_test(
+    name = "sql_tests",
+    srcs = ["engine/expr/test_ai_response_validation.cpp"],
+    test_hdrs = [],
+    module_interface = "//src/sql:sql_unit_test_interface",
+    shard_count = 1,
+)
