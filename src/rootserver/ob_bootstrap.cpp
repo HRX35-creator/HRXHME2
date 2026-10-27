@@ -17,6 +17,7 @@
 #define USING_LOG_PREFIX BOOTSTRAP
 
 #include "lib/stat/ob_diagnostic_info_guard.h"
+#include "common/ob_timeout_ctx.h"
 #include "rootserver/ob_bootstrap.h"
 #include "rootserver/ob_runtime_ddl_service.h"
 #include "share/rc/ob_server_runtime.h"
@@ -662,7 +663,13 @@ int ObBootstrap::init_global_stat()
   int ret = OB_SUCCESS;
   ObMySQLProxy &sql_proxy = ddl_service_.get_sql_proxy();
   ObMySQLTransaction trans;
+  // This transaction loads and replaces rows of __all_core_table. On platforms with
+  // slow buffered IO (e.g. Windows without O_DIRECT), the inner SQL can take longer
+  // than the rpc_timeout-derived default and fail with OB_TIMEOUT during bootstrap.
+  // Give this one-shot critical transaction a generous budget explicitly.
+  ObTimeoutCtx timeout_ctx;
   if (OB_FAIL(check_inner_stat())) {
+  } else if (OB_FAIL(timeout_ctx.set_timeout(5LL * 60 * 1000000))) {
   } else {
     const int64_t baseline_schema_version = OB_INVALID_VERSION; // OB_INVALID_VERSION == -1
     const SCN snapshot_gc_scn = SCN::min_scn();
