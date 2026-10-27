@@ -134,11 +134,9 @@ int ObIKFTParser::process_one_char(TokenizeContext &ctx,
                                    const ObFTCharUtil::CharType type)
 {
   int ret = OB_SUCCESS;
-  // proces by char with all segmenters
-  for (ObList<ObIIKProcessor *, ObIAllocator>::iterator iter = segmenters_.begin();
-       OB_SUCC(ret) && iter != segmenters_.end();
-       iter++) {
-    if (OB_FAIL((*iter)->process(ctx))) {
+  // 优化：使用基于数组的连续内存遍历，大幅提升 CPU Cache 命中率
+  for (int64_t i = 0; OB_SUCC(ret) && i < segmenters_.count(); i++) {
+    if (OB_FAIL(segmenters_.at(i)->process(ctx))) {
     }
   }
   return ret;
@@ -218,7 +216,6 @@ void ObIKFTParserDesc::free_token_iter(ObFTParserParam *param,
   iter->~ObITokenIterator();
   param->allocator_->free(iter);
 }
-
 
 int ObIKFTParserDesc::get_add_word_flag(ObAddWordFlag &flag) const
 {
