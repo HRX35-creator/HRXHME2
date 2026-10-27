@@ -147,6 +147,7 @@ public:
   common::ObFixedArray<ObString, common::ObIAllocator> namespace_def_;
 };
 
+namespace file_sql { class Reader; }
 class ObJsonTableOp;
 
 struct JtScanCtx {
@@ -156,7 +157,7 @@ struct JtScanCtx {
         table_func_(nullptr) {}
   
   bool is_json_table_func() {
-    return spec_ptr_->table_type_ == OB_ORA_JSON_TABLE_TYPE;
+    return spec_ptr_->table_type_ == OB_ORA_JSON_TABLE_TYPE || spec_ptr_->table_type_ == FILE_TABLE_TYPE;
   }
 
   bool is_unnest_table_func() {
@@ -197,7 +198,8 @@ public:
       input_(nullptr),
       j_null_(),
       j_arr_(allocator_),
-      j_obj_(allocator_)
+      j_obj_(allocator_),
+      file_reader_(nullptr)
   {
     const ObJsonTableSpec* spec_ptr = reinterpret_cast<const ObJsonTableSpec*>(&spec);
     col_count_ = spec_ptr->column_exprs_.count();
@@ -219,6 +221,9 @@ public:
                K_(col_count));
 
 private:
+  int open_file();
+  int next_file_row();
+  file_sql::Reader *file_reader_;
   int init();
   int reset_variable();  // reset var in rescan 
   int init_data_obj(); // allocate data_ array

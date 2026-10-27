@@ -293,7 +293,7 @@ END_P SET_VAR DELIMITER
         GENERAL GEOMETRY GEOMCOLLECTION GEOMETRYCOLLECTION GET_FORMAT GLOBAL GRANTS GROUP_CONCAT GROUPING
         GLOBAL_ALIAS
 
-        HASH HEAP HELP HISTOGRAM HOUR HIDDEN HYBRID HYBRID_HIST HYBRID_SEARCH
+        HASH HEAP HELP HISTOGRAM HOUR HIDDEN HYBRID HYBRID_HIST HYBRID_SEARCH READ_CSV READ_JSON READ_NDJSON READ_PARQUET FILE_GLOB
 
         IDENTIFIED IK_MODE ILOG IMMEDIATE IMPORT INCLUDING INCR INDEXES INFO
         INNODB INPLACE INSERT_METHOD INSTANT INSTANCE INVOKER IO IO_THREAD IPC ISOLATE ISOLATION ISSUER
@@ -498,6 +498,8 @@ END_P SET_VAR DELIMITER
 %type <node> dynamic_sampling_hint
 %type <node> skip_index_type opt_skip_index_type_list
 %type <node> vec_index_params vec_index_param vec_index_param_value opt_with_vector_index_parameters
+%type <node> file_copy_stmt file_copy_source file_copy_options file_copy_option file_copy_option_list
+%type <node> file_table_expr file_table_call file_table_name file_sql_options file_sql_option
 %type <node> json_table_expr unnest_expr mock_jt_on_error_on_empty jt_column_list json_table_column_def
 %type <node> json_table_ordinality_column_def json_table_exists_column_def json_table_value_column_def json_table_nested_column_def
 %type <node> opt_value_on_empty_or_error_or_mismatch opt_on_mismatch
@@ -556,7 +558,8 @@ opt_end_p:
 
 /* only preparable statement will set question mark size */
 stmt:
-    select_stmt             { $$ = $1; question_mark_issue($$, result); }
+    file_copy_stmt          { $$ = $1; question_mark_issue($$, result); }
+  | select_stmt             { $$ = $1; question_mark_issue($$, result); }
   | insert_stmt             { $$ = $1; question_mark_issue($$, result); }
   | create_table_stmt       {
     $$ = $1;
@@ -10849,6 +10852,10 @@ tbl_name
 {
   $$ = $1;
 }
+| file_table_expr
+{
+  $$ = $1;
+}
 ;
 
 tbl_name:
@@ -12266,7 +12273,7 @@ explain_or_desc relation_factor opt_desc_column_option
   malloc_non_terminal_node($$, result->malloc_pool_, T_SHOW_COLUMNS, 4, $$, $2, NULL, $3);
 }
 
-| explain_or_desc explainable_stmt { GEN_EXPLAN_STMT($1, $$, 0, 0, $2, NULL, NULL);}
+| explain_or_desc explainable_stmt { GEN_EXPLAN_STMT($1, $$, 0, 0, $2, NULL, NULL); if ($1) { dup_string_to_node($$, result->malloc_pool_, "DESCRIBE"); } }
 | explain_or_desc PRETTY explainable_stmt { GEN_EXPLAN_STMT($1, $$, 0, T_PRETTY, $3, NULL, NULL);}
 | explain_or_desc PRETTY_COLOR explainable_stmt { GEN_EXPLAN_STMT($1, $$, 0, T_PRETTY_COLOR, $3, NULL, NULL);}
 
@@ -12307,8 +12314,8 @@ explain_or_desc relation_factor opt_desc_column_option
 
 explain_or_desc:
 EXPLAIN {$$ = NULL;}
-| DESCRIBE {$$ = NULL;}
-| DESC  {$$ = NULL;}
+| DESCRIBE { malloc_terminal_node($$, result->malloc_pool_, T_INT); }
+| DESC  { malloc_terminal_node($$, result->malloc_pool_, T_INT); }
 ;
 
 explainable_stmt:
@@ -17452,6 +17459,94 @@ UNNEST '(' simple_expr_list ')'
 }
 ;
 
+file_copy_source:
+select_with_parens { $$ = $1; }
+| relation_factor
+{
+  ParseNode *star = NULL, *projection = NULL, *list = NULL, *from = NULL;
+  malloc_terminal_node(star, result->malloc_pool_, T_STAR);
+  malloc_non_terminal_node(projection, result->malloc_pool_, T_PROJECT_STRING, 1, star);
+  dup_string_to_node(projection, result->malloc_pool_, "*");
+  merge_nodes(list, result, T_PROJECT_LIST, projection);
+  ParseNode *table = NULL;
+  malloc_non_terminal_node(table, result->malloc_pool_, T_ORG, 4, $1, NULL, NULL, NULL);
+  merge_nodes(from, result, T_FROM_LIST, table);
+  malloc_select_node($$, result->malloc_pool_);
+  $$->children_[PARSE_SELECT_SELECT] = list;
+  $$->children_[PARSE_SELECT_FROM] = from;
+}
+;
+file_copy_options:
+/* empty */ { $$ = NULL; }
+| '(' file_copy_option_list ')' { $$ = $2; }
+| WITH '(' file_copy_option_list ')' { $$ = $3; }
+;
+file_copy_option:
+file_sql_option { $$ = $1; }
+| relation_name literal
+{ malloc_non_terminal_node($$, result->malloc_pool_, T_LINK_NODE, 2, $1, $2); }
+| FORMAT relation_name
+{
+  ParseNode *key = NULL;
+  make_name_node(key, result->malloc_pool_, "format");
+  $2->type_ = T_VARCHAR;
+  malloc_non_terminal_node($$, result->malloc_pool_, T_LINK_NODE, 2, key, $2);
+}
+| NULLX literal
+{
+  ParseNode *key = NULL;
+  make_name_node(key, result->malloc_pool_, "nullstr");
+  malloc_non_terminal_node($$, result->malloc_pool_, T_LINK_NODE, 2, key, $2);
+}
+;
+file_copy_option_list:
+file_copy_option { $$ = $1; }
+| file_copy_option_list ',' file_copy_option
+{ malloc_non_terminal_node($$, result->malloc_pool_, T_LINK_NODE, 2, $1, $3); }
+;
+file_copy_stmt:
+COPY file_copy_source TO STRING_VALUE file_copy_options
+{
+  $$ = $2;
+  if ($$->children_[PARSE_SELECT_INTO] || $$->children_[PARSE_SELECT_INTO_EXTRA]) {
+    yyerror(&@2, result, "COPY query cannot contain INTO"); YYERROR;
+  }
+  ParseNode *into = NULL;
+  malloc_non_terminal_node(into, result->malloc_pool_, T_INTO_OUTFILE, 5, $4, $5, NULL, NULL, NULL);
+  into->value_ = 1;
+  into->is_tree_not_param_ = 1;
+  $$->children_[PARSE_SELECT_INTO_EXTRA] = into;
+}
+;
+
+file_table_name:
+READ_CSV { malloc_terminal_node($$, result->malloc_pool_, T_INT); $$->value_ = 0; }
+| READ_JSON { malloc_terminal_node($$, result->malloc_pool_, T_INT); $$->value_ = 1; }
+| READ_NDJSON { malloc_terminal_node($$, result->malloc_pool_, T_INT); $$->value_ = 1; }
+| READ_PARQUET { malloc_terminal_node($$, result->malloc_pool_, T_INT); $$->value_ = 2; }
+| FILE_GLOB { malloc_terminal_node($$, result->malloc_pool_, T_INT); $$->value_ = 3; }
+;
+file_sql_option:
+relation_name COMP_EQ simple_expr
+{ malloc_non_terminal_node($$, result->malloc_pool_, T_LINK_NODE, 2, $1, $3); }
+;
+file_sql_options:
+file_sql_option { $$ = $1; }
+| file_sql_options ',' file_sql_option
+{ malloc_non_terminal_node($$, result->malloc_pool_, T_LINK_NODE, 2, $1, $3); }
+;
+file_table_call:
+file_table_name '(' literal ')'
+{ malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_EXPRESSION, 4, $1, $3, NULL, NULL); $$->is_tree_not_param_ = 1; }
+| file_table_name '(' literal ',' file_sql_options ')'
+{ malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_EXPRESSION, 4, $1, $3, $5, NULL); $$->is_tree_not_param_ = 1; }
+;
+file_table_expr:
+file_table_call %prec LOWER_PARENS { $$ = $1; }
+| file_table_call relation_name { $$ = $1; $$->children_[3] = $2; }
+| file_table_call AS relation_name { $$ = $1; $$->children_[3] = $3; }
+;
+
 hybrid_search_expr:
 HYBRID_SEARCH '(' literal ',' hybrid_search_param ')'
 {
@@ -18182,6 +18277,11 @@ ACCOUNT
 |       INCONSISTENT 
 |       INDIVIDUAL
 |       HYBRID_SEARCH
+|       READ_CSV
+|       READ_JSON
+|       READ_NDJSON
+|       READ_PARQUET
+|       FILE_GLOB
 ;
 
 unreserved_keyword_special:

@@ -1,0 +1,34 @@
+--disable_query_log
+--source test_suite/file_sql/include/file_sql_setup.inc
+SET enable_file_sql=0;
+--disable_result_log
+--error 1235,1210
+--eval SELECT * FROM read_csv('$file_sql_dir/people.csv');
+--enable_result_log
+SET enable_file_sql=1;
+--eval SELECT id,name,active,day,missing FROM read_csv('$file_sql_dir/people.csv') ORDER BY id;
+--eval SELECT count(*),sum(amount),avg(amount),min(amount),max(amount) FROM read_csv('$file_sql_dir/people.csv');
+--eval SELECT active,count(*) FROM read_csv('$file_sql_dir/people.csv') GROUP BY active HAVING count(*)>0 ORDER BY active;
+--eval DESCRIBE SELECT * FROM read_csv('$file_sql_dir/people.csv');
+--eval SELECT * FROM read_ndjson('$file_sql_dir/cities.jsonl') ORDER BY id;
+--eval SELECT count(*),sum(id),sum(amount) FROM read_parquet('$file_sql_dir/values.parquet');
+--eval SELECT a.id,b.city FROM read_csv('$file_sql_dir/people.csv') a LEFT JOIN read_json('$file_sql_dir/cities.jsonl') b ON a.id=b.id ORDER BY a.id;
+--eval SELECT a.id,b.name FROM read_csv('$file_sql_dir/people.csv') a INNER JOIN read_parquet('$file_sql_dir/values.parquet') b ON a.id=b.id ORDER BY a.id;
+--eval SELECT count(*) FROM glob('$file_sql_dir/*.parquet');
+--eval COPY (SELECT id,name FROM read_csv('$file_sql_dir/people.csv') ORDER BY id) TO '$file_sql_dir/output.csv' (HEADER TRUE, DELIMITER '|', NULL 'NULL');
+--eval SELECT * FROM read_csv('$file_sql_dir/output.csv', delimiter='|', nullstr='NULL') ORDER BY id;
+--disable_result_log
+--error 1235,1210
+--eval COPY (SELECT 1) TO '$file_sql_dir/output.csv';
+--enable_result_log
+--disable_result_log
+--error 1235,1210
+--eval SELECT * FROM read_csv('$file_sql_dir/bad.csv');
+--enable_result_log
+--disable_result_log
+--error 1235,1210
+--eval SELECT * FROM read_json('$file_sql_dir/nested.jsonl');
+--enable_result_log
+SELECT 1 AS ordinary_sql;
+--source test_suite/file_sql/include/file_sql_cleanup.inc
+--enable_query_log
