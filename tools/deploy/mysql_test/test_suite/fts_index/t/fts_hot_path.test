@@ -1,0 +1,55 @@
+# owner group: storage
+# description: cover tokenizer and merge hot paths without changing results
+
+--disable_warnings
+DROP DATABASE IF EXISTS fts_hot_path;
+--enable_warnings
+CREATE DATABASE fts_hot_path;
+USE fts_hot_path;
+SET NAMES utf8mb4;
+SET ob_query_timeout = 100000000000;
+SET ob_trx_timeout = 100000000000;
+
+SELECT tokenize('The quick brown fox jumps over the lazy dog. Full-text search indexing requires efficient tokenization on the hot path.', 'beng') AS beng_default;
+SELECT tokenize('The THE und www OceanBase', 'beng', '[{"output":"all"}]') AS beng_stopwords;
+SELECT tokenize(_utf8mb4'The THE und OceanBase' COLLATE utf8mb4_general_ci, 'beng', '[{"output":"all"}]') AS beng_same_collation;
+SELECT tokenize(_utf8mb4'The THE und OceanBase' COLLATE utf8mb4_bin, 'beng', '[{"output":"all"}]') AS beng_convert_collation;
+SELECT tokenize('数据库 FULLtext 索引，OceanBase😀', 'beng', '[{"output":"all"}]') AS beng_utf8mb4;
+SELECT tokenize('中华人民共和国人民大会堂', 'ik') AS ik_smart;
+SELECT tokenize('中华人民共和国人民大会堂', 'ik', '[{"additional_args":[{"ik_mode":"max_word"}]}]') AS ik_max_word;
+SELECT tokenize('OceanBase是一款非常稳定数据库，在110个星球上都非常著名，这简直难以置信😀', 'ik', '[{"output":"all"}]') AS ik_mixed_surrogate;
+
+CREATE TABLE docs (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  content TEXT NOT NULL,
+  content_en TEXT NOT NULL
+) DEFAULT CHARSET = utf8mb4;
+
+INSERT INTO docs (content, content_en) VALUES
+  ('全文索引分词器提升数据库性能', 'Database performance audit with full text search'),
+  ('数据库内核与全文索引', 'Database kernel and inverted index'),
+  ('分词器性能调优', 'Tokenizer performance optimization'),
+  ('倒排索引与查询执行', 'Full text query execution'),
+  ('OceanBase稳定database', 'Audit database performance'),
+  ('无关内容', 'No matching words');
+
+ALTER TABLE docs ADD FULLTEXT INDEX fti_cn(content) WITH PARSER ik;
+ALTER TABLE docs ADD FULLTEXT INDEX fti_en(content_en) WITH PARSER beng;
+
+SELECT id FROM docs WHERE MATCH(content) AGAINST('全文索引 性能') ORDER BY id;
+SELECT id FROM docs WHERE MATCH(content) AGAINST('全文索引 性能') LIMIT 2;
+SELECT id, MATCH(content) AGAINST('全文索引 性能') AS relevance FROM docs WHERE MATCH(content) AGAINST('全文索引 性能') ORDER BY id;
+SELECT id FROM docs WHERE MATCH(content) AGAINST('OceanBase 稳定 database') ORDER BY id;
+SELECT id FROM docs WHERE MATCH(content_en) AGAINST('database performance audit') ORDER BY id;
+SELECT id FROM docs WHERE MATCH(content_en) AGAINST('database performance audit') LIMIT 3;
+SELECT id FROM docs WHERE MATCH(content_en) AGAINST('+database +performance' IN BOOLEAN MODE) ORDER BY id;
+SELECT id, MATCH(content_en) AGAINST('database performance audit') AS relevance FROM docs WHERE MATCH(content_en) AGAINST('database performance audit') ORDER BY id;
+SELECT COUNT(*) AS cn_hits FROM docs WHERE MATCH(content) AGAINST('全文索引 性能');
+SELECT COUNT(*) AS en_hits FROM docs WHERE MATCH(content_en) AGAINST('database performance audit');
+ALTER SYSTEM SET _rowsets_max_rows = 1;
+SELECT COUNT(*) AS cn_single_row_hits FROM docs WHERE MATCH(content) AGAINST('全文索引 性能');
+ALTER SYSTEM SET _rowsets_max_rows = 256;
+SELECT COUNT(*) AS cn_positive_hits FROM docs WHERE MATCH(content) AGAINST('全文索引 性能') > 0;
+SELECT id FROM docs WHERE MATCH(content_en) AGAINST('database performance audit') > 0 ORDER BY id;
+
+DROP DATABASE fts_hot_path;

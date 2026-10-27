@@ -75,6 +75,7 @@ protected:
   virtual int inner_open(const ObDatum &document, const ObCharsetInfo *cs) override;
   INHERIT_TO_STRING_KV("ObTextTokenizer", ObTextTokenizer, K_(trav_pos), KP_(curr_token_ptr));
 private:
+  int64_t get_char_length() const;
   bool found_delimiter();
   const char *get_trav_ptr() { return input_doc_->ptr_ + trav_pos_; }
   uint32_t get_input_buf_len() { return input_doc_->len_; }
@@ -130,7 +131,9 @@ public:
   virtual void reset() override;
   virtual void reuse() override;
   virtual int get_next(ObDatum &next_token, int64_t &token_freq) override;
+  int get_next(ObDatum &next_token, int64_t &token_freq, ObIAllocator &result_allocator);
 private:
+  int get_next_internal(ObDatum &next_token, int64_t &token_freq, ObIAllocator *result_allocator);
   ObArenaAllocator norm_allocator_;
 };
 

@@ -26,6 +26,7 @@ namespace storage
 ObSRMergeCmp::ObSRMergeCmp()
   : cmp_func_(nullptr),
     iter_ids_(nullptr),
+    is_binary_collation_(false),
     is_inited_(false)
 {
 }
@@ -39,6 +40,8 @@ int ObSRMergeCmp::init(
     ret = OB_ERR_UNEXPECTED;
   } else {
     iter_ids_ = iter_ids;
+    is_binary_collation_ = common::CS_TYPE_BINARY == id_meta.cs_type_
+        && ob_is_string_type(id_meta.type_);
     common::ObDatumBasicFuncs *basic_funcs = ObDatumFuncs::get_basic_func(id_meta.type_, id_meta.cs_type_);
     cmp_func_ = basic_funcs->null_first_cmp_;
     if (OB_ISNULL(cmp_func_)) {
@@ -60,8 +63,14 @@ int ObSRMergeCmp::cmp(
     ret = OB_NOT_INIT;
   } else {
     int tmp_ret = 0;
-    if (OB_FAIL(cmp_func_(
-            get_id_datum(l.iter_idx_), get_id_datum(r.iter_idx_), tmp_ret, nullptr))) {
+    const ObDatum &l_id = get_id_datum(l.iter_idx_);
+    const ObDatum &r_id = get_id_datum(r.iter_idx_);
+    if (is_binary_collation_ && OB_LIKELY(!l_id.is_null() && !r_id.is_null())) {
+      const uint32_t min_len = l_id.len_ < r_id.len_ ? l_id.len_ : r_id.len_;
+      const int cmp = MEMCMP(l_id.ptr_, r_id.ptr_, min_len);
+      cmp_ret = 0 != cmp ? (cmp > 0 ? 1 : -1)
+                         : (l_id.len_ < r_id.len_ ? -1 : (l_id.len_ > r_id.len_ ? 1 : 0));
+    } else if (OB_FAIL(cmp_func_(l_id, r_id, tmp_ret, nullptr))) {
     } else {
       cmp_ret = tmp_ret;
     }
@@ -414,25 +423,22 @@ int ObSRDaaTIterImpl::project_results(const int64_t count)
   ObExpr *id_proj_expr = iter_param_->id_proj_expr_;
   ObEvalCtx *eval_ctx = iter_param_->eval_ctx_;
   ObEvalCtx::BatchInfoScopeGuard guard(*eval_ctx);
-
   if (eval_ctx->is_vectorized()) {
     sql::ObBitVector &id_evaluated_flags = id_proj_expr->get_evaluated_flags(*eval_ctx);
+    ObDatum *id_proj_datums = id_proj_expr->locate_datums_for_update(*eval_ctx, count);
     for (int64_t i = 0; i < count; ++i) {
-      guard.set_batch_idx(i);
-      ObDatum &id_proj_datum = id_proj_expr->locate_datum_for_write(*eval_ctx);
-      set_datum_func_(id_proj_datum, buffered_domain_ids_[i]);
+      set_datum_func_(id_proj_datums[i], buffered_domain_ids_[i]);
       id_evaluated_flags.set(i);
-      id_proj_expr->set_evaluated_projected(*eval_ctx);
     }
+    id_proj_expr->set_evaluated_projected(*eval_ctx);
     if (iter_param_->need_project_relevance()) {
       sql::ObBitVector &relevance_evaluated_flags = relevance_proj_expr->get_evaluated_flags(*eval_ctx);
+      ObDatum *relevance_proj_datums = relevance_proj_expr->locate_datums_for_update(*eval_ctx, count);
       for (int64_t i = 0; i < count; ++i) {
-        guard.set_batch_idx(i);
-        ObDatum &relevance_proj_datum = relevance_proj_expr->locate_datum_for_write(*eval_ctx);
-        relevance_proj_datum.set_double(buffered_relevances_[i]);
+        relevance_proj_datums[i].set_double(buffered_relevances_[i]);
         relevance_evaluated_flags.set(i);
-        relevance_proj_expr->set_evaluated_projected(*eval_ctx);
       }
+      relevance_proj_expr->set_evaluated_projected(*eval_ctx);
     }
   } else if (OB_UNLIKELY(1 != count)) {
     ret = OB_ERR_UNEXPECTED;
@@ -441,9 +447,11 @@ int ObSRDaaTIterImpl::project_results(const int64_t count)
     ObDatum &id_proj_datum = id_proj_expr->locate_datum_for_write(*eval_ctx);
     set_datum_func_(id_proj_datum, buffered_domain_ids_[0]);
     id_proj_expr->set_evaluated_projected(*eval_ctx);
-    ObDatum &relevance_proj_datum = relevance_proj_expr->locate_datum_for_write(*eval_ctx);
-    relevance_proj_datum.set_double(buffered_relevances_[0]);
-    relevance_proj_expr->set_evaluated_projected(*eval_ctx);
+    if (iter_param_->need_project_relevance()) {
+      ObDatum &relevance_proj_datum = relevance_proj_expr->locate_datum_for_write(*eval_ctx);
+      relevance_proj_datum.set_double(buffered_relevances_[0]);
+      relevance_proj_expr->set_evaluated_projected(*eval_ctx);
+    }
   }
   return ret;
 }

@@ -1,0 +1,103 @@
+DROP DATABASE IF EXISTS fts_hot_path;
+CREATE DATABASE fts_hot_path;
+USE fts_hot_path;
+SET NAMES utf8mb4;
+SET ob_query_timeout = 100000000000;
+SET ob_trx_timeout = 100000000000;
+SELECT tokenize('The quick brown fox jumps over the lazy dog. Full-text search indexing requires efficient tokenization on the hot path.', 'beng') AS beng_default;
+beng_default
+["text", "quick", "search", "brown", "jumps", "efficient", "requires", "fox", "path", "dog", "full", "hot", "indexing", "over", "tokenization", "lazy"]
+SELECT tokenize('The THE und www OceanBase', 'beng', '[{"output":"all"}]') AS beng_stopwords;
+beng_stopwords
+{"tokens": [{"oceanbase": 1}], "doc_len": 1}
+SELECT tokenize(_utf8mb4'The THE und OceanBase' COLLATE utf8mb4_general_ci, 'beng', '[{"output":"all"}]') AS beng_same_collation;
+beng_same_collation
+{"tokens": [{"oceanbase": 1}], "doc_len": 1}
+SELECT tokenize(_utf8mb4'The THE und OceanBase' COLLATE utf8mb4_bin, 'beng', '[{"output":"all"}]') AS beng_convert_collation;
+beng_convert_collation
+{"tokens": [{"oceanbase": 1}], "doc_len": 1}
+SELECT tokenize('数据库 FULLtext 索引，OceanBase😀', 'beng', '[{"output":"all"}]') AS beng_utf8mb4;
+beng_utf8mb4
+{"tokens": [{"索引，oceanbase😀": 1}, {"数据库": 1}, {"fulltext": 1}], "doc_len": 3}
+SELECT tokenize('中华人民共和国人民大会堂', 'ik') AS ik_smart;
+ik_smart
+["人民大会堂", "中华人民共和国"]
+SELECT tokenize('中华人民共和国人民大会堂', 'ik', '[{"additional_args":[{"ik_mode":"max_word"}]}]') AS ik_max_word;
+ik_max_word
+["大会", "人民大会堂", "大会堂", "共和国", "人民大会", "人民共和国", "中华人民", "共和", "会堂", "中华", "中华人民共和国", "国人", "华人", "人民"]
+SELECT tokenize('OceanBase是一款非常稳定数据库，在110个星球上都非常著名，这简直难以置信😀', 'ik', '[{"output":"all"}]') AS ik_mixed_surrogate;
+ik_mixed_surrogate
+{"tokens": [{"这简直": 1}, {"难以置信": 1}, {"著名": 1}, {"非常": 2}, {"在": 1}, {"oceanbase": 1}, {"稳定": 1}, {"110个": 1}, {"上": 1}, {"是": 1}, {"数据库": 1}, {"星球": 1}, {"一款": 1}, {"都": 1}], "doc_len": 15}
+CREATE TABLE docs (
+id BIGINT AUTO_INCREMENT PRIMARY KEY,
+content TEXT NOT NULL,
+content_en TEXT NOT NULL
+) DEFAULT CHARSET = utf8mb4;
+INSERT INTO docs (content, content_en) VALUES
+('全文索引分词器提升数据库性能', 'Database performance audit with full text search'),
+('数据库内核与全文索引', 'Database kernel and inverted index'),
+('分词器性能调优', 'Tokenizer performance optimization'),
+('倒排索引与查询执行', 'Full text query execution'),
+('OceanBase稳定database', 'Audit database performance'),
+('无关内容', 'No matching words');
+ALTER TABLE docs ADD FULLTEXT INDEX fti_cn(content) WITH PARSER ik;
+ALTER TABLE docs ADD FULLTEXT INDEX fti_en(content_en) WITH PARSER beng;
+SELECT id FROM docs WHERE MATCH(content) AGAINST('全文索引 性能') ORDER BY id;
+id
+1
+2
+3
+SELECT id FROM docs WHERE MATCH(content) AGAINST('全文索引 性能') LIMIT 2;
+id
+1
+2
+SELECT id, MATCH(content) AGAINST('全文索引 性能') AS relevance FROM docs WHERE MATCH(content) AGAINST('全文索引 性能') ORDER BY id;
+id	relevance
+1	1.4778636146110422
+2	0.7789943751714831
+3	0.7789943751714831
+SELECT id FROM docs WHERE MATCH(content) AGAINST('OceanBase 稳定 database') ORDER BY id;
+id
+5
+SELECT id FROM docs WHERE MATCH(content_en) AGAINST('database performance audit') ORDER BY id;
+id
+1
+2
+3
+5
+SELECT id FROM docs WHERE MATCH(content_en) AGAINST('database performance audit') LIMIT 3;
+id
+5
+1
+3
+SELECT id FROM docs WHERE MATCH(content_en) AGAINST('+database +performance' IN BOOLEAN MODE) ORDER BY id;
+id
+1
+5
+SELECT id, MATCH(content_en) AGAINST('database performance audit') AS relevance FROM docs WHERE MATCH(content_en) AGAINST('database performance audit') ORDER BY id;
+id	relevance
+1	1.3006144906438382
+2	0.3142857142857143
+3	0.3503184713375797
+5	1.5242870463596576
+SELECT COUNT(*) AS cn_hits FROM docs WHERE MATCH(content) AGAINST('全文索引 性能');
+cn_hits
+3
+SELECT COUNT(*) AS en_hits FROM docs WHERE MATCH(content_en) AGAINST('database performance audit');
+en_hits
+4
+ALTER SYSTEM SET _rowsets_max_rows = 1;
+SELECT COUNT(*) AS cn_single_row_hits FROM docs WHERE MATCH(content) AGAINST('全文索引 性能');
+cn_single_row_hits
+3
+ALTER SYSTEM SET _rowsets_max_rows = 256;
+SELECT COUNT(*) AS cn_positive_hits FROM docs WHERE MATCH(content) AGAINST('全文索引 性能') > 0;
+cn_positive_hits
+3
+SELECT id FROM docs WHERE MATCH(content_en) AGAINST('database performance audit') > 0 ORDER BY id;
+id
+1
+2
+3
+5
+DROP DATABASE fts_hot_path;
