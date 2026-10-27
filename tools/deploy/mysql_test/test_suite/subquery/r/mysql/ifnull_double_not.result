@@ -1,0 +1,53 @@
+SELECT 1 FROM dual WHERE IFNULL((SELECT FALSE), !(!(1 LIKE 'x')));
+1
+SELECT IFNULL((SELECT FALSE), !(!(1 LIKE 'x'))) AS v;
+v
+0
+SELECT IFNULL((SELECT TRUE), !(!(1 LIKE 'x'))) AS v;
+v
+1
+SELECT IFNULL((SELECT NULL), !(!(1 LIKE 'x'))) AS v;
+v
+0
+SELECT IFNULL((SELECT NULL), !(!(1 LIKE '1'))) AS v;
+v
+1
+SELECT IFNULL((SELECT NULL), !(!(NULL LIKE 'x'))) AS v;
+v
+NULL
+SELECT COALESCE((SELECT FALSE), !(!(1 LIKE 'x'))) AS v;
+v
+0
+SELECT CASE WHEN 1 THEN !(!(1 LIKE '1')) ELSE (SELECT FALSE) END AS v;
+v
+1
+SELECT COUNT(*) AS v FROM dual WHERE IFNULL((SELECT FALSE), !(!(!(!(1 LIKE 'x')))));
+v
+0
+SELECT IFNULL((SELECT NULL), !(!(!(!(1 LIKE '1'))))) AS v;
+v
+1
+SELECT IFNULL((SELECT NULL), !(!(!(1 LIKE 'x')))) AS v;
+v
+1
+SELECT IFNULL((SELECT FALSE), !(1 LIKE 'x')) AS v;
+v
+0
+SELECT !(!2) AS v;
+v
+1
+SELECT !(!0) AS v;
+v
+0
+SELECT !(!NULL) AS v;
+v
+NULL
+SELECT !(!(-2)) AS v;
+v
+1
+SELECT !(!(2 > 1)) AS v;
+v
+1
+SELECT !(!(2 < 1)) AS v;
+v
+0

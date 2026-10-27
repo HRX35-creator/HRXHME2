@@ -2382,6 +2382,8 @@ int ObTransformSimplifyExpr::do_push_not(ObRawExpr *&expr,
       } else if (OB_ISNULL(temp)) {
         ret = OB_ERR_UNEXPECTED;
       } else if (OB_FAIL(temp->formalize(ctx_->session_info_))) {
+      } else if (temp->get_result_type() != expr->get_result_type()) {
+        is_valid = false;
       } else {
         expr = temp;
         is_valid = false;
