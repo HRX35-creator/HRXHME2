@@ -8567,6 +8567,29 @@ int ObJoinOrder::generate_function_table_paths()
           func_path->value_expr_ = function_table_expr->get_param_expr(0);
           func_path->is_file_scan_ = true;
           func_path->file_format_ = static_cast<int64_t>(file_format);
+          if (function_table_expr->get_param_count() >= 4) {
+            const ObRawExpr *header_expr = function_table_expr->get_param_expr(1);
+            const ObRawExpr *delimiter_expr = function_table_expr->get_param_expr(2);
+            const ObRawExpr *quote_expr = function_table_expr->get_param_expr(3);
+            if (OB_NOT_NULL(header_expr) && header_expr->is_static_const_expr()) {
+              const ObConstRawExpr *const_expr = static_cast<const ObConstRawExpr *>(header_expr);
+              func_path->file_header_ = const_expr->get_value().get_int();
+            }
+            if (OB_NOT_NULL(delimiter_expr) && delimiter_expr->is_static_const_expr()) {
+              const ObConstRawExpr *const_expr = static_cast<const ObConstRawExpr *>(delimiter_expr);
+              ObString delimiter = const_expr->get_value().get_string();
+              if (!delimiter.empty()) {
+                func_path->file_delimiter_ = static_cast<unsigned char>(delimiter[0]);
+              }
+            }
+            if (OB_NOT_NULL(quote_expr) && quote_expr->is_static_const_expr()) {
+              const ObConstRawExpr *const_expr = static_cast<const ObConstRawExpr *>(quote_expr);
+              ObString quote = const_expr->get_value().get_string();
+              if (!quote.empty()) {
+                func_path->file_quote_ = static_cast<unsigned char>(quote[0]);
+              }
+            }
+          }
         }
       } else {
         func_path->value_expr_ = function_table_expr;

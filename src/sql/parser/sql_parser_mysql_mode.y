@@ -77,6 +77,7 @@
 %token <node> BIN_STRING_VALUE
 %token <node> REMAP_TABLE_NAME
 %token <node> REMAP_DATABASE_TABLE_NAME
+%token PARAM_ASSIGN
 %token <node> OUTLINE_DEFAULT_TOKEN/*use for outline parser to just filter hint of query_sql*/
 %token <node> ID_DOT_ID_DOT_ID
 %token <node> ID_DOT_ID
@@ -722,6 +723,17 @@ expr
   /* every mysql's item(same as ob's expr) has its own name */
   if (OB_UNLIKELY((NULL == $$->str_value_)) && $$->type_ != T_NCHAR && $$->type_ != T_VARCHAR) {
     dup_string($$, result, @1.first_column, @1.last_column);
+  }
+}
+| column_label PARAM_ASSIGN expr
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_LINK_NODE, 1, $3);
+  if (OB_UNLIKELY(NULL == $$)) {
+    yyerror(NULL, result, "No more space for malloc\n");
+    YYABORT_NO_MEMORY;
+  } else {
+    dup_node_string($1, $$, result->malloc_pool_);
+    $$->sql_str_off_ = @1.first_column;
   }
 }
 |
