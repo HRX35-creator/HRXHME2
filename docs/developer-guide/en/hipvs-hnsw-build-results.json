@@ -1,0 +1,284 @@
+{
+  "date": "2026-10-27",
+  "implementation_revision": "2927a906e364cf34f6faba6baf534281840f53d0",
+  "cloud_source": "public5bce9e06 plus AMD-only diff frombe35bcc to2927a906; earlier private AI changes excluded from upload",
+  "hardware": {
+    "reported_gpu_name": "AMD Radeon Graphics",
+    "architecture": "gfx1100",
+    "cpu_quota": 16,
+    "memory_limit_gib": 55,
+    "process_affinity": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ],
+    "omp_num_threads": 8,
+    "openblas_num_threads": 8,
+    "ubuntu": "24.04.4",
+    "rocm": "7.2.4",
+    "linux_vsag": "012a0f2",
+    "hipvs_package_version": "01.00.00",
+    "hipvs_exact_source_revision": "not established",
+    "numpy": "2.4.6",
+    "pymysql": "1.2.3"
+  },
+  "comparisons": [
+    {
+      "label": "query breadth128",
+      "filesystem": "tmpfs /tmp",
+      "speedup": 2.947537832802039,
+      "cpu": {
+        "report_sha256": "2d97648a46c4db2252484864e83c399237aab7e9eff77bb216cf5d63c58d8f1f",
+        "dataset_sha256": "796c992ac20e991223160cf41c984eb9b9cd5810d9bfb1e121580b84e1f92089",
+        "binary_sha256": "1c148f505bcec2329a591fa9969f8de7888f8e2da2730118350a0bb7e141048e",
+        "bridge_sha256": null,
+        "configuration": {
+          "rows": 10000,
+          "dimension": 128,
+          "queries": 200,
+          "k": 10,
+          "seed": 20261027,
+          "m": 16,
+          "ef_construction": 128,
+          "ef_search": 128,
+          "precision": "float32",
+          "metric": "squared_l2",
+          "memory": "4G",
+          "net_threads": 2
+        },
+        "runs": [
+          {
+            "query_ready_build_seconds": 1.8481387048959732,
+            "create_index_seconds": 1.8373011406511068,
+            "recall_at_k": 0.911
+          },
+          {
+            "query_ready_build_seconds": 1.8249603509902954,
+            "create_index_seconds": 1.8153308052569628,
+            "recall_at_k": 0.911
+          },
+          {
+            "query_ready_build_seconds": 1.8228347934782505,
+            "create_index_seconds": 1.8121515195816755,
+            "recall_at_k": 0.911
+          }
+        ],
+        "median_query_ready_build_seconds": 1.8249603509902954,
+        "minimum_recall_at_k": 0.911,
+        "server_exit_code": -9
+      },
+      "gpu": {
+        "report_sha256": "aed139c301fa949b7dbf0382b9902f12a3f9647c0b977d92aa1f767efbe3cf07",
+        "dataset_sha256": "796c992ac20e991223160cf41c984eb9b9cd5810d9bfb1e121580b84e1f92089",
+        "binary_sha256": "1c148f505bcec2329a591fa9969f8de7888f8e2da2730118350a0bb7e141048e",
+        "bridge_sha256": "a12326709042856ac16c538ba41202a13726f8985f3bf694993ce2e56aa4d755",
+        "configuration": {
+          "rows": 10000,
+          "dimension": 128,
+          "queries": 200,
+          "k": 10,
+          "seed": 20261027,
+          "m": 16,
+          "ef_construction": 128,
+          "ef_search": 128,
+          "precision": "float32",
+          "metric": "squared_l2",
+          "memory": "4G",
+          "net_threads": 2
+        },
+        "runs": [
+          {
+            "query_ready_build_seconds": 0.7466873731464148,
+            "create_index_seconds": 0.7356157600879669,
+            "recall_at_k": 0.9165
+          },
+          {
+            "query_ready_build_seconds": 0.5203230660408735,
+            "create_index_seconds": 0.5107593685388565,
+            "recall_at_k": 0.916
+          },
+          {
+            "query_ready_build_seconds": 0.6191473882645369,
+            "create_index_seconds": 0.6099162176251411,
+            "recall_at_k": 0.9055
+          }
+        ],
+        "median_query_ready_build_seconds": 0.6191473882645369,
+        "minimum_recall_at_k": 0.9055,
+        "server_exit_code": -9,
+        "build_path_evidence": [
+          [
+            "HIPVS_BUILD_COMPLETE(rows=10000, dimension=128, M=16, ef_construction=128, cpu_threads=4, device=\"AMD Radeon Graphics\", architecture=\"gfx1100\", cagra_build_wall_ms=1.591590080000000000e+02, hierarchy_serialize_wall_ms=4.015840599999999938e+01, adapter_build_total_ms=3.699090219999999931e+02, serialized_bytes=6605996, vsag_version=\"012a0f2\", nn_descent_iterations=0, cpu_fallback=false)"
+          ],
+          [
+            "HIPVS_BUILD_COMPLETE(rows=10000, dimension=128, M=16, ef_construction=128, cpu_threads=4, device=\"AMD Radeon Graphics\", architecture=\"gfx1100\", cagra_build_wall_ms=9.096858899999999437e+01, hierarchy_serialize_wall_ms=3.982265000000000299e+01, adapter_build_total_ms=1.365098680000000115e+02, serialized_bytes=6606132, vsag_version=\"012a0f2\", nn_descent_iterations=0, cpu_fallback=false)"
+          ],
+          [
+            "HIPVS_BUILD_COMPLETE(rows=10000, dimension=128, M=16, ef_construction=128, cpu_threads=4, device=\"AMD Radeon Graphics\", architecture=\"gfx1100\", cagra_build_wall_ms=9.433588899999999455e+01, hierarchy_serialize_wall_ms=3.934862300000000346e+01, adapter_build_total_ms=1.394484919999999875e+02, serialized_bytes=6606268, vsag_version=\"012a0f2\", nn_descent_iterations=0, cpu_fallback=false)"
+          ]
+        ]
+      }
+    },
+    {
+      "label": "query breadth512",
+      "filesystem": "overlay /root",
+      "speedup": 2.925659484196288,
+      "cpu": {
+        "report_sha256": "a98f524eab9e39e53a526a0f17beddd41b7f61fa7eb7326d67336ece8dfa09b0",
+        "dataset_sha256": "796c992ac20e991223160cf41c984eb9b9cd5810d9bfb1e121580b84e1f92089",
+        "binary_sha256": "1c148f505bcec2329a591fa9969f8de7888f8e2da2730118350a0bb7e141048e",
+        "bridge_sha256": null,
+        "configuration": {
+          "rows": 10000,
+          "dimension": 128,
+          "queries": 200,
+          "k": 10,
+          "seed": 20261027,
+          "m": 16,
+          "ef_construction": 128,
+          "ef_search": 512,
+          "precision": "float32",
+          "metric": "squared_l2",
+          "memory": "4G",
+          "net_threads": 2
+        },
+        "runs": [
+          {
+            "query_ready_build_seconds": 1.950610674917698,
+            "create_index_seconds": 1.9383786208927631,
+            "recall_at_k": 0.993
+          },
+          {
+            "query_ready_build_seconds": 1.8269022889435291,
+            "create_index_seconds": 1.813863242045045,
+            "recall_at_k": 0.993
+          },
+          {
+            "query_ready_build_seconds": 1.8198062907904387,
+            "create_index_seconds": 1.8129379693418741,
+            "recall_at_k": 0.993
+          }
+        ],
+        "median_query_ready_build_seconds": 1.8269022889435291,
+        "minimum_recall_at_k": 0.993,
+        "server_exit_code": -9
+      },
+      "gpu": {
+        "report_sha256": "5826d705ac4ec3c8d5396559b7bdaab1fd9fec52189f0476cd6e808aee54d575",
+        "dataset_sha256": "796c992ac20e991223160cf41c984eb9b9cd5810d9bfb1e121580b84e1f92089",
+        "binary_sha256": "1c148f505bcec2329a591fa9969f8de7888f8e2da2730118350a0bb7e141048e",
+        "bridge_sha256": "a12326709042856ac16c538ba41202a13726f8985f3bf694993ce2e56aa4d755",
+        "configuration": {
+          "rows": 10000,
+          "dimension": 128,
+          "queries": 200,
+          "k": 10,
+          "seed": 20261027,
+          "m": 16,
+          "ef_construction": 128,
+          "ef_search": 512,
+          "precision": "float32",
+          "metric": "squared_l2",
+          "memory": "4G",
+          "net_threads": 2
+        },
+        "runs": [
+          {
+            "query_ready_build_seconds": 0.7489242069423199,
+            "create_index_seconds": 0.7371632605791092,
+            "recall_at_k": 0.9995
+          },
+          {
+            "query_ready_build_seconds": 0.5202602874487638,
+            "create_index_seconds": 0.5103537440299988,
+            "recall_at_k": 0.9985
+          },
+          {
+            "query_ready_build_seconds": 0.6244411896914244,
+            "create_index_seconds": 0.6126175317913294,
+            "recall_at_k": 0.999
+          }
+        ],
+        "median_query_ready_build_seconds": 0.6244411896914244,
+        "minimum_recall_at_k": 0.9985,
+        "server_exit_code": -9,
+        "build_path_evidence": [
+          [
+            "HIPVS_BUILD_COMPLETE(rows=10000, dimension=128, M=16, ef_construction=128, cpu_threads=4, device=\"AMD Radeon Graphics\", architecture=\"gfx1100\", cagra_build_wall_ms=1.628182830000000081e+02, hierarchy_serialize_wall_ms=4.216104599999999891e+01, adapter_build_total_ms=3.799928269999999770e+02, serialized_bytes=6606132, vsag_version=\"012a0f2\", nn_descent_iterations=0, cpu_fallback=false)"
+          ],
+          [
+            "HIPVS_BUILD_COMPLETE(rows=10000, dimension=128, M=16, ef_construction=128, cpu_threads=4, device=\"AMD Radeon Graphics\", architecture=\"gfx1100\", cagra_build_wall_ms=9.114562300000000050e+01, hierarchy_serialize_wall_ms=4.763669800000000265e+01, adapter_build_total_ms=1.450401970000000063e+02, serialized_bytes=6606064, vsag_version=\"012a0f2\", nn_descent_iterations=0, cpu_fallback=false)"
+          ],
+          [
+            "HIPVS_BUILD_COMPLETE(rows=10000, dimension=128, M=16, ef_construction=128, cpu_threads=4, device=\"AMD Radeon Graphics\", architecture=\"gfx1100\", cagra_build_wall_ms=1.047132150000000053e+02, hierarchy_serialize_wall_ms=4.112742500000000234e+01, adapter_build_total_ms=1.522563440000000128e+02, serialized_bytes=6606336, vsag_version=\"012a0f2\", nn_descent_iterations=0, cpu_fallback=false)"
+          ]
+        ]
+      }
+    }
+  ],
+  "stability": {
+    "successful_builds": 30,
+    "first_released": {
+      "gpu_free_bytes": 51126468608,
+      "gpu_total_bytes": 51522830336,
+      "process_rss_kib": 419156,
+      "open_fds": 7,
+      "temporary_index_files": 0
+    },
+    "last_released": {
+      "gpu_free_bytes": 51126468608,
+      "gpu_total_bytes": 51522830336,
+      "process_rss_kib": 420552,
+      "open_fds": 7,
+      "temporary_index_files": 0
+    },
+    "last20_rss_kib_range": [
+      420404,
+      420552
+    ]
+  },
+  "profiling": {
+    "scope": "CMake-built production bridge; iterative float32 construction with self-edge normalization",
+    "kernel_dispatches": 139,
+    "half_signature_count": 0,
+    "nn_descent_kernel_count": 0,
+    "float32_descriptor_count": 8,
+    "unique_kernel_names": [
+      "__amd_rocclr_copyBuffer",
+      "__amd_rocclr_fillBufferAligned",
+      "__amd_rocclr_initHeap",
+      "void cuvs::neighbors::cagra::detail::graph::(anonymous namespace)::kern_make_rev_graph<unsigned int>(unsigned int const*, unsigned int*, unsigned int*, unsigned int, unsigned int)",
+      "void cuvs::neighbors::cagra::detail::graph::(anonymous namespace)::kern_prune<1024, unsigned int>(unsigned int const*, unsigned int, unsigned int, unsigned int, unsigned int, unsigned int, unsigned char*, unsigned int*, unsigned long*)",
+      "void cuvs::neighbors::cagra::detail::single_cta_search::search_kernel<128u, 64u, 1u, cuvs::neighbors::cagra::detail::dataset_descriptor_base_t<float, unsigned int, float>, cuvs::neighbors::filtering::none_sample_filter>(unsigned long, cuvs::neighbors::cagra::detail::dataset_descriptor_base_t<float, unsigned int, float>::DISTANCE_T*, unsigned int, cuvs::neighbors::cagra::detail::dataset_descriptor_base_t<float, unsigned int, float> const*, cuvs::neighbors::cagra::detail::dataset_descriptor_base_t<float, unsigned int, float>::DATA_T const*, cuvs::neighbors::cagra::detail::dataset_descriptor_base_t<float, unsigned int, float>::INDEX_T const*, unsigned int, unsigned int, unsigned long, cuvs::neighbors::cagra::detail::dataset_descriptor_base_t<float, unsigned int, float>::INDEX_T const*, unsigned int, cuvs::neighbors::cagra::detail::dataset_descriptor_base_t<float, unsigned int, float>::INDEX_T*, unsigned int, unsigned int, unsigned int, unsigned int, unsigned int*, unsigned int, unsigned int, unsigned int, cuvs::neighbors::filtering::none_sample_filter)",
+      "void cuvs::neighbors::cagra::detail::standard_dataset_descriptor_init_kernel<(cuvsDistanceType)0, 8u, 128u, float, unsigned int, float>(cuvs::neighbors::cagra::detail::dataset_descriptor_base_t<float, unsigned int, float>*, float const*, unsigned int, unsigned int, unsigned int)"
+    ],
+    "trace_sha256": "44a6742683cd14b5b656ed3abf360f16c8059dd8073c379cbf0d493952862a0c"
+  },
+  "crash_recovery": {
+    "success": true,
+    "intentional_crash_exit_code": -9,
+    "recovered_rows": 2048,
+    "bridge_loaded_during_recovered_queries": false,
+    "recovery_and_verification_seconds": 2.0741189140826464
+  },
+  "limitations": [
+    "official target configuration/quality/speedup threshold not published in inspected task",
+    "query correctness and performance shown only for these synthetic datasets",
+    "normal native server shutdown not established; CPU and GPU measurement cleanup both required SIGKILL after30seconds",
+    "one attempted fresh CPU startup on tmpfs failed with insufficient disk before any timed build; preserved separately",
+    "performance kernel trace is separate from uninstrumented SQL timings"
+  ]
+}

@@ -35,10 +35,24 @@ def sha256(path):
         return hashlib.file_digest(stream, 'sha256').hexdigest()
 
 
+def resources(hip):
+    free, total = c.c_size_t(), c.c_size_t()
+    status = hip.hipMemGetInfo(c.byref(free), c.byref(total))
+    if status:
+        raise RuntimeError(f'hipMemGetInfo failed: {status}')
+    values = dict(line.split(':', 1) for line in Path('/proc/self/status').read_text().splitlines())
+    return dict(gpu_free_bytes=free.value, gpu_total_bytes=total.value,
+                process_rss_kib=int(values['VmRSS'].split()[0]),
+                open_fds=len(list(Path('/proc/self/fd').iterdir())),
+                temporary_index_files=len(list(Path('/tmp').glob('seekdb-hipvs-hnsw-*'))))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--library', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--resources', action='store_true',
+                        help='record Linux process/HIP memory after each released build')
     for name, default in [('rows', 5000), ('dimension', 16), ('m', 8),
                           ('ef-construction', 80), ('cpu-threads', 8),
                           ('seed', 20261027), ('repeats', 1)]:
@@ -59,6 +73,11 @@ def main():
     lib.seekdb_hipvs_build_hnsw_v1.restype = c.c_int
     lib.seekdb_hipvs_free_v1.argtypes = [c.c_void_p]
     lib.seekdb_hipvs_free_v1.restype = None
+    hip = None
+    if args.resources:
+        hip = c.CDLL('libamdhip64.so')
+        hip.hipMemGetInfo.argtypes = [c.POINTER(c.c_size_t), c.POINTER(c.c_size_t)]
+        hip.hipMemGetInfo.restype = c.c_int
     report = dict(scope='bridge-only; not SQL end-to-end construction',
                   library_sha256=sha256(library), vectors_sha256=sha256(vector_path),
                   numpy=np.__version__, rows=args.rows, dimension=args.dimension,
@@ -92,6 +111,8 @@ def main():
         finally:
             if result.hnsw_data:
                 lib.seekdb_hipvs_free_v1(result.hnsw_data)
+            if hip is not None and status == 0:
+                entry['released_resources'] = resources(hip)
             (args.output / 'manifest.json').write_text(json.dumps(report, indent=2) + '\n')
         print(json.dumps(entry), flush=True)
         if status:

@@ -1,6 +1,6 @@
 # Optional hipVS HNSW bulk construction
 
-This implementation is in development. The full local native seekdb build, SQL controls, AMD bridge compilation/execution, native import of an AMD-built graph and AddressSanitizer/UndefinedBehaviorSanitizer checks have passed. Full seekdb SQL construction on AMD, CPU/GPU end-to-end speedup and competition acceptance have **not** been verified.
+Full native seekdb builds on macOS and Linux, actual AMD SQL construction/query/DML, native graph import with ASan/UBSan, crash recovery and repeated-build resource checks have passed. On one AMD node, three fresh CPU and GPU SQL builds over 10,000x128 vectors measured a 2.93x median construction speedup, with minimum independent Recall@10 of 0.993/0.9985. This is a measured example, not competition acceptance: the official target configuration and thresholds were not published in the inspected task. Raw measurements and limits are in [the results record](hipvs-hnsw-build-results.json).
 
 The default CPU path is unchanged. An explicit process option stages a complete ordinary HNSW snapshot, calls hipVS to construct its base graph on AMD hardware, converts it to a full HNSW hierarchy, validates its contents and imports it into a new native VSAG index. Queries, filtering, incremental DML and persistence then use the existing VSAG implementation. Quantized, HGraph and sparse indexes retain their existing paths.
 
@@ -70,7 +70,7 @@ The executed local test used macOS ARM64 and the packaged static VSAG dependenci
 
 The negative test exposed a pre-existing vector DDL error-propagation defect: the build-and-write pipeline recorded an error only in its auxiliary DDL field and returned success to the scheduler. The scheduler could then publish an empty snapshot. The pipeline now preserves the failing task result so `CREATE VECTOR INDEX` reports the construction failure. The same unchanged test failed before this fix and passed afterwards.
 
-The local test servers needed forced termination after a 30-second graceful-shutdown wait. These results do not establish normal shutdown behavior or GPU resource stability. Full AMD seekdb SQL and performance checks remain required before merge.
+The final production code at `2927a906` was rebuilt on macOS and the same 44 SQL controls passed again. The AMD Linux build also passed all three SQL controls with a real required-mode GPU bridge: ordinary bulk HNSW logged a completed 2,048-row GPU build without fallback; empty and quantized indexes, signed/wide IDs and later insert/update/delete remained usable. Both CPU and GPU native servers needed forced termination after a 30-second graceful-shutdown wait; normal shutdown is not established. Separate repeated-build and intentional-crash checks are described below.
 
 ## Executed AMD bridge interoperability
 
@@ -91,7 +91,18 @@ Each actual AMD blob was then imported into the packaged native VSAG libraries o
 ./test_hipvs_hnsw_format gpu-fixture/vectors.f32 gpu-fixture/index-1.bin
 ```
 
-The optional external-fixture mode expects exactly 5,000 vectors of dimension 16 with `M=8` and `ef_construction=80`. Without arguments it retains the reordered CPU fixture. A separate `rocprofv3 --kernel-trace --hip-trace --memory-copy-trace --stats` execution of the same bridge produced kernel/HIP/memory-copy CSV traces with 139 kernel dispatches, including iterative float32 CAGRA construction and graph pruning/reverse-edge work. Its instrumented timing is separate from performance measurements. The AMD SQL benchmark and final quality/speedup verdict are still outstanding.
+The optional external-fixture mode expects exactly 5,000 vectors of dimension 16 with `M=8` and `ef_construction=80`. Without arguments it retains the reordered CPU fixture. A separate `rocprofv3 --kernel-trace --hip-trace --memory-copy-trace --stats` execution of the same bridge produced kernel/HIP/memory-copy CSV traces with 139 kernel dispatches, including iterative float32 CAGRA construction and graph pruning/reverse-edge work. Its instrumented timing is separate from performance measurements.
+
+Thirty consecutive bridge builds completed in one process with `--resources`. After each release, GPU free memory was exactly 51,126,468,608 bytes, open file descriptors remained seven and private temporary index files remained zero. Process RSS increased from 419,156 to 420,552 KiB; the last 20 samples ranged from 420,404 to 420,552 KiB. This observed bounded short-run behavior is not an unlimited leak-free guarantee.
+
+`unittest/sql/engine/vector/check_hipvs_crash_recovery.py` builds an actual 2,048-row GPU SQL index, commits inserts/updates/deletion, intentionally kills the server, then restarts the same data directory with hipVS disabled. It verifies complete retained IDs, the vector index query plan, exact self queries and further DML; `/proc/PID/maps` confirms the bridge is not loaded during recovered queries. It passed twice on the AMD node, including the reusable command-line form. Test cleanup also uses SIGKILL and makes no graceful-shutdown claim.
+
+```sh
+python unittest/sql/engine/vector/check_hipvs_crash_recovery.py \
+  --binary /absolute/path/to/seekdb --bridge /absolute/path/to/libseekdb_hipvs_bridge.so \
+  --vectors gpu-fixture/vectors.f32 --base-dir /absolute/path/to/new-recovery-instance \
+  --output recovery.json --source-revision IMPLEMENTATION_REVISION
+```
 
 ## Required performance evidence
 
@@ -105,10 +116,10 @@ The executable harness is `unittest/sql/engine/vector/benchmark_hipvs_build.py`.
 python unittest/sql/engine/vector/benchmark_hipvs_build.py prepare \
   --data vectors.npz --rows 10000 --dim 128 --queries 200 --k 10 --seed 20261027
 python unittest/sql/engine/vector/benchmark_hipvs_build.py run \
-  --mode off --data vectors.npz --binary /absolute/path/to/seekdb \
+  --mode off --ef-search 512 --data vectors.npz --binary /absolute/path/to/seekdb \
   --base-dir /workspace/bench-cpu --output cpu.json --source-revision COMMIT
 python unittest/sql/engine/vector/benchmark_hipvs_build.py run \
-  --mode required --bridge /absolute/path/to/libseekdb_hipvs_bridge.so \
+  --mode required --ef-search 512 --bridge /absolute/path/to/libseekdb_hipvs_bridge.so \
   --data vectors.npz --binary /absolute/path/to/seekdb \
   --base-dir /workspace/bench-gpu --output gpu.json --source-revision COMMIT
 ```
@@ -116,3 +127,20 @@ python unittest/sql/engine/vector/benchmark_hipvs_build.py run \
 The example shape is a reproducibility example, not the unpublished official evaluation configuration. Each invocation owns a new disposable native instance and performs three fresh table imports/builds. Its endpoint includes `CREATE VECTOR INDEX`, verification of the vector query plan and the first indexed query. It records import/startup separately, raw neighbor IDs and independent float64 exact-L2 ground truth over the frozen float32 inputs. GPU mode requires matching completed-build logs and rejects any fallback; a rotated build log causes an explicit failure requiring reconciliation. The output binds dataset, binary, bridge and harness SHA-256 values, parameters, CPU affinity, versions and raw timings. Record the actual AMD hardware/ROCm/hipVS revisions and GPU profiling evidence alongside it; positive log timing alone does not replace hardware execution proof.
 
 The harness itself completed a local CPU control with 2,048 vectors of dimension 16, 32 independent queries and three fresh builds. Recall@10 was 1.0 in every run; query-ready build times were 0.3197, 0.3090 and 0.3087 seconds. These macOS control timings verify the harness and are not the AMD CPU baseline or a claimed acceleration result.
+
+## Executed SQL construction comparison
+
+The measured node reported `AMD Radeon Graphics` / `gfx1100`, Ubuntu 24.04.4 and ROCm 7.2.4, with a 16-CPU cgroup quota and 55 GiB memory limit. Both modes used the same binary, frozen dataset, native defaults and CPU affinity 0-15; `OMP_NUM_THREADS=8` and `OPENBLAS_NUM_THREADS=8` were identical. The GPU completion logs reported four VSAG construction threads. The Linux VSAG revision was `012a0f2`; exact hipVS library source revision remains unknown.
+
+The cloud build used public baseline `5bce9e06` plus only the AMD diff from private base `be35bcc` to implementation `2927a906`. Earlier private AI solutions were not uploaded. The full cumulative private tree was also compiled on macOS. Linux binary SHA-256 was `1c148f505bcec2329a591fa9969f8de7888f8e2da2730118350a0bb7e141048e`; bridge SHA-256 was `a12326709042856ac16c538ba41202a13726f8985f3bf694993ce2e56aa4d755`. The shared dataset SHA-256 was `796c992ac20e991223160cf41c984eb9b9cd5810d9bfb1e121580b84e1f92089` (NumPy 2.4.6, seed 20261027, 10,000 float32 vectors of dimension128, 200 independent queries, float64 exact L2 truth, K=10, signed/wide IDs).
+
+Each run imported raw rows into a fresh table with no vector index. The interval includes CREATE INDEX, scan/transfer/synchronization/conversion/snapshot publication, vector-index plan verification and the first successful indexed query. `M=16` and `ef_construction=128` were equal in both modes. All GPU builds logged matching 10,000-row completion and no fallback. No build or slow sample was discarded.
+
+| Configuration | CPU seconds, all three runs | GPU seconds, all three runs | Median speedup | Minimum CPU/GPU Recall@10 |
+| --- | --- | --- | --- | --- |
+| ef_search=512, overlay-backed data directories | 1.950611 / 1.826902 / 1.819806 | 0.748924 / 0.520260 / 0.624441 | 2.92566x | 0.993 / 0.9985 |
+| Earlier ef_search=128, tmpfs-backed data directories | 1.848139 / 1.824960 / 1.822835 | 0.746687 / 0.520323 / 0.619147 | 2.94754x | 0.911 / 0.9055 |
+
+The earlier lower-recall comparison is retained. These are separate paired configurations; the changed filesystem prevents attributing cross-row timing differences solely to query breadth. A subsequent CPU startup on the 4-GiB tmpfs failed for insufficient disk space before any timed build. Both modes of the higher-quality comparison then used fresh directories on the larger overlay filesystem. Original failure, raw query IDs and complete measurements remain preserved locally; the JSON results record binds their SHA-256 values and includes the raw timings, per-run Recall, configuration and GPU log evidence.
+
+The inspected task does not specify a fixed speedup or quality threshold, so this report makes no official passing-score claim. Results cover these synthetic datasets on this one node; they do not establish large-scale or real-embedding performance. Native server cleanup required forced termination in both modes, as noted above.
