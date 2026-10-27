@@ -182,6 +182,18 @@ cc_library(
     visibility = ["//src/observer:__pkg__"],
 )
 
+# UUID node discovery needs only POSIX headers, so its focused regression tests
+# can exercise the production implementation without linking the SQL runtime.
+cc_library(
+    name = "uuid_node_headers",
+    hdrs = ["engine/expr/ob_uuid_node.h"],
+    strip_include_prefix = "/src",
+    visibility = [
+        "//src/sql:__subpackages__",
+        "//unittest/sql:__pkg__",
+    ],
+)
+
 # Private means private to the SQL module, not private to one Unity action.
 # Submodule header owners are visible only through this SQL-internal seam.
 cc_library(
@@ -189,11 +201,14 @@ cc_library(
     hdrs = glob(
         ["**/*.h", "**/*.ipp", "**/*.def"],
         allow_empty = True,
-        exclude = SQL_PUBLIC_HEADER_ROOTS + SQL_INTERFACE_CLOSURE_HEADERS + SQL_COMPOSITION_HEADERS,
+        exclude = SQL_PUBLIC_HEADER_ROOTS + SQL_INTERFACE_CLOSURE_HEADERS + SQL_COMPOSITION_HEADERS + [
+            "engine/expr/ob_uuid_node.h",
+        ],
     ),
     deps = [
         ":sql_retrieval_composition_headers",
         ":sql_runtime_interface",
+        ":uuid_node_headers",
         "//rust:config_headers",
         "//src/sql/engine/prepare:engine_prepare_internal_headers",
         "//src/sql/optimizer:optimizer_internal_headers",
