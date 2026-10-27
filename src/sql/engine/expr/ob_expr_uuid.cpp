@@ -25,6 +25,8 @@
 #endif
 #include <iphlpapi.h>
 #else
+#include <fcntl.h>
+#include <unistd.h>
 #include <sys/ioctl.h>
 #include <net/if.h>
 #ifdef __APPLE__
@@ -33,8 +35,6 @@
 #elif defined(__ANDROID__)
 #include <ifaddrs.h>
 #include <linux/if_packet.h>
-#include <fcntl.h>
-#include <unistd.h>
 #endif
 #endif
 #include "sql/engine/expr/ob_expr_uuid.h"
@@ -74,6 +74,34 @@ int ObBigEndian::put_uint32(unsigned char *b, uint32_t v)
   }
   return ret;
 }
+
+#if (defined(__linux__) && !defined(__EMSCRIPTEN__)) || defined(__ANDROID__)
+// RFC 9562 section 6.10: a node ID built from random data carries the multicast
+// bit, so it can never collide with an address assigned to a real interface.
+static int generate_random_uuid_node(unsigned char *node)
+{
+  int ret = OB_SUCCESS;
+  const int64_t node_len = 6;
+  int fd = -1;
+  ssize_t read_len = -1;
+  if (OB_ISNULL(node)) {
+    ret = OB_ERR_UNEXPECTED;
+    LOG_WARN("unexpected error. pointer is null", K(ret), K(node));
+  } else if ((fd = ::open("/dev/urandom", O_RDONLY)) < 0) {
+    ret = OB_ERR_UNEXPECTED;
+    LOG_WARN("open /dev/urandom failed", K(ret), K(errno));
+  } else if ((read_len = ::read(fd, node, node_len)) != node_len) {
+    ret = OB_ERR_UNEXPECTED;
+    LOG_WARN("read /dev/urandom failed", K(ret), K(errno), K(read_len));
+  } else {
+    node[0] |= 0x01; // mark the node ID as randomly generated
+  }
+  if (fd >= 0) {
+    ::close(fd);
+  }
+  return ret;
+}
+#endif
 
 ObUUIDNode::ObUUIDNode()
 {
@@ -165,7 +193,7 @@ int ObUUIDNode::init()
     struct ifaddrs *ifaddr = NULL;
     bool mac_addr_found = false;
     if (getifaddrs(&ifaddr) == -1) {
-      ret = OB_ERR_UNEXPECTED;
+      LOG_WARN("getifaddrs failed, try a random UUID node", K(errno));
     } else {
       for (struct ifaddrs *ifa = ifaddr; ifa != NULL && !mac_addr_found; ifa = ifa->ifa_next) {
         if (ifa->ifa_addr == NULL) continue;
@@ -179,44 +207,36 @@ int ObUUIDNode::init()
       }
       freeifaddrs(ifaddr);
     }
-    if (OB_SUCC(ret) && !mac_addr_found) {
-      // RFC 4122 section 4.5: when MAC address is unavailable (Android sandbox),
-      // use random bytes with the multicast bit set as the node ID.
-      int fd = open("/dev/urandom", O_RDONLY);
-      if (fd >= 0 && read(fd, mac_addr_, 6) == 6) {
-        mac_addr_[0] |= 0x01;  // set multicast bit
-        mac_addr_found = true;
-        LOG_INFO("using random UUID node ID (no MAC available on Android)");
+    if (!mac_addr_found) {
+      if (OB_FAIL(generate_random_uuid_node(mac_addr_))) {
+        LOG_WARN("failed to generate a random UUID node", K(ret));
       } else {
-        ret = OB_ERR_UNEXPECTED;
+        LOG_INFO("using random UUID node ID (no MAC available on Android)");
+        is_inited_ = true;
       }
-      if (fd >= 0) {
-        close(fd);
-      }
-    }
-    if (OB_SUCC(ret) && mac_addr_found) {
+    } else {
       is_inited_ = true;
     }
   }
 #else
-  // Linux: Use ioctl to get MAC address
+  // Linux: Use ioctl to get MAC address, fall back to a random node ID when the
+  // environment does not expose interface information.
   struct ifreq ifr;
   struct ifconf ifc;
   char buf[1024];
+  bool mac_addr_found = false;
   int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
   if (sock == -1) {
-    ret = OB_ERR_UNEXPECTED;
-    LOG_ERROR("socket failed", K(ret), K(errno));
+    LOG_WARN("socket failed, try a random UUID node", K(errno));
   } else {
     ifc.ifc_len = sizeof(buf);
     ifc.ifc_buf = buf;
     if (ioctl(sock, SIOCGIFCONF, &ifc) < 0) {
-      ret = OB_ERR_UNEXPECTED;
+      LOG_WARN("ioctl failed, SIOCGIFCONF, try a random UUID node", K(errno));
     } else {
       ifreq *it = ifc.ifc_req;
       ifreq *end = it + (ifc.ifc_len / sizeof(ifreq));
-      bool mac_addr_found = false;
-      for (; it != end && OB_SUCC(ret); ++it) {
+      for (; it != end; ++it) {
         if (OB_ISNULL(it) || OB_ISNULL(it->ifr_name) || OB_ISNULL(ifr.ifr_name)) {
           continue;
         } else {
@@ -236,14 +256,16 @@ int ObUUIDNode::init()
           }
         }
       }//end for
-      if (OB_FAIL(ret)) {
-      } else if (!mac_addr_found) {
-        ret = OB_ERR_UNEXPECTED;
-      } else {
-        is_inited_ = true;
-      }
     }
     close(sock);
+  }
+  if (mac_addr_found) {
+    is_inited_ = true;
+  } else if (OB_FAIL(generate_random_uuid_node(mac_addr_))) {
+    LOG_WARN("failed to generate a random UUID node", K(ret));
+  } else {
+    LOG_INFO("no usable MAC address, using random UUID node ID");
+    is_inited_ = true;
   }
 #endif
   return ret;
