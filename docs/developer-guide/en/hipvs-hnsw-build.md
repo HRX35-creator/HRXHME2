@@ -1,6 +1,6 @@
 # Optional hipVS HNSW bulk construction
 
-This implementation is in development. Native CPU interoperability and AddressSanitizer/UndefinedBehaviorSanitizer checks have passed; an AMD build, GPU execution, end-to-end speedup and competition acceptance have **not** been verified.
+This implementation is in development. The full native seekdb build, native SQL controls, CPU interoperability and AddressSanitizer/UndefinedBehaviorSanitizer checks have passed. An AMD bridge build, GPU execution, CPU/GPU end-to-end speedup and competition acceptance have **not** been verified.
 
 The default CPU path is unchanged. An explicit process option stages a complete ordinary HNSW snapshot, calls hipVS to construct its base graph on AMD hardware, converts it to a full HNSW hierarchy, validates its contents and imports it into a new native VSAG index. Queries, filtering, incremental DML and persistence then use the existing VSAG implementation. Quantized, HGraph and sparse indexes retain their existing paths.
 
@@ -59,10 +59,34 @@ c++ -std=c++17 -O1 -g -fsanitize=address,undefined \
 ./test_hipvs_hnsw_format
 ```
 
-The executed local test used macOS ARM64 and the packaged static VSAG dependencies. The main vector and observer translation units also passed the existing Clang 19 compilation flags in syntax checks. Full native SQL regression and actual GPU compilation/execution remain required before merge.
+The executed local test used macOS ARM64 and the packaged static VSAG dependencies. The main vector and observer translation units passed the existing Clang 19 compilation flags in syntax checks, followed by a full native build.
+
+`unittest/sql/engine/vector/test_hipvs_build_integration.py` exercises empty snapshots, bulk HNSW, quantized HNSW, signed/wide document IDs, indexed queries and later insert/update/delete operations. On the native binary, `off` and `auto` each passed 19 checks including the existing ANN rewrite and AI column worker suites. `required` with a missing bridge and an invalid option each passed three controls: ordinary bulk HNSW fails explicitly while empty and quantized indexes remain usable. These are 44 test executions across four fresh process configurations. Actual `auto` fallback logs were checked; they are not GPU execution evidence.
+
+The negative test exposed a pre-existing vector DDL error-propagation defect: the build-and-write pipeline recorded an error only in its auxiliary DDL field and returned success to the scheduler. The scheduler could then publish an empty snapshot. The pipeline now preserves the failing task result so `CREATE VECTOR INDEX` reports the construction failure. The same unchanged test failed before this fix and passed afterwards.
+
+The local test servers needed forced termination after a 30-second graceful-shutdown wait. These results do not establish normal shutdown behavior or GPU resource stability. Actual GPU compilation/execution remains required before merge.
 
 ## Required performance evidence
 
 Use the same frozen vectors, query set, float32 precision, IDs, dimension, L2 metric, data-generation seed, CPU resources and comparable `M`/`ef_construction`/`ef_search` values. Record the implementation and dependency revisions and device information. Each run must begin with imported raw data and **no vector index**. Time fresh `CREATE VECTOR INDEX` through completed snapshot storage and the first successful query that actually uses the vector index; any lazy construction belongs inside this interval.
 
 Run at least three fresh CPU builds with `off` and three GPU builds with `required`. Preserve every timing, verify complete data/ID coverage, check the actual query plan, and calculate Recall@K against independent exact ground truth. Record any failure or fallback. Compare medians and apply the officially published quality/speedup thresholds when available; no threshold or passing score is asserted here. Initialization, data generation/import and query-performance measurements are separate from index construction.
+
+The executable harness is `unittest/sql/engine/vector/benchmark_hipvs_build.py`. Install NumPy and PyMySQL in an isolated environment (the local harness control used NumPy 2.5.4 and PyMySQL 1.2.3). Prepare the dataset once and use that exact file on the same AMD node for both modes:
+
+```sh
+python unittest/sql/engine/vector/benchmark_hipvs_build.py prepare \
+  --data vectors.npz --rows 10000 --dim 128 --queries 200 --k 10 --seed 20261027
+python unittest/sql/engine/vector/benchmark_hipvs_build.py run \
+  --mode off --data vectors.npz --binary /absolute/path/to/seekdb \
+  --base-dir /workspace/bench-cpu --output cpu.json --source-revision COMMIT
+python unittest/sql/engine/vector/benchmark_hipvs_build.py run \
+  --mode required --bridge /absolute/path/to/libseekdb_hipvs_bridge.so \
+  --data vectors.npz --binary /absolute/path/to/seekdb \
+  --base-dir /workspace/bench-gpu --output gpu.json --source-revision COMMIT
+```
+
+The example shape is a reproducibility example, not the unpublished official evaluation configuration. Each invocation owns a new disposable native instance and performs three fresh table imports/builds. Its endpoint includes `CREATE VECTOR INDEX`, verification of the vector query plan and the first indexed query. It records import/startup separately, raw neighbor IDs and independent float64 exact-L2 ground truth over the frozen float32 inputs. GPU mode requires matching completed-build logs and rejects any fallback; a rotated build log causes an explicit failure requiring reconciliation. The output binds dataset, binary, bridge and harness SHA-256 values, parameters, CPU affinity, versions and raw timings. Record the actual AMD hardware/ROCm/hipVS revisions and GPU profiling evidence alongside it; positive log timing alone does not replace hardware execution proof.
+
+The harness itself completed a local CPU control with 2,048 vectors of dimension 16, 32 independent queries and three fresh builds. Recall@10 was 1.0 in every run; query-ready build times were 0.3197, 0.3090 and 0.3087 seconds. These macOS control timings verify the harness and are not the AMD CPU baseline or a claimed acceleration result.
