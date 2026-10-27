@@ -19,7 +19,11 @@ COPY (SELECT id, name FROM read_csv('/absolute/path/to/data/input.csv'))
 Filters, expressions, aggregates, sorting, limits and joins use ordinary seekdb
 operators. Files are not imported into a temporary SQL table or sent to another
 query engine. `DESCRIBE SELECT` returns the inferred output column names, types
-and nullability. An ordinary `EXPLAIN` still shows the native execution plan.
+and nullability as `column_name`, `column_type` and `null`, followed by nullable
+`key`, `default` and `extra` columns. An ordinary `EXPLAIN` still shows the native
+execution plan. CSV/JSONL DATETIME output uses the greatest fractional precision
+present in that column; whole-second input has no fractional suffix. Parquet
+timestamps retain microsecond precision.
 
 CSV options are `header`, `delimiter` (alias `delim`), `quote`, `escape`, and
 `nullstr`. Named reader options use `name=value`. Reader headers default to true;

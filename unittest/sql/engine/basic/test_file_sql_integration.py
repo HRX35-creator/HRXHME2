@@ -106,11 +106,42 @@ class FileSQLIntegrationTest(unittest.TestCase):
         self.assertEqual('say "hi"',rows[2][6])
 
     def test_describe_select(self):
-        rows=self.execute("DESCRIBE SELECT * FROM read_csv(%s)",(str(self.csv_path),))
+        with self.connection.cursor() as cursor:
+            cursor.execute("DESCRIBE SELECT * FROM read_csv(%s)",(str(self.csv_path),))
+            self.assertEqual(["column_name","column_type","null","key","default","extra"],
+                             [field[0] for field in cursor.description])
+            rows=cursor.fetchall()
         self.assertEqual(["id","name","score","active","day","created","note","id__2"],[row[0] for row in rows])
         self.assertEqual(["BIGINT","VARCHAR","DOUBLE","BOOLEAN","DATE","DATETIME","VARCHAR","BIGINT"],
                          [row[1] for row in rows])
         self.assertEqual(["NO","NO","NO","NO","YES","YES","NO","NO"],[row[2] for row in rows])
+        self.assertTrue(all(row[3:] == (None,None,None) for row in rows))
+
+    def test_datetime_wire_precision(self):
+        # Python's default DATETIME decoder hides extra trailing zeroes. Check
+        # both the protocol scale and the text seen by mysqltest/SQL clients.
+        converters=pymysql.converters.conversions.copy()
+        converters[pymysql.constants.FIELD_TYPE.DATETIME]=lambda value: value
+        options=dict(self.connection_options,conv=converters)
+        with pymysql.connect(**options) as raw:
+            with raw.cursor() as cursor:
+                cursor.execute("SET SESSION enable_file_sql=ON")
+                for function,extension in (("read_csv","csv"),("read_json","jsonl")):
+                    for fraction in ("", ".1", ".123456"):
+                        with self.subTest(function=function,fraction=fraction):
+                            first="2026-08-01 10:11:12"
+                            second="1969-12-31 23:59:59"+fraction
+                            if extension == "csv":
+                                content=f"created,id\n{first},1\n{second},2\n,3\n"
+                            else:
+                                content="\n".join(json.dumps({"id":i,"created":value})
+                                                  for i,value in enumerate((first,second,None),1))+"\n"
+                            path=self.write(f"precision.{extension}",content)
+                            cursor.execute(f"SELECT created FROM {function}(%s) ORDER BY id",(path,))
+                            scale=max(0,len(fraction)-1)
+                            self.assertEqual(scale,cursor.description[0][5])
+                            first_fraction="."+"0"*scale if scale else ""
+                            self.assertEqual(((first+first_fraction,),(second,),(None,)),cursor.fetchall())
 
     def test_csv_options_and_headerless_input(self):
         path=self.write("options.csv",'1;"a;b";NULL\r\n2;"line\nnext";3\r\n')
