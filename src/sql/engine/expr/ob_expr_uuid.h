@@ -38,7 +38,9 @@ struct ObUUIDNode
 {
   ObUUIDNode();
   int init();
-  unsigned char mac_addr_[6];
+  /// The length of the node id in bytes, the MAC address is 6 bytes long.
+  static const int MAC_ADDR_LEN = 6;
+  unsigned char mac_addr_[MAC_ADDR_LEN];
   bool is_inited_;
   /**
    * @brief Look up the MAC address of a non-loopback network interface.
@@ -58,9 +60,10 @@ struct ObUUIDNode
    * @brief Generate a random node id for the UUID, see RFC 4122 section 4.5.
    *        The multicast bit is set to mark the node id as a random one.
    * @param mac_addr [out] the 6 bytes node id
+   * @param len [in] the number of bytes to fill, it must be the node id length
    * @return OB_SUCCESS if the node id was generated, otherwise an error
    */
-  static int gen_random_node_id(unsigned char *mac_addr);
+  static int gen_random_node_id(unsigned char *mac_addr, int len);
   /**
    * @brief The interface lookup used by init(). It is a function pointer so that
    *        the unit test can simulate an environment where no physical MAC

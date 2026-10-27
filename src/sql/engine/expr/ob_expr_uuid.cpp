@@ -42,6 +42,7 @@
 #include <unistd.h>
 #endif
 #endif
+#include <string.h>
 #include "sql/engine/expr/ob_expr_uuid.h"
 #include "sql/engine/ob_exec_context.h"
 #include "lib/time/ob_time_utility.h"
@@ -83,6 +84,7 @@ int ObBigEndian::put_uint32(unsigned char *b, uint32_t v)
 ObUUIDNode::ObUUIDNode()
 {
   is_inited_ = false;
+  memset(mac_addr_, 0, sizeof(mac_addr_));
   (void)init();
 }
 
@@ -101,7 +103,7 @@ int ObUUIDNode::init()
     // network interface information is not accessible, e.g. ioctl(SIOCGIFCONF)
     // fails with EPERM. RFC 4122 section 4.5 allows a random node id instead,
     // the multicast bit marks it as a random one.
-    ret = gen_random_node_id(mac_addr_);
+    ret = gen_random_node_id(mac_addr_, MAC_ADDR_LEN);
     if (OB_SUCC(ret)) {
       LOG_WARN("no MAC address is available, using a random UUID node id", K(ret));
     }
@@ -278,16 +280,17 @@ int ObUUIDNode::get_mac_by_getifaddrs(unsigned char *mac_addr)
   return ret;
 }
 
-int ObUUIDNode::gen_random_node_id(unsigned char *mac_addr)
+int ObUUIDNode::gen_random_node_id(unsigned char *mac_addr, int len)
 {
   int ret = OB_SUCCESS;
-  if (OB_ISNULL(mac_addr)) {
+  if (OB_ISNULL(mac_addr) || len != MAC_ADDR_LEN) {
     ret = OB_ERR_UNEXPECTED;
-    LOG_ERROR("unexpected error. pointer is null", K(ret), K(mac_addr));
+    LOG_ERROR("unexpected error. invalid node id buffer", K(ret), K(mac_addr), K(len));
   } else {
 #if defined(__EMSCRIPTEN__)
-    // Emscripten getentropy uses the host cryptographic random source
-    if (getentropy(mac_addr, sizeof(mac_addr)) != 0) {
+    // Emscripten getentropy uses the host cryptographic random source.
+    // The length is passed explicitly, sizeof(mac_addr) would be the pointer size.
+    if (getentropy(mac_addr, len) != 0) {
       ret = OB_ERR_UNEXPECTED;
       LOG_WARN("failed to generate a random UUID node id", K(ret), K(errno));
     } else {
@@ -302,9 +305,9 @@ int ObUUIDNode::gen_random_node_id(unsigned char *mac_addr)
       ret = OB_ERR_UNEXPECTED;
       LOG_WARN("failed to open /dev/urandom", K(ret), K(errno));
     } else {
-      ssize_t read_size = read(fd, mac_addr, 6);
+      ssize_t read_size = read(fd, mac_addr, len);
       close(fd);
-      if (read_size != 6) {
+      if (read_size != len) {
         ret = OB_ERR_UNEXPECTED;
         LOG_WARN("failed to read random bytes for the UUID node id", K(ret), K(read_size));
       } else {
