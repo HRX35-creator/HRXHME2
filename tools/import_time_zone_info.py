@@ -133,6 +133,7 @@ class TimeZoneInfoImporter:
                 raise
             else:
                 print("INFO : success to insert time zone version")
+            self.conn.commit()
         else:
             raise RuntimeError("time zone row counts do not match the import manifest")
 
