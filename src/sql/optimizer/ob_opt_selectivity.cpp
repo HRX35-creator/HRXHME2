@@ -22,6 +22,7 @@
 #include "sql/optimizer/stat/ob_dbms_stats_utils.h"
 #include "sql/optimizer/ob_access_path_estimation.h"
 #include "sql/optimizer/ob_sel_estimator.h"
+#include "sql/resolver/expr/ob_raw_expr_util.h"
 #include "sql/engine/expr/ob_datum_cast.h"
 using namespace oceanbase::common;
 using namespace oceanbase::share::schema;
@@ -2172,6 +2173,49 @@ int ObOptSelectivity::get_column_min_max(const OptTableMetas &table_metas,
         column_meta->set_max_value(stat.max_val_);
         min_obj = column_meta->get_min_value();
         max_obj = column_meta->get_max_value();
+      }
+    }
+  }
+  return ret;
+}
+
+int ObOptSelectivity::has_column_range_stat(const OptTableMetas &table_metas,
+                                             const OptSelectivityCtx &ctx,
+                                             const ObIArray<ObRawExpr *> &quals,
+                                             bool &has_stat)
+{
+  // This helper only reports whether the selectivity of the quals can be
+  // derived from the collected statistics, so it never fails the caller.
+  // Whenever the answer is unknown the conservative value is reported.
+  int ret = OB_SUCCESS;
+  has_stat = true;
+  for (int64_t i = 0; has_stat && i < quals.count(); ++i) {
+    const ObRawExpr *qual = quals.at(i);
+    if (OB_ISNULL(qual)) {
+      continue;
+    }
+    ObArray<ObRawExpr *> column_exprs;
+    if (OB_FAIL(ObRawExprUtils::extract_column_exprs(qual, column_exprs))) {
+      has_stat = false;
+    } else {
+      for (int64_t j = 0; has_stat && j < column_exprs.count(); ++j) {
+        const ObRawExpr *column_expr = column_exprs.at(j);
+        if (OB_ISNULL(column_expr) || !column_expr->is_column_ref_expr()) {
+          continue;
+        }
+        ObObj min_obj;
+        ObObj max_obj;
+        min_obj.set_min_value();
+        max_obj.set_max_value();
+        int tmp_ret = get_column_min_max(table_metas, ctx, *column_expr, min_obj, max_obj);
+        if (OB_FAIL(tmp_ret)) {
+          // the column statistics are not available at all
+          has_stat = false;
+        } else if (min_obj.is_min_value() || max_obj.is_max_value()) {
+          // the column has no min/max statistics, so calc_column_range_selectivity()
+          // falls back to a default constant instead of estimating the range
+          has_stat = false;
+        }
       }
     }
   }

@@ -1462,11 +1462,19 @@ int ObJoinOrder::process_vec_index_info(const ObDMLStmt *stmt,
     ret = OB_ERR_UNEXPECTED;
   } else {
     double selectivity = 0.0;
+    // Tells whether the selectivity is derived from the collected statistics
+    // of the filtered column.  Without statistics the range selectivity is a
+    // fixed default constant, so the scan strategy must not be chosen from it.
+    bool selectivity_from_stat = true;
     if (OB_FAIL(ObOptSelectivity::calculate_selectivity(get_plan()->get_basic_table_metas(),
                                                         get_plan()->get_selectivity_ctx(),
                                                         get_restrict_infos(),
                                                         selectivity,
                                                         get_plan()->get_predicate_selectivities()))) {
+    } else if (OB_FAIL(ObOptSelectivity::has_column_range_stat(get_plan()->get_basic_table_metas(),
+                                                                get_plan()->get_selectivity_ctx(),
+                                                                get_restrict_infos(),
+                                                                selectivity_from_stat))) {
     } else if (OB_FAIL(ObVectorIndexUtil::set_vector_index_param(vec_index_schema,
                                                                  access_path.vec_idx_info_.vec_extra_info_,
                                                                  selectivity,
@@ -1475,6 +1483,7 @@ int ObJoinOrder::process_vec_index_info(const ObDMLStmt *stmt,
     } else {
       access_path.vec_idx_info_.inited_ = true;
       access_path.vec_idx_info_.vec_extra_info_.set_row_count(table_meta_info_.table_row_count_);
+      access_path.vec_idx_info_.vec_extra_info_.set_selectivity_from_stat(selectivity_from_stat);
     }
     // set vec_extra_info_
     if (OB_FAIL(ret)) {
@@ -1483,11 +1492,16 @@ int ObJoinOrder::process_vec_index_info(const ObDMLStmt *stmt,
       LOG_USER_ERROR(OB_NOT_SUPPORTED, "when using vector index, weak read is");
     } else {
       double selectivity = 0.0;
+      bool selectivity_from_stat = true;
       if (OB_FAIL(ObOptSelectivity::calculate_selectivity(get_plan()->get_basic_table_metas(),
                                                           get_plan()->get_selectivity_ctx(),
                                                           get_restrict_infos(),
                                                           selectivity,
                                                           get_plan()->get_predicate_selectivities()))) {
+      } else if (OB_FAIL(ObOptSelectivity::has_column_range_stat(get_plan()->get_basic_table_metas(),
+                                                                  get_plan()->get_selectivity_ctx(),
+                                                                  get_restrict_infos(),
+                                                                  selectivity_from_stat))) {
       } else if (OB_FAIL(ObVectorIndexUtil::set_vector_index_param(vec_index_schema,
                                                                    access_path.vec_idx_info_.vec_extra_info_,
                                                                    selectivity,
@@ -1496,6 +1510,7 @@ int ObJoinOrder::process_vec_index_info(const ObDMLStmt *stmt,
       } else {
         access_path.domain_idx_info_.set_domain_idx_type(DomainIndexType::VEC_INDEX);
         access_path.vec_idx_info_.vec_extra_info_.set_row_count(table_meta_info_.table_row_count_);
+        access_path.vec_idx_info_.vec_extra_info_.set_selectivity_from_stat(selectivity_from_stat);
       }
     } // not weak read
 

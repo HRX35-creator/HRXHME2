@@ -662,4 +662,51 @@ order by p.cardinality, p.plan_id;
 
 drop table t_issue1439_or_selectivity;
 
+# issue #1471: the adaptive scan must not choose the pre-filter strategy when
+# the predicate keeps every row of the table
+--disable_warnings
+drop table if exists t_issue1471_tautology_filter;
+--enable_warnings
+create table t_issue1471_tautology_filter(
+  id bigint not null,
+  embedding vector(3) not null,
+  category int not null,
+  primary key(id),
+  vector key idx_embedding(embedding)
+    with (distance=l2, type=hnsw, lib=vsag, m=16, ef_construction=128, ef_search=64));
+
+--disable_query_log
+--let $row = 0
+while ($row < 100)
+{
+  eval insert into t_issue1471_tautology_filter values ($row, '[$row,0,0]', 1);
+  --inc $row
+}
+--enable_query_log
+
+--disable_result_log
+call dbms_stats.set_table_stats('TEST', 'T_ISSUE1471_TAUTOLOGY_FILTER', numrows=>200000);
+--enable_result_log
+
+# The table has never been analyzed, so the range selectivity of the category
+# column is a fixed default constant instead of an estimate.  The pre-filter
+# must not be chosen on such a guess, because it has to evaluate the predicate
+# on every row of the table before the vector search may start.
+alter system flush plan cache;
+--disable_query_log
+--disable_result_log
+select id from t_issue1471_tautology_filter
+where category between 1 and 5
+order by l2_distance(embedding, '[0,0,0]') approximate limit 10;
+--enable_result_log
+--enable_query_log
+select p.operator
+from oceanbase.`V$OB_PLAN_CACHE_PLAN_STAT` s
+join oceanbase.__all_virtual_sql_plan p on p.plan_id = s.plan_id
+where instr(s.statement, 't_issue1471_tautology_filter') > 0
+  and p.operator like 'VECTOR INDEX ADAPTIVE SCAN%'
+order by length(s.statement), p.plan_id;
+
+drop table t_issue1471_tautology_filter;
+
 alter system set vector_memory_limit = 0;

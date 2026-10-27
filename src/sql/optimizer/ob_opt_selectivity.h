@@ -891,9 +891,28 @@ public:
   
   static int get_column_min_max(const OptTableMetas &table_metas,
                                 const OptSelectivityCtx &ctx,
-                                const ObRawExpr &expr,  
+                                const ObRawExpr &expr,
                                 ObObj &min_obj,
                                 ObObj &max_obj);
+
+  /**
+   * @brief Check whether the selectivity of the given quals is derived from
+   *        the collected statistics of the filtered columns.
+   *
+   * calc_column_range_selectivity() falls back to a fixed default constant
+   * (OB_DEFAULT_CLOSED_RANGE_SEL for a closed range) when the filtered column
+   * has no min/max statistics, so the selectivity it returns is a guess
+   * instead of an estimate.  Such a guess says nothing about the number of
+   * rows that really survive the predicate, so it must not be used to select
+   * a scan strategy.
+   *
+   * @param has_stat  OUT, set to false when at least one filtered column has
+   *                  no usable min/max statistics.
+   */
+  static int has_column_range_stat(const OptTableMetas &table_metas,
+                                    const OptSelectivityCtx &ctx,
+                                    const ObIArray<ObRawExpr *> &quals,
+                                    bool &has_stat);
 
   static int get_column_basic_info(const OptTableMetas &table_metas,
                                    const OptSelectivityCtx &ctx,

@@ -5880,14 +5880,34 @@ int ObVectorIndexUtil::set_adaptive_try_path(ObVecIdxExtraInfo& vc_info, const b
       }
     }
   } else if (vc_info.adaptive_try_path_ == ObVecIdxAdaTryPath::VEC_PATH_UNCHOSEN) {
-    if (output_row_count <= ObVecIdxExtraInfo::MAX_HNSW_BRUTE_FORCE_SIZE) {
+    // A pre-filter has to evaluate the predicate on every scanned row before the
+    // vector search may start, so its cost follows the number of scanned rows
+    // and not the number of rows that survive the predicate.  A predicate that
+    // keeps (almost) every row of the table therefore turns the pre-filter into
+    // a full table scan whose eligible VID set is nearly as large as the table
+    // itself, and searching the vector index directly while evaluating the
+    // predicate on the visited candidates is the cheaper strategy.
+    const double pre_filter_selectivity_limit = ObVecIdxExtraInfo::MAX_HNSW_PRE_FILTER_SELECTIVITY;
+    const bool predicate_keeps_most_rows = vc_info.selectivity_ >= pre_filter_selectivity_limit;
+    // A selectivity that is not derived from the collected statistics of the
+    // filtered column is a fixed default constant (0.05 for a closed range)
+    // and says nothing about the rows that really survive the predicate.
+    // Choosing the pre-filter on such a guess may turn the scan into a full
+    // table scan, so the strategy is only taken from the estimate when the
+    // estimate is backed by statistics.  The adaptive scan retries the query
+    // with the pre-filter when the runtime shows that the predicate is
+    // selective after all.
+    const bool can_use_pre_filter = !predicate_keeps_most_rows && vc_info.selectivity_from_stat();
+    if (can_use_pre_filter && output_row_count <= ObVecIdxExtraInfo::MAX_HNSW_BRUTE_FORCE_SIZE) {
       vc_info.adaptive_try_path_ = ObVecIdxAdaTryPath::VEC_INDEX_PRE_FILTER;
     } else if (is_primary_idx) {
-      vc_info.adaptive_try_path_ = (output_row_count < ObVecIdxExtraInfo::MAX_HNSW_PRE_ROW_CNT_WITH_ROWKEY
+      vc_info.adaptive_try_path_ = (can_use_pre_filter
+                                    && output_row_count < ObVecIdxExtraInfo::MAX_HNSW_PRE_ROW_CNT_WITH_ROWKEY
                                     && vc_info.selectivity_ <= ObVecIdxExtraInfo::DEFAULT_PRE_RATE_FILTER_WITH_ROWKEY) ?
                                     ObVecIdxAdaTryPath::VEC_INDEX_PRE_FILTER : ObVecIdxAdaTryPath::VEC_INDEX_ITERATIVE_FILTER;
     } else {
-      vc_info.adaptive_try_path_ = (output_row_count < ObVecIdxExtraInfo::MAX_HNSW_PRE_ROW_CNT_WITH_IDX
+      vc_info.adaptive_try_path_ = (can_use_pre_filter
+                                    && output_row_count < ObVecIdxExtraInfo::MAX_HNSW_PRE_ROW_CNT_WITH_IDX
                                     && vc_info.selectivity_ <= ObVecIdxExtraInfo::DEFAULT_PRE_RATE_FILTER_WITH_IDX) ?
                                     ObVecIdxAdaTryPath::VEC_INDEX_PRE_FILTER : ObVecIdxAdaTryPath::VEC_INDEX_ITERATIVE_FILTER;
     }
