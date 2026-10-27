@@ -74,6 +74,10 @@ class AIColumnRetryStrictIntegrationTest(AISQLMockTestCase):
                 f"SELECT result FROM `{table}` WHERE id=2",
                 f"SELECT * FROM `{table}` WHERE id=2",
                 f"SELECT id FROM `{table}` WHERE result IS NULL",
+                f"SELECT t.id FROM `{table}` t JOIN (SELECT 'reply:two' AS result) s USING(result)",
+                f"SELECT t.id FROM `{table}` t NATURAL JOIN (SELECT 'reply:two' AS result) s",
+                f"SELECT ROW_NUMBER() OVER(ORDER BY result) FROM `{table}`",
+                f"SELECT (SELECT t.result) FROM `{table}` t WHERE id=2",
                 f"SELECT id FROM `{table}` WHERE id IN(SELECT id FROM `{table}` WHERE result IS NULL)",
                 f"UPDATE `{table}` SET category='rejected' WHERE result IS NULL",
                 f"DELETE FROM `{table}` WHERE result IS NULL"):

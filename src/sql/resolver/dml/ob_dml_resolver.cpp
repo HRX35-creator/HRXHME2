@@ -2874,6 +2874,12 @@ int ObDMLResolver::resolve_joined_table(const ParseNode &parse_node, JoinedTable
       current_scope_ = old_scope;
     }
   }
+  // USING and NATURAL synthesize ON expressions without resolve_sql_expr.
+  // They still explicitly read the participating AI columns.
+  for (int64_t i = 0; OB_SUCC(ret) && joined_table != nullptr
+      && i < joined_table->join_conditions_.count(); ++i) {
+    ret = record_ai_column_reads(joined_table->join_conditions_.at(i));
+  }
   return ret;
 }
 
