@@ -2214,8 +2214,8 @@ int ObDMLService::enqueue_ai_column_tasks(ObDMLModifyRowNode &modify)
   } else if (OB_FAIL(qualified.append("."))) {
   } else if (OB_FAIL(append_ai_identifier(qualified, schema->get_table_name_str()))) {
   } else if (OB_FAIL(build_ai_rowkey(*schema, ctdef, deleting ? ctdef.old_row_ : ctdef.new_row_, op, predicate))) {
-  } else if (OB_FAIL(eligible.append_fmt("TIMESTAMPADD(MICROSECOND,%ld,FROM_UNIXTIME(%ld))",
-          queue_time % 1000000, queue_time / 1000000))) {
+  } else if (OB_FAIL(eligible.append_fmt("FROM_UNIXTIME(%ld.%06ld)",
+          queue_time / 1000000, queue_time % 1000000))) {
   } else if (OB_FAIL(op.open_inner_conn())) {
   }
   for (int64_t a = 0; OB_SUCC(ret) && a < schema->get_ai_column_count(); ++a) {

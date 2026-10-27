@@ -29,8 +29,10 @@ int wall_time(ObSqlString &sql, int64_t microseconds)
 {
   // Queue deadlines are server times. SQL NOW() can be overridden by a
   // session's timestamp variable and must not control durable work.
-  return sql.append_fmt("TIMESTAMPADD(MICROSECOND,%ld,FROM_UNIXTIME(%ld))",
-      microseconds % 1000000, microseconds / 1000000);
+  // A decimal argument keeps microseconds; adding them to a scale-zero
+  // FROM_UNIXTIME(integer) would format away the fractional seconds.
+  return sql.append_fmt("FROM_UNIXTIME(%ld.%06ld)",
+      microseconds / 1000000, microseconds % 1000000);
 }
 
 int identifier(ObSqlString &sql, const ObString &name)

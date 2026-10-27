@@ -186,6 +186,8 @@ class AIColumnWorkerIntegrationTest(AISQLMockTestCase):
     def test_session_timestamp_override_does_not_delay_durable_work(self):
         table = self.create("clock")
         self.addCleanup(self.execute, "SET timestamp=0")
+        self.addCleanup(self.execute, "SET time_zone='SYSTEM'")
+        self.execute("SET time_zone='+12:00'")
         self.execute("SET timestamp=2000000000")
         self.execute(f"INSERT INTO `{table}`(id,content) VALUES(1,'future SQL clock')")
         self.wait_value(table, "reply:future SQL clock")
