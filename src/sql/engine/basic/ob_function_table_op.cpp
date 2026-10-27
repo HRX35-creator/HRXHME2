@@ -20,6 +20,7 @@
 #include "sql/engine/basic/ob_file_scan_utils.h"
 #include "sql/engine/ob_exec_context.h"
 #include "sql/engine/expr/ob_expr_lob_utils.h"
+#include "common/timezone/ob_time_convert.h"
 
 
 namespace oceanbase
@@ -149,6 +150,21 @@ int ObFunctionTableOp::inner_get_next_row_file_scan()
           datum.set_double(atof(field.c_str()));
         } else if (ObTinyIntType == type) {
           datum.set_bool(field == "true" || field == "TRUE");
+        } else if (ObDateType == type) {
+          int32_t date_value = 0;
+          ObString field_str(static_cast<int32_t>(field.size()), field.data());
+          if (OB_FAIL(ObTimeConverter::str_to_date(field_str, date_value))) {
+          } else {
+            datum.set_int32(date_value);
+          }
+        } else if (ObDateTimeType == type) {
+          int64_t datetime_value = 0;
+          ObString field_str(static_cast<int32_t>(field.size()), field.data());
+          ObTimeConvertCtx cvrt_ctx(nullptr, false);
+          if (OB_FAIL(ObTimeConverter::str_to_datetime(field_str, cvrt_ctx, datetime_value))) {
+          } else {
+            datum.set_int(datetime_value);
+          }
         } else if (ob_is_string_tc(type) || ob_is_text_tc(type)) {
           datum.set_string(field.data(), static_cast<uint32_t>(field.size()));
         } else {
