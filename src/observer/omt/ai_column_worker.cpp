@@ -45,6 +45,19 @@ int hex_literal(ObSqlString &sql, const ObString &value)
   return ret;
 }
 
+int nonnegative_integer(ObMySQLResult &result, const char *name, uint64_t &value)
+{
+  int ret = OB_SUCCESS;
+  ObObj object;
+  if (OB_FAIL(result.get_obj(name, object))) {
+  } else if (object.is_null()) { ret = OB_ERR_NULL_VALUE;
+  } else if (object.is_unsigned_integer()) { value = object.get_uint64();
+  } else if (object.is_signed_integer() && object.get_int() >= 0) {
+    value = static_cast<uint64_t>(object.get_int());
+  } else { ret = OB_OBJ_TYPE_ERROR; }
+  return ret;
+}
+
 int table_name(ObSchemaGetterGuard &guard, const ObTableSchema &table, ObSqlString &sql, ObString &database_name)
 {
   int ret = OB_SUCCESS;
@@ -229,9 +242,19 @@ void AIColumnWorker::run1()
     if (sql_ != nullptr) {
       int expected = 0;
       if (reclaimed_.compare_exchange_strong(expected, 1)) {
-        reclaimed_.store(reclaim_previous_boot() == OB_SUCCESS ? 2 : 0);
+        const int ret = reclaim_previous_boot();
+        reclaimed_.store(ret == OB_SUCCESS ? 2 : 0);
+        if (ret != OB_SUCCESS && REACH_TIME_INTERVAL(5 * 1000 * 1000)) {
+          LOG_ERROR("AI column durable queue is unavailable", KR(ret));
+        }
       }
-      if (reclaimed_.load() == 2) { (void) process_one(); }
+      if (reclaimed_.load() == 2) {
+        const int ret = process_one();
+        if (ret != OB_SUCCESS && ret != OB_ITER_END && ret != OB_EAGAIN
+            && ret != OB_CANCELED && REACH_TIME_INTERVAL(5 * 1000 * 1000)) {
+          LOG_ERROR("AI column worker cannot advance durable work", KR(ret));
+        }
+      }
     }
     ob_usleep(100 * 1000);
   }
@@ -264,7 +287,7 @@ int AIColumnWorker::process_one()
               "ORDER BY eligible_ts,table_id,request_id LIMIT 1"))) {
       } else if ((row = result.get_result()) == nullptr) { ret = OB_ERR_UNEXPECTED;
       } else if (OB_FAIL(row->next())) {
-      } else if (OB_FAIL(row->get_uint("table_id", group.table_id_))) {
+      } else if (OB_FAIL(nonnegative_integer(*row, "table_id", group.table_id_))) {
       } else if (OB_FAIL(row->get_int("lease_epoch", group.epoch_))) {
       } else if (OB_FAIL(read_text(*row, "request_id", allocator, group.request_, 64))) {
       } else { ret = read_text(*row, "rowkey_predicate", allocator, group.predicate_, 64 * 1024); }
@@ -373,7 +396,7 @@ int AIColumnWorker::process_group(const Group &group)
         while (OB_SUCC(ret) && OB_SUCC(ret = row->next())) {
           Task task;
           if (tasks.count() >= 4096) { ret = OB_SIZE_OVERFLOW;
-          } else if (OB_FAIL(row->get_uint("column_id", task.column_id_))) {
+          } else if (OB_FAIL(nonnegative_integer(*row, "column_id", task.column_id_))) {
           } else if (OB_FAIL(row->get_int("definition_version", task.definition_))) {
           } else if (OB_FAIL(row->get_int("state", task.state_))) {
           } else if (OB_FAIL(row->get_int("retry_count", task.retries_))) {
@@ -453,18 +476,19 @@ int AIColumnWorker::execute_task(const Group &group, const Task &task)
   {
     SMART_VAR(ObMySQLProxy::MySQLResult, result) {
       ObMySQLResult *row = nullptr;
-      int64_t input_bytes = 0, config_bytes = 0;
+      uint64_t input_bytes = 0, config_bytes = 0;
       if (OB_FAIL(ret)) {
       } else if (OB_FAIL(sql_->read(result, query.ptr()))) {
       } else if ((row = result.get_result()) == nullptr) { ret = OB_ERR_UNEXPECTED;
       } else if (OB_FAIL(row->next())) {
         if (ret == OB_ITER_END) { max_retries = 0; }
       } else if (OB_FAIL(row->get_type("input_kind", input_type))) {
-      } else if (OB_FAIL(row->get_int("input_bytes", input_bytes))) {
+      } else if (OB_FAIL(nonnegative_integer(*row, "input_bytes", input_bytes))) {
+        if (ret == OB_ERR_NULL_VALUE) { ret = OB_INVALID_ARGUMENT; }
       } else if (input_bytes > INPUT_LIMIT) { ret = OB_SIZE_OVERFLOW;
       } else if (OB_FAIL(read_text(*row, "input_text", allocator, input, INPUT_LIMIT))) {
       } else {
-        ret = row->get_int("config_bytes", config_bytes);
+        ret = nonnegative_integer(*row, "config_bytes", config_bytes);
         if (ret == OB_ERR_NULL_VALUE) { ret = OB_SUCCESS;
         } else if (OB_SUCC(ret) && config_bytes > INPUT_LIMIT) { ret = OB_SIZE_OVERFLOW;
         } else if (OB_SUCC(ret)) { ret = read_text(*row, "config_text", allocator, config_text, INPUT_LIMIT); }
@@ -585,7 +609,7 @@ int AIColumnWorker::finish_group(const Group &group)
           while (OB_SUCC(ret) && OB_SUCC(ret = row->next())) {
             Task task;
             if (tasks.count() >= 4096) { ret = OB_SIZE_OVERFLOW;
-            } else if (OB_FAIL(row->get_uint("column_id", task.column_id_))) {
+            } else if (OB_FAIL(nonnegative_integer(*row, "column_id", task.column_id_))) {
             } else if (OB_FAIL(row->get_int("definition_version", task.definition_))) {
             } else if (OB_FAIL(row->get_int("state", task.state_))) {
             } else if (OB_FAIL(row->get_int("retry_count", task.retries_))) {
