@@ -18,6 +18,8 @@
 #include "ob_expr_ai_embed.h"
 #include "query/ai/ob_ai_endpoint_resolver.h"
 #include "share/rc/ob_server_runtime.h"
+#include <rapidjson/document.h>
+#include <cmath>
 
 using namespace oceanbase::common;
 using namespace oceanbase::sql;
@@ -128,7 +130,36 @@ int ObExprAIEmbed::eval_ai_embed(const ObExpr &expr, ObEvalCtx &ctx, ObDatum &re
       ObAIFuncModel model(temp_allocator, *info, *endpoint_info);
       ObString result;
       if (OB_FAIL(model.call_dense_embedding(content, config, result))) {
-      } else if (OB_FAIL(ObAIFuncUtils::set_string_result(expr, ctx, res, result))) {
+      } else {
+        // --- 新增：对返回的 JSON 数组进行合法性及维度校验 ---
+        rapidjson::Document doc;
+        doc.Parse(result.ptr(), result.length());
+        if (doc.HasParseError() || !doc.IsArray()) {
+          ret = OB_INVALID_ARGUMENT;
+          LOG_WARN("ai_embed, response is not a valid JSON array", K(ret), K(result));
+        } else if (OB_NOT_NULL(arg_dim) && doc.Size() != dim) {
+          ret = OB_INVALID_ARGUMENT;
+          LOG_WARN("ai_embed, returned vector dimension mismatch", K(ret), K(doc.Size()), K(dim));
+        } else {
+          for (rapidjson::SizeType i = 0; i < doc.Size(); i++) {
+            if (!doc[i].IsNumber()) {
+              ret = OB_INVALID_ARGUMENT;
+              LOG_WARN("ai_embed, vector element is not a number", K(ret), K(i));
+              break;
+            }
+            double val = doc[i].GetDouble();
+            if (std::isnan(val) || std::isinf(val)) {
+              ret = OB_INVALID_ARGUMENT;
+              LOG_WARN("ai_embed, vector element is NaN or Inf", K(ret), K(i), K(val));
+              break;
+            }
+          }
+        }
+        
+        if (OB_SUCC(ret)) {
+          if (OB_FAIL(ObAIFuncUtils::set_string_result(expr, ctx, res, result))) {
+          }
+        }
       }
     }
   }
