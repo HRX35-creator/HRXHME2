@@ -16,6 +16,8 @@ cc_library(
 cc_test(
     name = "test_sql_string",
     linkstatic = True,
+    # Discard unused RPC sections pulled in by the shared OBLib runtime.
+    linkopts = ["-Wl,--gc-sections"],
     deps = [":sql_string_cases", "//src/oblib:oblib_test_runtime"],
     target_compatible_with = ["@platforms//os:linux"],
 )
