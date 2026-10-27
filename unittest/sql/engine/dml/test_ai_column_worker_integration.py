@@ -186,10 +186,17 @@ class AIColumnWorkerIntegrationTest(AISQLMockTestCase):
     def test_session_timestamp_override_does_not_delay_durable_work(self):
         table = self.create("clock")
         self.addCleanup(self.execute, "SET timestamp=0")
-        self.addCleanup(self.execute, "SET time_zone='SYSTEM'")
+        original_zone = self.execute("SELECT @@time_zone")[0][0]
+        self.addCleanup(self.execute, "SET time_zone=%s", (original_zone,))
         self.execute("SET time_zone='+12:00'")
         self.execute("SET timestamp=2000000000")
+        self.connection.begin()
+        self.addCleanup(self.connection.rollback)
         self.execute(f"INSERT INTO `{table}`(id,content) VALUES(1,'future SQL clock')")
+        self.assertEqual(((1,),), self.execute(
+            "SELECT g.lease_until IS NULL FROM oceanbase.__all_ai_column_group g "
+            "JOIN oceanbase.__all_table t ON t.table_id=g.table_id WHERE t.table_name=%s", (table,)))
+        self.connection.commit()
         self.wait_value(table, "reply:future SQL clock")
         self.assertEqual((), self.tasks(table))
         self.assertEqual(1, self.server.requests.qsize())

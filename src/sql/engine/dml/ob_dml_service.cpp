@@ -2263,11 +2263,11 @@ int ObDMLService::enqueue_ai_column_tasks(ObDMLModifyRowNode &modify)
         if (OB_SUCC(ret) && persisted && !deleting) {
           ObSqlString group, task;
           if (OB_FAIL(group.append_fmt("INSERT IGNORE INTO oceanbase.__all_ai_column_group "
-                  "(table_id,request_id,rowkey_predicate,eligible_ts) VALUES(%lu,", table_id))) {
+                  "(table_id,request_id,rowkey_predicate,eligible_ts,lease_until) VALUES(%lu,", table_id))) {
           } else if (OB_FAIL(append_ai_hex(group, request))) {
           } else if (OB_FAIL(group.append(","))) {
           } else if (OB_FAIL(append_ai_hex(group, predicate.string()))) {
-          } else if (OB_FAIL(group.append_fmt(",%s)", eligible.ptr()))) {
+          } else if (OB_FAIL(group.append_fmt(",%s,NULL)", eligible.ptr()))) {
           } else if (OB_FAIL(op.execute_write(group.ptr()))) {
           } else if (OB_FAIL(task.append_fmt("INSERT IGNORE INTO oceanbase.__all_ai_column_task "
                   "(table_id,request_id,column_id,rowkey_predicate,eligible_ts,definition_version) VALUES(%lu,", table_id))) {
