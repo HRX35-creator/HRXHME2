@@ -199,51 +199,55 @@ int ObUUIDNode::init()
     }
   }
 #else
-  // Linux: Use ioctl to get MAC address
-  struct ifreq ifr;
-  struct ifconf ifc;
-  char buf[1024];
+  // Linux: Use ioctl to get MAC address, with RFC 4122 4.5 random node fallback (#1480)
+  bool mac_addr_found = false;
   int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
   if (sock == -1) {
-    ret = OB_ERR_UNEXPECTED;
-    LOG_ERROR("socket failed", K(ret), K(errno));
+    LOG_WARN("socket failed", K(errno));
   } else {
+    struct ifreq ifr;
+    struct ifconf ifc;
+    char buf[1024];
     ifc.ifc_len = sizeof(buf);
     ifc.ifc_buf = buf;
     if (ioctl(sock, SIOCGIFCONF, &ifc) < 0) {
-      ret = OB_ERR_UNEXPECTED;
+      LOG_WARN("ioctl failed, SIOCGIFCONF", K(errno));
     } else {
       ifreq *it = ifc.ifc_req;
       ifreq *end = it + (ifc.ifc_len / sizeof(ifreq));
-      bool mac_addr_found = false;
-      for (; it != end && OB_SUCC(ret); ++it) {
-        if (OB_ISNULL(it) || OB_ISNULL(it->ifr_name) || OB_ISNULL(ifr.ifr_name)) {
+      for (; it != end && !mac_addr_found; ++it) {
+        if (OB_ISNULL(it) || OB_ISNULL(it->ifr_name)) {
           continue;
-        } else {
-          strncpy(ifr.ifr_name, it->ifr_name, IFNAMSIZ - 1);
-          if (ioctl(sock, SIOCGIFFLAGS, &ifr) == 0) {
-            if (!(ifr.ifr_flags & IFF_LOOPBACK)) {
-              if (ioctl(sock, SIOCGIFHWADDR, &ifr) == 0) {
-                MEMCPY(mac_addr_, ifr.ifr_hwaddr.sa_data, 6);
-                mac_addr_found = true;
-                break;
-              } else {
-                LOG_WARN("ioctl failed, SIOCGIFHWADDR", K(errno), K(it->ifr_name));
-              }
-            }
+        }
+        strncpy(ifr.ifr_name, it->ifr_name, IFNAMSIZ - 1);
+        if (ioctl(sock, SIOCGIFFLAGS, &ifr) == 0 && !(ifr.ifr_flags & IFF_LOOPBACK)) {
+          if (ioctl(sock, SIOCGIFHWADDR, &ifr) == 0) {
+            MEMCPY(mac_addr_, ifr.ifr_hwaddr.sa_data, 6);
+            mac_addr_found = true;
           } else {
-            LOG_WARN("ioctl failed, SIOCGIFFLAGS", K(errno), K(it->ifr_name));
+            LOG_WARN("ioctl failed, SIOCGIFHWADDR", K(errno), K(it->ifr_name));
           }
         }
-      }//end for
-      if (OB_FAIL(ret)) {
-      } else if (!mac_addr_found) {
-        ret = OB_ERR_UNEXPECTED;
-      } else {
-        is_inited_ = true;
       }
     }
     close(sock);
+  }
+  if (!mac_addr_found) {
+    int fd = open("/dev/urandom", O_RDONLY);
+    if (fd >= 0 && read(fd, mac_addr_, 6) == 6) {
+      mac_addr_[0] |= 0x01;
+      mac_addr_found = true;
+      LOG_INFO("using random UUID node ID when MAC is unavailable on Linux");
+    } else {
+      ret = OB_ERR_UNEXPECTED;
+      LOG_WARN("failed to obtain a UUID node ID", K(ret), K(errno));
+    }
+    if (fd >= 0) {
+      close(fd);
+    }
+  }
+  if (mac_addr_found) {
+    is_inited_ = true;
   }
 #endif
   return ret;
