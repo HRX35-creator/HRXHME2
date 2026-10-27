@@ -12167,6 +12167,88 @@ int ObLogPlan::prepare_text_retrieval_merge(const ObIArray<ObRawExpr *> &merge_m
   return ret;
 }
 
+// Only the truth value of a natural-language MATCH may be replaced by a
+// positive presence value. In particular, numeric comparisons and projected,
+// grouped or ordered scores must keep their original BM25 values.
+static int check_match_truth_use(const ObRawExpr *expr,
+                                 const ObMatchFunRawExpr *match_expr,
+                                 const bool truth_context,
+                                 bool &found_match,
+                                 bool &score_observed)
+{
+  int ret = OB_SUCCESS;
+  if (OB_ISNULL(expr)) {
+    score_observed = true; // Unknown expression shape: keep the scored path.
+  } else if (expr->is_match_against_expr() && expr->same_as(*match_expr)) {
+    found_match = true;
+    score_observed |= !truth_context;
+  } else {
+    const ObItemType type = expr->get_expr_type();
+    const bool child_truth_context = truth_context && T_OP_BOOL == type;
+    for (int64_t i = 0; OB_SUCC(ret) && !score_observed && i < expr->get_param_count(); ++i) {
+      if (OB_FAIL(SMART_CALL(check_match_truth_use(expr->get_param_expr(i), match_expr,
+                                                  child_truth_context, found_match,
+                                                  score_observed)))) {
+      }
+    }
+  }
+  return ret;
+}
+
+static int check_unobserved_match_score(const ObDMLStmt &stmt,
+                                       const ObMatchFunRawExpr &match_expr,
+                                       bool &unobserved)
+{
+  int ret = OB_SUCCESS;
+  unobserved = false;
+  // Restrict the first score-free path to order-independent scalar COUNTs.
+  // Keep the existing implicit relevance order of row-producing/LIMIT scans.
+  if (!stmt.is_select_stmt() || !stmt.is_single_table_stmt() ||
+      stmt.get_match_exprs().count() != 1 || match_expr.is_es_match() ||
+      NATURAL_LANGUAGE_MODE != match_expr.get_mode_flag() ||
+      !match_expr.get_columns_boosts().empty() ||
+      nullptr != match_expr.get_param_text_expr()) {
+    // Keep scoring for joins, multiple MATCH expressions and custom ranking.
+  } else {
+    const ObSelectStmt &select_stmt = static_cast<const ObSelectStmt &>(stmt);
+    const TableItem *table = stmt.get_table_item(0);
+    bool only_scalar_counts = select_stmt.is_scala_group_by();
+    for (int64_t i = 0; only_scalar_counts && i < select_stmt.get_aggr_item_size(); ++i) {
+      only_scalar_counts = T_FUN_COUNT == select_stmt.get_aggr_item(i)->get_expr_type();
+    }
+    for (int64_t i = 0; only_scalar_counts && i < select_stmt.get_select_item_size(); ++i) {
+      const ObRawExpr *expr = select_stmt.get_select_item(i).expr_;
+      // With ONLY_FULL_GROUP_BY disabled an ungrouped column could expose the
+      // first input row. Keep that existing ordering-dependent behavior.
+      only_scalar_counts = nullptr != expr &&
+          (expr->is_aggr_expr() || !expr->has_flag(CNT_COLUMN));
+    }
+    if (OB_ISNULL(table) || !table->is_basic_table() ||
+        !only_scalar_counts || nullptr != stmt.get_limit_expr()) {
+      // Keep scoring for grouped, ranked or ordering-dependent aggregates.
+    } else {
+      ObSEArray<ObRawExpr *, 16> roots;
+      bool found_match = false;
+      bool score_observed = false;
+      if (OB_FAIL(stmt.get_relation_exprs(roots))) {
+      }
+      for (int64_t i = 0; OB_SUCC(ret) && !score_observed && i < roots.count(); ++i) {
+        bool truth_context = false;
+        for (int64_t j = 0; j < stmt.get_condition_exprs().count(); ++j) {
+          truth_context |= roots.at(i) == stmt.get_condition_exprs().at(j);
+        }
+        if (OB_FAIL(check_match_truth_use(roots.at(i), &match_expr, truth_context,
+                                          found_match, score_observed))) {
+        }
+      }
+      if (OB_SUCC(ret)) {
+        unobserved = found_match && !score_observed;
+      }
+    }
+  }
+  return ret;
+}
+
 int ObLogPlan::prepare_text_retrieval_info(const uint64_t ref_table_id,
                                            const uint64_t index_table_id,
                                            ObMatchFunRawExpr *match_against,
@@ -12184,7 +12266,6 @@ int ObLogPlan::prepare_text_retrieval_info(const uint64_t ref_table_id,
   uint64_t inv_idx_tid = OB_INVALID_ID;
   ObSEArray<ObAuxTableMetaInfo, 4> index_infos;
   bool need_calc_relevance = true;
-  ObSEArray<ObExprConstraint, 2> constraints;
   uint64_t docid_col_id = OB_INVALID_ID;
   if (OB_ISNULL(match_against) || OB_ISNULL(get_stmt()) || OB_ISNULL(get_optimizer_context().get_query_ctx())) {
     ret = OB_INVALID_ARGUMENT;
@@ -12251,18 +12332,11 @@ int ObLogPlan::prepare_text_retrieval_info(const uint64_t ref_table_id,
     }
   }
   if (OB_SUCC(ret)) {
-    /*
-    if (OB_FAIL(ObTransformUtils::check_need_calc_match_score(get_optimizer_context().get_exec_ctx(),
-                                                              get_stmt(),
-                                                              match_against,
-                                                              need_calc_relevance,
-                                                              constraints))) {
-      LOG_WARN("failed to check need calc relevance", K(ret));
-    } else if (!need_calc_relevance &&
-               OB_FAIL(append_array_no_dup(get_optimizer_context().get_query_ctx()->all_expr_constraints_, constraints))) {
-      LOG_WARN("failed to append array no dup", K(ret));
+    bool score_unobserved = false;
+    if (OB_FAIL(check_unobserved_match_score(*get_stmt(), *match_against, score_unobserved))) {
+    } else {
+      need_calc_relevance = !score_unobserved;
     }
-    */
     tr_info.match_expr_ = match_against;
     tr_info.inv_idx_tid_ = inv_idx_tid;
     tr_info.fwd_idx_tid_ = fwd_idx_tid;
