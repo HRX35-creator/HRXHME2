@@ -1263,6 +1263,7 @@ dependencies = [
 name = "uuid-generator"
 version = "0.1.0"
 dependencies = [
+ "cfg-if",
  "cxx",
  "getrandom 0.4.3",
  "mac_address",

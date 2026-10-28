@@ -88,34 +88,21 @@ fn select_node(
     Ok(node)
 }
 
-#[cfg(any(
-    target_os = "linux",
-    target_os = "android",
-    target_os = "macos",
-    target_os = "windows",
-    target_os = "freebsd",
-    target_os = "netbsd",
-    target_os = "openbsd",
-    target_os = "illumos"
-))]
 fn mac_address() -> Option<[u8; 6]> {
-    // Enumeration failures (including sandbox permissions) mean no usable MAC.
-    mac_address::MacAddressIterator::new()
-        .ok()?
-        .map(|mac| mac.bytes())
-        .find(valid_mac)
-}
-
-#[cfg(not(any(
-    target_os = "linux",
-    target_os = "android",
-    target_os = "macos",
-    target_os = "windows",
-    target_os = "freebsd",
-    target_os = "netbsd",
-    target_os = "openbsd",
-    target_os = "illumos"
-)))]
-fn mac_address() -> Option<[u8; 6]> {
-    None
+    cfg_if::cfg_if! {
+        if #[cfg(any(
+            target_os = "linux",
+            target_os = "android",
+            target_os = "macos",
+            target_os = "windows"
+        ))] {
+            // Enumeration failures (including sandbox permissions) mean no usable MAC.
+            mac_address::MacAddressIterator::new()
+                .ok()?
+                .map(|mac| mac.bytes())
+                .find(valid_mac)
+        } else {
+            None
+        }
+    }
 }
