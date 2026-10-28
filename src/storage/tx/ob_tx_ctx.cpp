@@ -1844,7 +1844,6 @@ int ObTxCtx::on_success_ops_(ObTxLogCb *log_cb)
 {
   int ret = OB_SUCCESS;
   const SCN log_ts = log_cb->get_log_ts();
-  const palf::LSN log_lsn = log_cb->get_lsn();
   const ObTxCbArgArray &cb_arg_array = log_cb->get_cb_arg_array();
 
   if (OB_FAIL(common_on_success_(log_cb))) {
@@ -5626,7 +5625,6 @@ int ObTxCtx::on_local_commit_tx_()
   } else if (FALSE_IT(set_durable_state_(ObTxState::COMMIT))) {
 
   } else if (FALSE_IT(unregister_timeout_task_())) {
-  } else if (need_wait) {
   }
 
   if (OB_FAIL(ret) || need_wait) {

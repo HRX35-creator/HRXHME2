@@ -427,7 +427,7 @@ public:
         has_decided = true;
       }
       if (tx_ctx->is_too_long_transaction()) {
-        // If the transaction has not completed in 600 seconds, print its trace log
+        // If the transaction has not completed in 600 seconds, print its state.
         tx_ctx->print_tx_state();
       }
       if (OB_SUCC(ret)) {
