@@ -23,7 +23,6 @@ name
 bf_cache_miss_count_threshold
 builtin_db_data_verify_cycle
 cache_wash_threshold
-clog_io_isolation_mode
 clog_sync_time_warn_threshold
 compaction_dag_cnt_limit
 compaction_high_thread_score

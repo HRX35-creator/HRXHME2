@@ -1946,14 +1946,6 @@
   edit_level: DYNAMIC_EFFECTIVE
   description: "A switch that allows enabling the tree-based IO scheduler.Value: True: allowed; False: disabled"
 
-- name: clog_io_isolation_mode
-  type: INT
-  default: "1"
-  range: "[1,2]"
-  section: OBSERVER
-  edit_level: DYNAMIC_EFFECTIVE
-  description: "Specifies the I/O isolation mode for Commit Log (clog). Values: 1 - Non-isolation mode (disable I/O isolation), 2 - Full isolation mode (enable I/O isolation). Example: 1=Off, 2=On"
-
 - name: _enable_memleak_light_backtrace
   type: BOOL
   default: "True"

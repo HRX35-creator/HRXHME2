@@ -495,7 +495,9 @@ pub fn update_internal_state(
 
 pub fn load_active(store: &kv::Store, startup: bool) -> Result<(), crate::Error> {
     let _guard = crate::lock_writers()?;
-    let entries = crate::load(store)?;
+    let mut entries = crate::load(store)?;
+    // Older stores may contain an override for this removed, unused parameter.
+    entries.retain(|entry| entry.name != "clog_io_isolation_mode");
     for entry in &entries {
         validate_entry(entry)?;
     }

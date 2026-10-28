@@ -123,6 +123,33 @@ fn invalid_utf8_and_unknown_entries_block_startup_without_publication() {
 }
 
 #[test]
+fn removed_clog_io_isolation_override_does_not_block_startup_or_reload() {
+    let _guard = CONFIG_TEST_LOCK.lock().unwrap();
+    let mut directory = TestDirectory::new();
+    reset_active_defaults(directory.store());
+    assert!(!crate::config::parameter_exists("clog_io_isolation_mode"));
+    assert!(crate::config::bootstrap_set("clog_io_isolation_mode", "2").is_err());
+    assert!(crate::config::update_parameter(
+        directory.store(),
+        "clog_io_isolation_mode",
+        Some("2"),
+    )
+    .is_err());
+
+    raw_put(directory.store(), "cpu_count", b"4");
+    for value in [b"1", b"2"] {
+        raw_put(directory.store(), "clog_io_isolation_mode", value);
+        directory.reopen();
+        for startup in [true, false] {
+            crate::config::load_active(directory.store(), startup).unwrap();
+            assert_eq!(crate::config::cpu_count(), 4);
+            assert!(crate::config::configured_value("clog_io_isolation_mode").is_none());
+            assert!(crate::config::effective_value("clog_io_isolation_mode").is_none());
+        }
+    }
+}
+
+#[test]
 fn startup_skips_write_policy_but_requires_storable_values() {
     let _guard = CONFIG_TEST_LOCK.lock().unwrap();
     let mut directory = TestDirectory::new();
