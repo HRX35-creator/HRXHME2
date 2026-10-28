@@ -40,10 +40,14 @@ int ObGlobalStatProxy::set_init_value(
     const int64_t ddl_epoch)
 {
   int ret = OB_SUCCESS;
+  ObTimeoutCtx ctx;
   if (!is_valid() || core_schema_version <= 0 || sys_schema_version <= 0 || baseline_schema_version < -1
       || !snapshot_gc_scn.is_valid() || gc_schema_version < 0 || ddl_epoch < 0) {
     ret = OB_INVALID_ARGUMENT;
+  } else if (OB_FAIL(ObShareUtil::set_default_timeout_ctx(ctx, config::internal_sql_execute_timeout()))) {
   } else {
+    // Bootstrap's locking read and initial write share the internal SQL budget.
+    // Otherwise update() limits both statements to the much shorter RPC timeout.
     ObGlobalStatItem::ItemList list;
     ObGlobalStatItem core_schema_version_item(list, "core_schema_version", core_schema_version);
     ObGlobalStatItem sys_schema_version_item(list, "sys_schema_version", sys_schema_version);
