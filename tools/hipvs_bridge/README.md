@@ -72,6 +72,34 @@ data. The real mutation and profiling scripts and all attempts are retained in
 the local evidence archive with SHA-256
 `765457718f28fa9cfd8fcf258010a8ac6938b59d6d70813a97e98c9620f8ee75`.
 
+## Offline graph diagnostics
+
+The standalone test project also builds `replay_hipvs_graph`. Run:
+
+```sh
+replay_hipvs_graph captured-export.bin base.f32 query.f32 report.json
+replay_hipvs_graph --cpu-control base.f32 query.f32 cpu-control.json
+```
+
+The first command validates the complete captured hipVS export with the
+production converter, retains its edges and vector values, and measures recall
+against exact float64 top-10 truth. It reports reachability, zero-indegree nodes,
+three entry-point choices, and ef_search 64/128/256/512. It also compares a CPU
+HNSW graph with copies that preserve its base edges and remove only upper layers.
+The CPU-only command uses 128 dimensions and m=16 and requires no captured graph
+or GPU. Both paths validate returned ID uniqueness/range and vector distances.
+Do not confuse their in-process load/query timings with the SQL build benchmark.
+
+On the saved 100k Gaussian input, the CPU-only control reproduced Recall@10
+0.509 at ef=64. Removing only its upper layers gave 0.497, or 0.505 with a
+centroid entry, on two runs. This small loss does not establish that removing
+hierarchy is harmless for every graph, but it cannot alone explain the earlier
+GPU result of 0.395-0.433. Two captured 2k GPU graphs were fully reachable; higher
+ef reached recall 1.0, and changing their entry points had little effect. These
+small graphs do not rule out connectivity or candidate-quality issues at 100k.
+The full 100k GPU graph was not retained in the earlier archive, so a new
+controlled capture is required before changing production construction settings.
+
 ## Compatibility and limits
 
 - Linux LP64, little endian, float32 dense L2, HNSW without extra-info payloads.
