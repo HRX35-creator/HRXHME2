@@ -626,6 +626,12 @@ public:
       const bool with_alias_name,
       const bool with_comma,
       ObSqlString &sql_string);
+  // Append `prefix + identifier` as a backtick-quoted MySQL identifier,
+  // doubling every backtick inside the identifier.
+  static int append_quoted_identifier(
+      const common::ObString &prefix,
+      const common::ObString &identifier,
+      ObSqlString &sql_string);
   static int reshape_ddl_column_obj(
       common::ObDatum &datum,
       const ObObjMeta &obj_meta);

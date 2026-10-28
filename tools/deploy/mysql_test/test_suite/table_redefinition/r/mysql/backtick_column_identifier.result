@@ -1,0 +1,23 @@
+drop database if exists ddl_backtick_identifier;
+create database ddl_backtick_identifier;
+use ddl_backtick_identifier;
+create table t1 (`key``id` int not null, `val``ue` varchar(20), c3 int, primary key (`key``id`));
+insert into t1 values (1, 'a', 10), (2, 'b', 20), (3, 'c', 30);
+alter table t1 drop primary key, add primary key (c3);
+select `key``id`, `val``ue`, c3 from t1 order by c3;
+key`id	val`ue	c3
+1	a	10
+2	b	20
+3	c	30
+alter table t1 modify `val``ue` varchar(40);
+select `key``id`, `val``ue`, c3 from t1 order by c3;
+key`id	val`ue	c3
+1	a	10
+2	b	20
+3	c	30
+create index idx_value on t1 (`val``ue`);
+select /*+ index(t1 idx_value) */ `val``ue` from t1 where `val``ue` = 'b';
+val`ue
+b
+drop table t1;
+drop database ddl_backtick_identifier;
