@@ -379,6 +379,9 @@ public:
   static bool is_valid_prompt_object(ObJsonObject* prompt_object);
   static int replace_all_str_args_in_template(ObIAllocator &allocator, ObJsonObject* prompt_object, ObString& replaced_prompt_str);
   static int construct_prompt_object(ObIAllocator &allocator, ObString &template_str, ObJsonArray *args_array, ObJsonObject *&prompt_object);
+  static int json_node_to_text(ObIAllocator &allocator, ObJsonNode &node, ObString &text);
+  static bool parse_placeholder(const ObString &template_str, int64_t pos, int64_t &index, int64_t &close_pos);
+  static bool is_textualizable_json_node(ObJsonNodeType node_type);
   static constexpr char prompt_template_key[20] = "template";
   static constexpr char prompt_args_key[20] = "args";
 private:
