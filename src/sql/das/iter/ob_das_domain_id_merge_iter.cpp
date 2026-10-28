@@ -78,7 +78,8 @@ ObDASDomainIdMergeIter::ObDASDomainIdMergeIter()
     data_table_rtdef_(nullptr),
     rowkey_domain_tablet_ids_(),
     merge_memctx_(),
-    is_need_multi_get_(false)
+    is_need_multi_get_(false),
+    sample_lookup_(false)
 {}
 
 ObDASDomainIdMergeIter::~ObDASDomainIdMergeIter()
@@ -248,6 +249,7 @@ int ObDASDomainIdMergeIter::inner_release()
   data_table_iter_ = nullptr;
   need_filter_rowkey_domain_ = true;
   is_no_sample_ = true;
+  sample_lookup_ = false;
   return ret;
 }
 
@@ -272,7 +274,7 @@ int ObDASDomainIdMergeIter::inner_get_next_row()
   int ret = OB_SUCCESS;
   if (OB_ISNULL(data_table_iter_)) {
     ret = OB_ERR_UNEXPECTED;
-  } else if (is_need_multi_get_) {
+  } else if (is_need_multi_get_ || sample_lookup_) {
     if (OB_FAIL(multi_get_row())) {
       if (ret != OB_ITER_END) {
       }
@@ -294,7 +296,7 @@ int ObDASDomainIdMergeIter::inner_get_next_rows(int64_t &count, int64_t capacity
   int ret = OB_SUCCESS;
   if (OB_ISNULL(data_table_iter_)) {
     ret = OB_ERR_UNEXPECTED;
-  } else if (is_need_multi_get_) {
+  } else if (is_need_multi_get_ || sample_lookup_) {
     if (OB_FAIL(multi_get_rows(count, capacity))) {
     }
   } else if (!need_filter_rowkey_domain_) {
@@ -334,6 +336,7 @@ int ObDASDomainIdMergeIter::build_rowkey_domain_range()
   } else if (OB_FAIL(check_is_need_multi_get())) {
   } else {
     const common::ObIArray<common::ObNewRange> &key_ranges = data_table_iter_->get_scan_param().key_ranges_;
+    sample_lookup_ = !is_need_multi_get_ && !data_table_iter_->get_scan_param().sample_info_.is_no_sample();
     for (int64_t k = 0; OB_SUCC(ret) && k < rowkey_domain_scan_params_.count(); k++) {
       bool is_emb_vec = rowkey_domain_ctdefs_.at(k)->semantic_index_info_.is_emb_vec_tbl_;
       bool use_rowkey_vid_tbl = rowkey_domain_ctdefs_.at(k)->semantic_index_info_.use_rowkey_vid_tbl_;
@@ -341,7 +344,7 @@ int ObDASDomainIdMergeIter::build_rowkey_domain_range()
         ret = OB_ERR_UNEXPECTED;
       } else {
         storage::ObTableScanParam& scan_param = *rowkey_domain_scan_params_.at(k);
-        if (!is_need_multi_get_) {
+        if (!is_need_multi_get_ && !sample_lookup_) {
           for (int64_t i = 0; OB_SUCC(ret) && i < key_ranges.count(); ++i) {
             ObNewRange key_range = key_ranges.at(i);
             key_range.table_id_ = scan_param.index_id_;
@@ -400,7 +403,11 @@ int ObDASDomainIdMergeIter::build_rowkey_domain_range()
         }
         if (OB_SUCC(ret)) {
           scan_param.tablet_id_ = rowkey_domain_tablet_ids_.at(k);
-          scan_param.sample_info_ = data_table_iter_->get_scan_param().sample_info_;
+          if (sample_lookup_) {
+            scan_param.sample_info_.reset();
+          } else {
+            scan_param.sample_info_ = data_table_iter_->get_scan_param().sample_info_;
+          }
           scan_param.scan_flag_.scan_order_ = data_table_iter_->get_scan_param().scan_flag_.scan_order_;
           scan_param.enable_new_false_range_ = data_table_iter_->get_scan_param().enable_new_false_range_;
           if (!data_table_iter_->get_scan_param().need_switch_param_) {
@@ -1311,7 +1318,11 @@ int ObDASDomainIdMergeIter::reset_rowkey_domain_iter_scan_range(int64_t iter_idx
     }
     if (OB_SUCC(ret)) {
       scan_param.tablet_id_ = rowkey_domain_tablet_ids_.at(iter_idx);
-      scan_param.sample_info_ = data_table_iter_->get_scan_param().sample_info_;
+      if (sample_lookup_) {
+        scan_param.sample_info_.reset();
+      } else {
+        scan_param.sample_info_ = data_table_iter_->get_scan_param().sample_info_;
+      }
       scan_param.scan_flag_.scan_order_ = data_table_iter_->get_scan_param().scan_flag_.scan_order_;
       if (!data_table_iter_->get_scan_param().need_switch_param_) {
         scan_param.need_switch_param_ = false;

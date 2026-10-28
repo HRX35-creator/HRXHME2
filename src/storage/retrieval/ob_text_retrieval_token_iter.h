@@ -133,6 +133,20 @@ public:
   virtual int get_curr_score(double &score) const override;
   virtual int get_curr_id(const ObDatum *&id_datum) const override;
 public:
+  // Advances to the next posting and returns its document id, which stays valid until the next
+  // advance. Postings inside a loaded batch are reached without virtual dispatch.
+  inline int next_doc_id(const ObDocIdExt *&doc_id)
+  {
+    int ret = OB_SUCCESS;
+    if (OB_LIKELY(cur_idx_ + 1 < count_)) {
+      ++cur_idx_;
+    } else if (OB_FAIL(get_next_row())) {
+    }
+    if (OB_SUCC(ret)) {
+      doc_id = doc_id_.get_data() + cur_idx_;
+    }
+    return ret;
+  }
   int get_token_doc_cnt(int64_t &token_doc_cnt) const { return token_iter_->get_token_doc_cnt(token_doc_cnt); }
   virtual int get_dim_max_score(double &score) override {
     int ret = OB_SUCCESS;
@@ -145,6 +159,7 @@ public:
 private:
   int save_relevances_and_docids();
   int save_docids();
+  int compare_id(const ObDatum &lhs, const ObDatum &rhs, int &result) const;
   ObArenaAllocator *allocator_;
   ObTextRetrievalTokenIter *token_iter_;
   sql::ObEvalCtx *eval_ctx_;
@@ -156,6 +171,7 @@ private:
   ObFixedArray<double, ObIAllocator> relevance_; // when ~ObFixedArray(), wikll destory itself
   ObFixedArray<ObDocIdExt, ObIAllocator> doc_id_;
   common::ObDatumCmpFuncType cmp_func_;
+  bool binary_id_;
   bool is_inited_;
   DISALLOW_COPY_AND_ASSIGN(ObTextRetrievalDaaTTokenIter);
 };
@@ -184,6 +200,7 @@ public:
   virtual bool in_shallow_status() const override;
   // currently, for text retrieval, total_doc_cnt and token_doc_cnt is required before block max calculation
   int init_block_max_iter(const int64_t total_doc_cnt, const double avg_doc_token_cnt);
+  int get_token_doc_cnt(int64_t &token_doc_cnt) const { return token_iter_.get_token_doc_cnt(token_doc_cnt); }
 private:
   int calc_dim_max_score(
       const ObBlockMaxScoreIterParam &block_max_iter_param,

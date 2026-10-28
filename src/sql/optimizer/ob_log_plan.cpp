@@ -12039,6 +12039,42 @@ int ObLogPlan::prepare_text_retrieval_scan(const ObIArray<ObRawExpr *> &scan_mat
     ObTextRetrievalInfo &tr_info = table_scan->get_text_retrieval_info();
     tr_info.match_expr_ = match_against;
     tr_info.pushdown_match_filter_ = match_pred;
+    const bool membership_predicate = NATURAL_LANGUAGE_MODE == match_against->get_mode_flag()
+        && match_against->get_columns_boosts().empty()
+        && nullptr == match_against->get_param_text_expr()
+        && T_OP_BOOL == match_pred->get_expr_type()
+        && 1 == match_pred->get_param_count()
+        && match_against == match_pred->get_param_expr(0);
+    if (membership_predicate) {
+      // BM25's positive IDF floor makes the bare predicate true for every
+      // retrieved document, including when its score is projected or sorted.
+      tr_info.pushdown_match_filter_ = nullptr;
+    }
+    // A natural-language match has a positive score for every posting that is
+    // returned. Scalar aggregation does not observe the implicit score order,
+    // and a query without ORDER BY has none (e.g. a view whose parent only
+    // counts its rows). If MATCH is used only as this boolean predicate, union
+    // the postings without collecting corpus statistics or evaluating BM25.
+    if (get_stmt()->is_select_stmt()
+        && (static_cast<const ObSelectStmt *>(get_stmt())->is_scala_group_by()
+            || !static_cast<const ObSelectStmt *>(get_stmt())->has_order_by())
+        && !table_scan->get_index_back()
+        && !get_stmt()->has_subquery()
+        && membership_predicate) {
+      ObSEArray<ObRawExpr *, 8> exprs;
+      bool score_used = false;
+      if (OB_FAIL(get_stmt()->get_relation_exprs(exprs))) {
+      }
+      for (int64_t i = 0; OB_SUCC(ret) && !score_used && i < exprs.count(); ++i) {
+        if (exprs.at(i) != match_pred
+            && OB_FAIL(ObRawExprUtils::find_expr(exprs.at(i), match_against, score_used))) {
+        }
+      }
+      if (OB_SUCC(ret) && !score_used) {
+        tr_info.need_calc_relevance_ = false;
+        tr_info.pushdown_match_filter_ = nullptr;
+      }
+    }
     // The mapping table is absent when the data-table rowkey is used as the document ID.
     table_scan->set_doc_id_index_table_id(tr_info.doc_id_idx_tid_);
     if (table_scan->is_vec_adaptive_scan() || table_scan->is_vec_idx_scan_post_filter()) {

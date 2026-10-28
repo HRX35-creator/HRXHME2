@@ -37,6 +37,7 @@
 #include "sql/resolver/ddl/ob_ddl_resolver.h"
 
 #include "sql/ob_sql_utils.h"
+#include "data_plane/ob_order_perserving_encoder.h"
 #include "sql/engine/px/ob_px_dtl_msg.h"
 #include "query/vector/ob_vector_index_util.h"
 #include "sql/resolver/ddl/ob_fts_index_builder_util.h"
@@ -464,6 +465,26 @@ int ObDDLTaskUtil::generate_build_replica_sql(const int64_t data_table_id,
 
     // generate local build sql
     if (OB_SUCC(ret)) {
+      // Posting lists contain many repeated terms. Encode supported rowkeys
+      // once instead of repeating collation-aware comparisons at every sort
+      // comparison. Keep the legacy DDL sort for other tables/key types.
+      bool enable_fts_encode_sort = dest_table_schema->is_fts_index_aux()
+          || dest_table_schema->is_fts_doc_word_aux();
+      const ObRowkeyInfo &sort_rowkey = dest_table_schema->get_rowkey_info();
+      for (int64_t i = 0; enable_fts_encode_sort && i < sort_rowkey.get_size(); ++i) {
+        const ObRowkeyColumn *key = sort_rowkey.get_column(i);
+        const ObColumnSchemaV2 *col = nullptr == key ? nullptr
+            : dest_table_schema->get_column_schema(key->column_id_);
+        // encode() implements VARCHAR with the same string encoder as CHAR;
+        // the generic optimizer eligibility policy excludes variable strings.
+        // Here they are bounded generated terms or binary document IDs.
+        const ObObjType encode_type = nullptr != col && col->get_data_type() == ObVarcharType
+            ? ObCharType : (nullptr == col ? ObNullType : col->get_data_type());
+        if (nullptr == col || !ObOrderPerservingEncoder::can_encode_sortkey(
+                encode_type, col->get_collation_type())) {
+          enable_fts_encode_sort = false;
+        }
+      }
       ObSqlString query_column_sql_string;
       ObSqlString insert_column_sql_string;
       ObSqlString rowkey_column_sql_string;
@@ -534,8 +555,8 @@ int ObDDLTaskUtil::generate_build_replica_sql(const int64_t data_table_id,
         }
         if (OB_FAIL(ret)) {
         } else {
-          if (OB_FAIL(sql_string.assign_fmt("INSERT /*+ enable_parallel_dml parallel(%ld) opt_param('ddl_execution_id', %ld) opt_param('ddl_task_id', %ld) opt_param('enable_newsort', 'false') %.*s use_px */INTO `%.*s`.`%.*s` %.*s(%.*s) SELECT /*+ index(`%.*s` primary) %.*s */ %.*s from `%.*s`.`%.*s` %.*s as of snapshot %ld %.*s",
-              real_parallelism, execution_id, task_id,
+          if (OB_FAIL(sql_string.assign_fmt("INSERT /*+ enable_parallel_dml parallel(%ld) opt_param('ddl_execution_id', %ld) opt_param('ddl_task_id', %ld) opt_param('enable_newsort', '%s') %.*s use_px */INTO `%.*s`.`%.*s` %.*s(%.*s) SELECT /*+ index(`%.*s` primary) %.*s */ %.*s from `%.*s`.`%.*s` %.*s as of snapshot %ld %.*s",
+              real_parallelism, execution_id, task_id, enable_fts_encode_sort ? "true" : "false",
               static_cast<int>(strlen(io_read_hint)), io_read_hint,
               static_cast<int>(new_dest_database_name.length()), new_dest_database_name.ptr(), static_cast<int>(new_dest_table_name.length()), new_dest_table_name.ptr(),
               static_cast<int>(partition_names.length()), partition_names.ptr(),

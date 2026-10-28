@@ -216,6 +216,10 @@ int ObSortOp::process_sort()
         sort_row_count_++;
         OZ(sort_impl_.add_row(MY_SPEC.all_exprs_, need_dump));
         sort_impl_.collect_memory_dump_info(op_monitor_info_);
+        if (OB_SUCC(ret) && need_dump && MY_SPEC.prescan_enabled_) {
+          // only switch to prescan when the sort cannot keep growing in memory
+          OZ(sort_impl_.recheck_need_dump(need_dump));
+        }
         if (need_dump && MY_SPEC.prescan_enabled_) {
           break;
         }
@@ -256,6 +260,11 @@ int ObSortOp::process_sort_batch()
           OZ(sort_impl_.add_batch(MY_SPEC.all_exprs_, *input_brs->skip_,
                                   input_brs->size_, need_dump));
           sort_impl_.collect_memory_dump_info(op_monitor_info_);
+          if (OB_SUCC(ret) && need_dump && MY_SPEC.prescan_enabled_) {
+            // Scanning the remaining input into a spilled cache store only pays off when the
+            // sort really has to dump. While it can still grow in memory, keep adding to it.
+            OZ(sort_impl_.recheck_need_dump(need_dump));
+          }
         }
         if (input_brs->end_ || (need_dump && MY_SPEC.prescan_enabled_)) {
           break;

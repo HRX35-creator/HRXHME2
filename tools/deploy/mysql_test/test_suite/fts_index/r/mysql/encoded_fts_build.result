@@ -1,0 +1,58 @@
+DROP TABLE IF EXISTS encoded_fts_build;
+CREATE TABLE encoded_fts_build (
+id VARBINARY(16) PRIMARY KEY,
+body TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci,
+cjk TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin
+);
+INSERT INTO encoded_fts_build VALUES
+(X'00', 'Café CAFÉ database database', '数据库 中华人民共和国'),
+(X'0000', 'cafe audit', '中华人民 数据库'),
+(X'0020', 'database performance', '中华人民共和国 中文索引'),
+(X'20', 'security audit database', '数据库 中文索引'),
+(X'2000', 'café cafe cafe', '北京 数据库'),
+(X'FF00', 'different words', '中文 索引'),
+(X'FFFF', NULL, NULL);
+ALTER TABLE encoded_fts_build ADD FULLTEXT INDEX ft_body(body) WITH PARSER beng;
+ALTER TABLE encoded_fts_build ADD FULLTEXT INDEX ft_cjk(cjk) WITH PARSER ik;
+SELECT HEX(id), ROUND(MATCH(body) AGAINST('cafe database'), 6)
+FROM encoded_fts_build WHERE MATCH(body) AGAINST('cafe database') ORDER BY id;
+HEX(id)	ROUND(MATCH(body) AGAINST('cafe database'), 6)
+00	0.831416
+0000	0.373576
+0020	0.373576
+20	0.352160
+2000	0.464615
+SELECT COUNT(*) FROM encoded_fts_build WHERE MATCH(body) AGAINST('cafe database');
+COUNT(*)
+5
+SELECT HEX(id), ROUND(MATCH(cjk) AGAINST('数据库 中华人民'), 6)
+FROM encoded_fts_build WHERE MATCH(cjk) AGAINST('数据库 中华人民') ORDER BY id;
+HEX(id)	ROUND(MATCH(cjk) AGAINST('数据库 中华人民'), 6)
+00	0.371622
+0000	2.551312
+20	0.350318
+2000	0.371622
+SELECT COUNT(*) FROM encoded_fts_build WHERE MATCH(cjk) AGAINST('数据库 中华人民');
+COUNT(*)
+4
+UPDATE encoded_fts_build SET body = 'database audit cafe', cjk = '数据库 中文索引' WHERE id = X'FF00';
+DELETE FROM encoded_fts_build WHERE id = X'00';
+SELECT HEX(id), ROUND(MATCH(body) AGAINST('cafe database'), 6)
+FROM encoded_fts_build WHERE MATCH(body) AGAINST('cafe database') ORDER BY id;
+HEX(id)	ROUND(MATCH(body) AGAINST('cafe database'), 6)
+0000	0.373576
+0020	0.373576
+20	0.352160
+2000	0.464615
+FF00	0.704321
+DROP INDEX ft_body ON encoded_fts_build;
+ALTER TABLE encoded_fts_build ADD FULLTEXT INDEX ft_body(body) WITH PARSER beng;
+SELECT HEX(id), ROUND(MATCH(body) AGAINST('cafe database'), 6)
+FROM encoded_fts_build WHERE MATCH(body) AGAINST('cafe database') ORDER BY id;
+HEX(id)	ROUND(MATCH(body) AGAINST('cafe database'), 6)
+0000	0.371622
+0020	0.371622
+20	0.350318
+2000	0.462185
+FF00	0.700637
+DROP TABLE encoded_fts_build;

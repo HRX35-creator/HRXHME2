@@ -1,0 +1,112 @@
+DROP TABLE IF EXISTS pwab_digits;
+DROP TABLE IF EXISTS pwab_docs;
+CREATE TABLE pwab_digits (d INT PRIMARY KEY);
+INSERT INTO pwab_digits VALUES (0),(1),(2),(3),(4),(5),(6),(7),(8),(9);
+CREATE TABLE pwab_docs (
+id BIGINT PRIMARY KEY,
+title VARCHAR(128) NOT NULL,
+body TEXT NOT NULL,
+body_en TEXT NOT NULL
+) DEFAULT CHARSET = utf8mb4;
+INSERT INTO pwab_docs
+SELECT n,
+CONCAT('标题', n % 7, ' ', ELT(n % 3 + 1, '全文索引', '分词器', '倒排索引')),
+CONCAT('文档', n, ' ', ELT(n % 4 + 1, '数据库稳定', '全文索引优化', '分词器热路径', '中华人民共和国'),
+' ', ELT(n % 5 + 1, 'OceanBase', 'database', 'tokenizer', 'audit', 'performance'),
+REPEAT(' 内存池化数据结构 填充文本', n % 6 + 4)),
+CONCAT('row ', n, ' ', ELT(n % 5 + 1, 'database audit', 'quick brown fox', 'performance tuning',
+'lazy dog', 'security review'),
+' ', ELT(n % 3 + 1, 'database', 'fox', 'index'),
+REPEAT(' padding words for the tokenizer', n % 6 + 4))
+FROM (SELECT a.d * 1000 + b.d * 100 + c.d * 10 + e.d + 1 AS n
+FROM pwab_digits a, pwab_digits b, pwab_digits c, pwab_digits e) s
+WHERE n <= 4000;
+SELECT COUNT(*) FROM pwab_docs;
+COUNT(*)
+4000
+ALTER TABLE pwab_docs ADD FULLTEXT INDEX ft_all(title, body) WITH PARSER ik;
+ALTER /*+ parallel(12) */ TABLE pwab_docs ADD FULLTEXT INDEX ft_en(body_en) WITH PARSER beng;
+ALTER /*+ parallel(6) */ TABLE pwab_docs ADD FULLTEXT INDEX ft_body(body) WITH PARSER ik;
+SELECT COUNT(*), SUM(id) FROM pwab_docs WHERE MATCH(title, body) AGAINST('全文索引 分词器');
+COUNT(*)	SUM(id)
+3334	6669001
+SELECT COUNT(*), SUM(id) FROM pwab_docs WHERE MATCH(title, body) AGAINST('OceanBase 稳定 database');
+COUNT(*)	SUM(id)
+2200	4399600
+SELECT COUNT(*), SUM(id) FROM pwab_docs WHERE MATCH(body_en) AGAINST('database audit');
+COUNT(*)	SUM(id)
+1867	3736668
+SELECT COUNT(*), SUM(id) FROM pwab_docs WHERE MATCH(body_en) AGAINST('+fox -lazy' IN BOOLEAN MODE);
+COUNT(*)	SUM(id)
+1601	3202402
+SELECT COUNT(*), SUM(id) FROM pwab_docs WHERE MATCH(body) AGAINST('倒排索引 tokenizer');
+COUNT(*)	SUM(id)
+800	1599600
+SELECT id, ROUND(MATCH(title, body) AGAINST('中华人民共和国 audit'), 6) s FROM pwab_docs
+WHERE MATCH(title, body) AGAINST('中华人民共和国 audit') ORDER BY s DESC, id LIMIT 10;
+id	s
+43	2.727711
+103	2.727711
+163	2.727711
+223	2.727711
+283	2.727711
+343	2.727711
+403	2.727711
+463	2.727711
+523	2.727711
+583	2.727711
+SELECT id, ROUND(MATCH(body_en) AGAINST('quick fox security'), 6) s FROM pwab_docs
+WHERE MATCH(body_en) AGAINST('quick fox security') ORDER BY s DESC, id LIMIT 10;
+id	s
+6	1.874331
+36	1.874331
+66	1.874331
+96	1.874331
+1	1.865367
+31	1.865367
+61	1.865367
+91	1.865367
+126	1.839389
+156	1.839389
+SELECT id, ROUND(MATCH(body) AGAINST('分词器热路径 performance'), 6) s FROM pwab_docs
+WHERE MATCH(body) AGAINST('分词器热路径 performance') ORDER BY s DESC, id LIMIT 10;
+id	s
+54	5.381095
+114	5.381095
+174	5.381095
+234	5.381095
+294	5.381095
+354	5.381095
+414	5.381095
+474	5.381095
+534	5.381095
+594	5.381095
+UPDATE pwab_docs SET body = '全新内容 tokenizer', body_en = 'brand new lazy text' WHERE id % 97 = 0;
+DELETE FROM pwab_docs WHERE id % 89 = 0;
+SELECT COUNT(*), SUM(id) FROM pwab_docs WHERE MATCH(title, body) AGAINST('全文索引 分词器');
+COUNT(*)	SUM(id)
+3290	6580939
+SELECT COUNT(*), SUM(id) FROM pwab_docs WHERE MATCH(body_en) AGAINST('database audit');
+COUNT(*)	SUM(id)
+1828	3657042
+SELECT COUNT(*), SUM(id) FROM pwab_docs WHERE MATCH(body_en) AGAINST('+fox -lazy' IN BOOLEAN MODE);
+COUNT(*)	SUM(id)
+1566	3130514
+SELECT COUNT(*), SUM(id) FROM pwab_docs WHERE MATCH(body) AGAINST('倒排索引 tokenizer');
+COUNT(*)	SUM(id)
+823	1646361
+SELECT id, ROUND(MATCH(body) AGAINST('全新内容 tokenizer'), 6) s FROM pwab_docs
+WHERE MATCH(body) AGAINST('全新内容 tokenizer') ORDER BY s DESC, id LIMIT 10;
+id	s
+97	16.914379
+194	16.914379
+291	16.914379
+388	16.914379
+485	16.914379
+582	16.914379
+679	16.914379
+776	16.914379
+873	16.914379
+970	16.914379
+DROP TABLE pwab_docs;
+DROP TABLE pwab_digits;

@@ -37,9 +37,10 @@ struct ObTextDaaTParam
   ObTextDaaTParam()
     : dim_iters_(nullptr), base_param_(nullptr), allocator_(nullptr), relevance_collector_(nullptr),
       bm25_param_est_ctx_(), mode_flag_(sql::ObMatchAgainstMode::NATURAL_LANGUAGE_MODE),
-      function_lookup_mode_(false) {}
+      function_lookup_mode_(false), union_only_(false) {}
   ~ObTextDaaTParam() {}
-  TO_STRING_KV(K_(base_param), KP_(dim_iters), K_(bm25_param_est_ctx),  K_(mode_flag), K_(function_lookup_mode));
+  TO_STRING_KV(K_(base_param), KP_(dim_iters), K_(bm25_param_est_ctx),  K_(mode_flag), K_(function_lookup_mode),
+      K_(union_only));
   ObIArray<ObISRDaaTDimIter *> *dim_iters_;
   ObSparseRetrievalMergeParam *base_param_;
   common::ObArenaAllocator *allocator_;
@@ -47,6 +48,8 @@ struct ObTextDaaTParam
   ObBM25ParamEstCtx bm25_param_est_ctx_;
   sql::ObMatchAgainstMode mode_flag_;
   bool function_lookup_mode_;
+  // Every document matching any token is a result and neither its score nor a filter is evaluated.
+  bool union_only_;
 };
 
 class ObTextDaaTIter final : public ObSRDaaTIterImpl
@@ -55,18 +58,37 @@ public:
   ObTextDaaTIter() : ObSRDaaTIterImpl(),
       bm25_param_estimator_(),
       mode_flag_(sql::ObMatchAgainstMode::NATURAL_LANGUAGE_MODE),
-      function_lookup_mode_(false) {}
+      function_lookup_mode_(false),
+      union_only_(false),
+      union_id_kind_(UNION_ID_GENERIC),
+      union_cmp_func_(nullptr),
+      union_ids_() {}
   virtual ~ObTextDaaTIter() { reset(); }
 
   int init(const ObTextDaaTParam &param);
+  virtual int get_next_rows(const int64_t capacity, int64_t &count) override;
   virtual void reuse(const bool switch_tablet = false) override;
   virtual void reset() override;
 protected:
   virtual int pre_process() override;
+private:
+  enum UnionIdKind
+  {
+    UNION_ID_GENERIC = 0,
+    UNION_ID_BINARY,
+    UNION_ID_UINT64,
+  };
+  int union_next_rows(const int64_t capacity, int64_t &count);
+  int compare_union_ids(const ObDatum &left, const ObDatum &right, int &cmp_ret) const;
 protected:
   ObBM25ParamEstimator bm25_param_estimator_;
   sql::ObMatchAgainstMode mode_flag_;
   bool function_lookup_mode_;
+  bool union_only_;
+  UnionIdKind union_id_kind_;
+  common::ObDatumCmpFuncType union_cmp_func_;
+  // current document id of each posting list on the union path, null once a list is exhausted
+  ObFixedArray<const ObDocIdExt *, ObIAllocator> union_ids_;
 private:
   DISALLOW_COPY_AND_ASSIGN(ObTextDaaTIter);
 };
@@ -83,7 +105,11 @@ public:
 protected:
   virtual int get_next_rows(const int64_t capacity, int64_t &count) override;
   virtual int init_before_wand_process() override;
+  virtual bool prefer_exhaustive_search() override;
 protected:
+  // Up to this many postings in total, scoring every document costs less than building the
+  // block-max iterators and skipping with them.
+  static const int64_t EXHAUSTIVE_SEARCH_MAX_POSTINGS = 100000;
   ObBM25ParamEstimator bm25_param_estimator_;
 private:
   DISALLOW_COPY_AND_ASSIGN(ObTextBMWIter);

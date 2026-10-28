@@ -51,7 +51,10 @@ private:
   ObObjMeta meta_;
 };
 
-typedef common::hash::ObHashMap<ObFTWord, int64_t> ObFTWordMap;
+// Each document/query invocation owns a separate map, including parallel
+// workers. Per-bucket read/write latches are unnecessary for these local maps.
+typedef common::hash::ObHashMap<ObFTWord, int64_t,
+    common::hash::NoPthreadDefendMode> ObFTWordMap;
 
 class ObAddWordFlag final
 {

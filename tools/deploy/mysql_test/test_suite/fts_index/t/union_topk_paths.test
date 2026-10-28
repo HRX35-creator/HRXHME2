@@ -1,0 +1,68 @@
+#owner: fts
+#owner group: sql
+#description: union-only retrieval, binary doc id seeks, small top-k and IK dictionary lookups
+
+--disable_warnings
+DROP TABLE IF EXISTS fts_union_t;
+--enable_warnings
+
+CREATE TABLE fts_union_t (
+  id INT PRIMARY KEY,
+  cat INT NOT NULL,
+  zh VARCHAR(200),
+  en VARCHAR(200),
+  FULLTEXT INDEX ft_zh(zh) WITH PARSER ik,
+  FULLTEXT INDEX ft_en(en) WITH PARSER beng
+);
+
+INSERT INTO fts_union_t VALUES
+  (1, 1, '全文索引的分词器热路径优化', 'full text index tokenizer hot path'),
+  (2, 2, '倒排索引与检索系统设计', 'inverted index and retrieval design'),
+  (3, 1, '数据库性能优化实践', 'database performance tuning practice'),
+  (4, 3, '中文分词词典加载机制', 'dictionary loading for chinese tokenizer'),
+  (5, 2, 'OceanBase 是一款非常稳定的数据库', 'oceanbase is a very stable database'),
+  (6, 1, '分词器与倒排索引', 'tokenizer and inverted index'),
+  (7, 3, '搜索引擎召回率调优', 'search engine recall tuning'),
+  (8, 2, '全文检索 全文检索 全文检索', 'retrieval retrieval retrieval'),
+  (9, 1, '没有任何匹配的句子', 'nothing here matches'),
+  (10, 3, '索引 索引 分词', 'index index tokenizer');
+
+# membership only: union of posting lists without scores
+SELECT COUNT(*) FROM fts_union_t WHERE MATCH(zh) AGAINST('全文索引 分词器');
+SELECT COUNT(*) FROM fts_union_t WHERE MATCH(en) AGAINST('index tokenizer database');
+SELECT COUNT(*) FROM fts_union_t WHERE MATCH(en) AGAINST('index index index');
+SELECT COUNT(*) FROM fts_union_t WHERE MATCH(en) AGAINST('nosuchword anothermissingword');
+SELECT COUNT(*), MIN(id), MAX(id), SUM(id) FROM fts_union_t WHERE MATCH(zh) AGAINST('索引 数据库 召回率');
+SELECT cat, COUNT(*) FROM fts_union_t WHERE MATCH(en) AGAINST('index tokenizer') GROUP BY cat ORDER BY cat;
+SELECT COUNT(*) FROM fts_union_t WHERE MATCH(en) AGAINST('index tokenizer') AND cat = 1;
+SELECT COUNT(*) FROM (SELECT id FROM fts_union_t WHERE MATCH(en) AGAINST('index tokenizer database') LIMIT 3) t;
+SELECT COUNT(*) FROM (SELECT id FROM fts_union_t WHERE MATCH(en) AGAINST('index tokenizer database') LIMIT 2 OFFSET 4) t;
+
+# relevance ordered top-k on short posting lists
+SELECT id, ROUND(MATCH(en) AGAINST('index tokenizer'), 6) AS s FROM fts_union_t
+  WHERE MATCH(en) AGAINST('index tokenizer') ORDER BY s DESC, id LIMIT 3;
+SELECT id FROM fts_union_t WHERE MATCH(zh) AGAINST('倒排索引 分词器') ORDER BY MATCH(zh) AGAINST('倒排索引 分词器') DESC, id LIMIT 4;
+SELECT id, ROUND(MATCH(zh) AGAINST('全文检索 索引'), 6) FROM fts_union_t WHERE MATCH(zh) AGAINST('全文检索 索引')
+  ORDER BY MATCH(zh) AGAINST('全文检索 索引') DESC LIMIT 2;
+SELECT id, ROUND(MATCH(en) AGAINST('retrieval index database'), 6) FROM fts_union_t
+  WHERE MATCH(en) AGAINST('retrieval index database') ORDER BY 2 DESC, 1 LIMIT 5 OFFSET 1;
+
+# boolean mode keeps its own evaluation
+SELECT id FROM fts_union_t WHERE MATCH(en) AGAINST('+index -inverted' IN BOOLEAN MODE) ORDER BY id;
+SELECT COUNT(*) FROM fts_union_t WHERE MATCH(en) AGAINST('+index +tokenizer' IN BOOLEAN MODE);
+
+# rows changed after the index was built are seen by the union and top-k paths
+INSERT INTO fts_union_t VALUES (11, 1, '新增的倒排索引文档', 'freshly inserted index document');
+UPDATE fts_union_t SET en = 'no longer about that' WHERE id = 6;
+DELETE FROM fts_union_t WHERE id = 10;
+SELECT COUNT(*) FROM fts_union_t WHERE MATCH(en) AGAINST('index tokenizer');
+SELECT id FROM fts_union_t WHERE MATCH(en) AGAINST('index tokenizer') ORDER BY MATCH(en) AGAINST('index tokenizer') DESC, id LIMIT 3;
+SELECT COUNT(*) FROM fts_union_t WHERE MATCH(zh) AGAINST('倒排索引');
+
+# IK dictionary lookups: prefixes, quantifiers, mixed letters and punctuation
+SELECT tokenize('中华人民共和国人民大会堂是著名地标', 'ik');
+SELECT tokenize('中华人民共和国人民大会堂是著名地标', 'ik', '[{"additional_args":[{"ik_mode": "max_word"}]}]');
+SELECT tokenize('一二三四五六七八九十 2026年10月28日 三百五十元 ABC123def 。，、', 'ik');
+SELECT tokenize('全文索引的分词器热路径优化包括解析器实例复用、停用词全局单例', 'ik', '[{"additional_args":[{"ik_mode": "max_word"}]}]');
+
+DROP TABLE fts_union_t;

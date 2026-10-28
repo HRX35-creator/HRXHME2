@@ -378,19 +378,25 @@ int ObFTRangeDict::match_with_hit(const ObString &single_word,
   return last_hit.dict_->match_with_hit(single_word, last_hit, hit);
 }
 
+// utf8mb4_bin compares the common prefix byte by byte first. Only when one character is a prefix
+// of the other does its space padding decide, so that rare case keeps the collation function.
+static inline int compare_utf8mb4_bin_char(const ObFTSingleWord &bound, const ObString &single_word)
+{
+  const int64_t length = MIN(static_cast<int64_t>(bound.word_len), single_word.length());
+  int cmp = length > 0 ? MEMCMP(bound.word, single_word.ptr(), length) : 0;
+  if (0 == cmp && bound.word_len != single_word.length()) {
+    cmp = ObCharset::strcmp(ObCollationType::CS_TYPE_UTF8MB4_BIN, bound.get_word(), single_word);
+  }
+  return cmp;
+}
+
 int ObFTRangeDict::find_first_char_range(const ObString &single_word, ObIFTDict *&dict) const
 {
   int ret = OB_SUCCESS;
   bool found = false;
   for (int i = 0; OB_SUCC(ret) && !found && i < range_dicts_.size(); ++i) {
-    if (ObCharset::strcmp(ObCollationType::CS_TYPE_UTF8MB4_BIN,
-                          range_dicts_[i].start_.get_word(),
-                          single_word)
-            <= 0
-        && ObCharset::strcmp(ObCollationType::CS_TYPE_UTF8MB4_BIN,
-                             range_dicts_[i].end_.get_word(),
-                             single_word)
-               >= 0) {
+    if (compare_utf8mb4_bin_char(range_dicts_[i].start_, single_word) <= 0
+        && compare_utf8mb4_bin_char(range_dicts_[i].end_, single_word) >= 0) {
       dict = range_dicts_[i].dict_;
       found = true;
     }

@@ -223,11 +223,14 @@ int oceanbase::storage::ObDDLStorageUtil::report_ddl_sstable_checksum(
                                                       column_checksums,
                                                       column_count,
                                                       data_format_version))) {
+        // the checksum is written synchronously, so only a failed attempt backs off before retrying
+        if (retry_cnt > 1) {
+          ob_usleep(100L * 1000L);
+        }
       } else {
         break;
       }
     }
-    ob_usleep(100L * 1000L);
   }
   return ret;
 }

@@ -71,8 +71,7 @@ Outputs & filters:
   4 - output([t_ir_single_column.detail], [t_ir_single_column.digest], [MATCH(t_ir_single_column.detail) AGAINST('database')]), filter(nil), rowset=16
       access([t_ir_single_column.seq], [t_ir_single_column.detail], [t_ir_single_column.digest]), partitions(p[0-1])
       is_index_back=true, is_global_index=false, 
-      calc_relevance=true, match_expr(MATCH(t_ir_single_column.detail) AGAINST('database')), 
-      pushdown_match_filter(MATCH(t_ir_single_column.detail) AGAINST('database'))
+      calc_relevance=true, match_expr(MATCH(t_ir_single_column.detail) AGAINST('database'))
 explain /*+ use_das(t_ir_single_column) */ select digest, detail from t_ir_single_column where match (detail) against ("database");
 Query Plan
 =============================================================================
@@ -97,8 +96,7 @@ Outputs & filters:
   4 - output([t_ir_single_column.detail], [t_ir_single_column.digest], [MATCH(t_ir_single_column.detail) AGAINST('database')]), filter(nil), rowset=16
       access([t_ir_single_column.seq], [t_ir_single_column.detail], [t_ir_single_column.digest]), partitions(p[0-1])
       is_index_back=true, is_global_index=false, 
-      calc_relevance=true, match_expr(MATCH(t_ir_single_column.detail) AGAINST('database')), 
-      pushdown_match_filter(MATCH(t_ir_single_column.detail) AGAINST('database'))
+      calc_relevance=true, match_expr(MATCH(t_ir_single_column.detail) AGAINST('database'))
 
 select digest, detail from t_ir_single_column where match (detail) against ("distributed database");
 +---------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
@@ -214,8 +212,7 @@ Outputs & filters:
   4 - output([t_ir_single_column.digest], [MATCH(t_ir_single_column.detail) AGAINST('database')]), filter(nil), rowset=16
       access([t_ir_single_column.seq], [t_ir_single_column.digest]), partitions(p[0-1])
       is_index_back=true, is_global_index=false, 
-      calc_relevance=true, match_expr(MATCH(t_ir_single_column.detail) AGAINST('database')), 
-      pushdown_match_filter(MATCH(t_ir_single_column.detail) AGAINST('database'))
+      calc_relevance=true, match_expr(MATCH(t_ir_single_column.detail) AGAINST('database'))
 
 select
     digest, match (detail) against ("database") as relevance
@@ -274,8 +271,7 @@ Outputs & filters:
   1 - output([t_ir_single_column.digest], [MATCH(t_ir_single_column.detail) AGAINST('computer')]), filter(nil), rowset=16
       access([t_ir_single_column.seq], [t_ir_single_column.digest]), partitions(p[0-1])
       is_index_back=true, is_global_index=false, 
-      calc_relevance=true, match_expr(MATCH(t_ir_single_column.detail) AGAINST('computer')), 
-      pushdown_match_filter(MATCH(t_ir_single_column.detail) AGAINST('computer'))
+      calc_relevance=true, match_expr(MATCH(t_ir_single_column.detail) AGAINST('computer'))
 
 select /*+ use_das(t_ir_single_column) */
     digest, match (detail) against ("computer") as relevance
@@ -333,7 +329,6 @@ Outputs & filters:
       access([t_ir_single_column.seq], [t_ir_single_column.digest]), partitions(p[0-1])
       is_index_back=true, is_global_index=false, 
       calc_relevance=true, match_expr(MATCH(t_ir_single_column.detail) AGAINST('computer')), 
-      pushdown_match_filter(MATCH(t_ir_single_column.detail) AGAINST('computer')), 
       sort_keys([MATCH(t_ir_single_column.detail) AGAINST('computer'), DESC]), limit(4), offset(nil), with_ties(false)
 
 select
@@ -377,7 +372,6 @@ Outputs & filters:
       access([t_ir_single_column.seq], [t_ir_single_column.digest]), partitions(p[0-1])
       is_index_back=true, is_global_index=false, 
       calc_relevance=true, match_expr(MATCH(t_ir_single_column.detail) AGAINST('computer')), 
-      pushdown_match_filter(MATCH(t_ir_single_column.detail) AGAINST('computer')), 
       sort_keys([MATCH(t_ir_single_column.detail) AGAINST('computer'), DESC]), limit(4), offset(nil), with_ties(false)
 
 select /*+ use_das(t_ir_single_column) */
@@ -430,8 +424,7 @@ Outputs & filters:
       < 4]), rowset=16
       access([t_ir_single_column.seq], [t_ir_single_column.digest]), partitions(p[0-1])
       is_index_back=true, is_global_index=false, filter_before_indexback[false], 
-      calc_relevance=true, match_expr(MATCH(t_ir_single_column.detail) AGAINST('scientist')), 
-      pushdown_match_filter(MATCH(t_ir_single_column.detail) AGAINST('scientist'))
+      calc_relevance=true, match_expr(MATCH(t_ir_single_column.detail) AGAINST('scientist'))
 
 select
     digest, seq, match (detail) against ("scientist") as relevance
@@ -518,8 +511,7 @@ Outputs & filters:
        '%Ken%', '\\')]), rowset=16
       access([t_ir_single_column.seq], [t_ir_single_column.digest]), partitions(p[0-1])
       is_index_back=true, is_global_index=false, filter_before_indexback[false], 
-      calc_relevance=true, match_expr(MATCH(t_ir_single_column.detail) AGAINST('scientist')), 
-      pushdown_match_filter(MATCH(t_ir_single_column.detail) AGAINST('scientist'))
+      calc_relevance=true, match_expr(MATCH(t_ir_single_column.detail) AGAINST('scientist'))
 
 select
     digest, seq, match (detail) against ("scientist") as relevance
@@ -681,8 +673,7 @@ Outputs & filters:
   8 - output([t_ir_single_column.seq], [t_ir_single_column.digest], [MATCH(t_ir_single_column.detail) AGAINST('computer')]), filter(nil), rowset=16
       access([t_ir_single_column.seq], [t_ir_single_column.digest]), partitions(p[0-1])
       is_index_back=true, is_global_index=false, 
-      calc_relevance=true, match_expr(MATCH(t_ir_single_column.detail) AGAINST('computer')), 
-      pushdown_match_filter(MATCH(t_ir_single_column.detail) AGAINST('computer'))
+      calc_relevance=true, match_expr(MATCH(t_ir_single_column.detail) AGAINST('computer'))
 
 select
     t_ir_single_column.digest, t_dim_table.seq as seq, t_dim_table.log as log , match (detail) against ("computer") as score
@@ -732,8 +723,7 @@ Outputs & filters:
   3 - output([t_ir_single_column.seq], [t_ir_single_column.digest], [MATCH(t_ir_single_column.detail) AGAINST('computer')]), filter(nil), rowset=16
       access([t_ir_single_column.seq], [t_ir_single_column.digest]), partitions(p[0-1])
       is_index_back=true, is_global_index=false, 
-      calc_relevance=true, match_expr(MATCH(t_ir_single_column.detail) AGAINST('computer')), 
-      pushdown_match_filter(MATCH(t_ir_single_column.detail) AGAINST('computer'))
+      calc_relevance=true, match_expr(MATCH(t_ir_single_column.detail) AGAINST('computer'))
 
 select /*+ use_das(t_ir_single_column) */
     t_ir_single_column.digest, t_dim_table.seq as seq, t_dim_table.log as log , match (detail) against ("computer") as score
@@ -783,8 +773,7 @@ Outputs & filters:
   3 - output([t_ir_single_column.seq], [t_ir_single_column.digest], [MATCH(t_ir_single_column.detail) AGAINST('computer')]), filter(nil), rowset=16
       access([t_ir_single_column.seq], [t_ir_single_column.digest]), partitions(p[0-1])
       is_index_back=true, is_global_index=false, 
-      calc_relevance=true, match_expr(MATCH(t_ir_single_column.detail) AGAINST('computer')), 
-      pushdown_match_filter(MATCH(t_ir_single_column.detail) AGAINST('computer'))
+      calc_relevance=true, match_expr(MATCH(t_ir_single_column.detail) AGAINST('computer'))
 
 select /*+ use_das(t_ir_single_column), use_das(t_dim_table) */
     t_ir_single_column.digest, t_dim_table.seq as seq, t_dim_table.log as log , match (detail) against ("computer") as score
@@ -901,8 +890,7 @@ Outputs & filters:
   5 - output(nil), filter(nil), rowset=16
       access(nil), partitions(p[0-1])
       limit(1), offset(nil), is_index_back=false, is_global_index=false, 
-      calc_relevance=true, match_expr(MATCH(t_ir_single_column.detail) AGAINST('distributed database')), 
-      pushdown_match_filter(MATCH(t_ir_single_column.detail) AGAINST('distributed database'))
+      calc_relevance=false, match_expr(MATCH(t_ir_single_column.detail) AGAINST('distributed database'))
 select distinct 1 from t_ir_single_column where match (detail) against ("distributed database");
 +---+
 | 1 |
@@ -925,8 +913,7 @@ Outputs & filters:
   1 - output(nil), filter(nil), rowset=16
       access(nil), partitions(p[0-1])
       limit(1), offset(nil), is_index_back=false, is_global_index=false, 
-      calc_relevance=true, match_expr(MATCH(t_ir_single_column.detail) AGAINST('distributed database')), 
-      pushdown_match_filter(MATCH(t_ir_single_column.detail) AGAINST('distributed database'))
+      calc_relevance=false, match_expr(MATCH(t_ir_single_column.detail) AGAINST('distributed database'))
 select /*+ use_das(t_ir_single_column) */ distinct 1 from t_ir_single_column where match (detail) against ("distributed database");
 +---+
 | 1 |
@@ -965,8 +952,7 @@ Outputs & filters:
   7 - output([t_ir_single_column.digest]), filter(nil), rowset=16
       access([t_ir_single_column.seq], [t_ir_single_column.digest]), partitions(p[0-1])
       is_index_back=true, is_global_index=false, 
-      calc_relevance=true, match_expr(MATCH(t_ir_single_column.detail) AGAINST('distributed database')), 
-      pushdown_match_filter(MATCH(t_ir_single_column.detail) AGAINST('distributed database'))
+      calc_relevance=true, match_expr(MATCH(t_ir_single_column.detail) AGAINST('distributed database'))
 select distinct digest from t_ir_single_column where match (detail) against ("distributed database");
 +---------------------+
 | digest              |
@@ -991,8 +977,7 @@ Outputs & filters:
   1 - output([t_ir_single_column.digest]), filter(nil), rowset=16
       access([t_ir_single_column.seq], [t_ir_single_column.digest]), partitions(p[0-1])
       is_index_back=true, is_global_index=false, 
-      calc_relevance=true, match_expr(MATCH(t_ir_single_column.detail) AGAINST('distributed database')), 
-      pushdown_match_filter(MATCH(t_ir_single_column.detail) AGAINST('distributed database'))
+      calc_relevance=true, match_expr(MATCH(t_ir_single_column.detail) AGAINST('distributed database'))
 select /*+ use_das(t_ir_single_column) */ distinct digest from t_ir_single_column where match (detail) against ("distributed database");
 +---------------------+
 | digest              |
@@ -1034,8 +1019,7 @@ Outputs & filters:
   5 - output([MATCH(t_ir_single_column.detail) AGAINST('distributed database')]), filter([t_ir_single_column.seq > 1]), rowset=16
       access([t_ir_single_column.seq]), partitions(p[0-1])
       is_index_back=true, is_global_index=false, filter_before_indexback[false], 
-      calc_relevance=true, match_expr(MATCH(t_ir_single_column.detail) AGAINST('distributed database')), 
-      pushdown_match_filter(MATCH(t_ir_single_column.detail) AGAINST('distributed database'))
+      calc_relevance=true, match_expr(MATCH(t_ir_single_column.detail) AGAINST('distributed database'))
   6 - output([t_ir_single_column.digest]), filter(nil), rowset=16
       limit(1), offset(nil)
   7 - output([t_ir_single_column.digest]), filter(nil), rowset=16
@@ -1092,8 +1076,7 @@ Outputs & filters:
   6 - output(nil), filter([t_ir_single_column.seq > 1]), rowset=16
       access([t_ir_single_column.seq]), partitions(p[0-1])
       is_index_back=true, is_global_index=false, filter_before_indexback[false], 
-      calc_relevance=true, match_expr(MATCH(t_ir_single_column.detail) AGAINST('distributed database')), 
-      pushdown_match_filter(MATCH(t_ir_single_column.detail) AGAINST('distributed database'))
+      calc_relevance=true, match_expr(MATCH(t_ir_single_column.detail) AGAINST('distributed database'))
   7 - output([t_ir_single_column.digest]), filter(nil), rowset=16
       limit(1), offset(nil)
   8 - output([t_ir_single_column.digest]), filter(nil), rowset=16
@@ -1138,8 +1121,7 @@ Outputs & filters:
   2 - output(nil), filter([t_ir_single_column.seq > 1]), rowset=16
       access([t_ir_single_column.seq]), partitions(p[0-1])
       is_index_back=true, is_global_index=false, filter_before_indexback[false], 
-      calc_relevance=true, match_expr(MATCH(t_ir_single_column.detail) AGAINST('distributed database')), 
-      pushdown_match_filter(MATCH(t_ir_single_column.detail) AGAINST('distributed database'))
+      calc_relevance=true, match_expr(MATCH(t_ir_single_column.detail) AGAINST('distributed database'))
   3 - output([t_ir_single_column.digest]), filter(nil), rowset=16
       limit(1), offset(nil)
   4 - output([t_ir_single_column.digest]), filter(nil), rowset=16

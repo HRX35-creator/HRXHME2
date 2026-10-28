@@ -159,6 +159,10 @@ public:
         const share::schema::ObIndexType index_type,
         const int64_t original_parallelism,
         int64_t &decided_parallelism);
+  // Parallelism of one word-segmenting aux table (fts index / doc word) build when the statement
+  // asks for none. Segmenting is CPU bound and the two tables are built at the same time, so each
+  // gets a share of the cpus the server is configured with (never more than it may run on).
+  static int64_t default_word_aux_build_parallelism();
 private:
   static int build_fts_aux_index_name(
     const ObIndexType type,

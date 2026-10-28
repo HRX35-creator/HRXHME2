@@ -118,12 +118,22 @@ int ObGenDicLoader::get_dic_loader(const ObString &parser_name,
   int ret = OB_SUCCESS;
   ObGenDicLoaderKey dic_loader_key;
   ObDicLoader *dic_loader = nullptr;
+  bool found = false;
   if (!is_inited_) {
     ret = OB_NOT_INIT;
   } else if (parser_name.empty()
              || charset == CHARSET_INVALID) {
     ret = OB_INVALID_ARGUMENT;
   } else if (OB_FAIL(dic_loader_key.init(parser_name, charset))) {
+  } else {
+    // Loaders are created once and stay in the map, so the common case only needs a read lock.
+    TCRLockGuard read_guard(lock_);
+    if (OB_SUCCESS == dic_loader_map_.get_refactored(dic_loader_key, dic_loader)) {
+      found = true;
+      ret = loader_handle.set_loader(dic_loader);
+    }
+  }
+  if (OB_FAIL(ret) || found) {
   } else {
     TCWLockGuard guard(lock_);
     if (OB_FAIL(dic_loader_map_.get_refactored(dic_loader_key, dic_loader))) {

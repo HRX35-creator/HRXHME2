@@ -67,6 +67,9 @@ public:
 
   int find(const ObFTSingleWord &word, ObFTWordCode &code) const;
 
+  // Same lookup on a raw character, without copying it into an ObFTSingleWord first.
+  int find(const char *word, const int64_t word_len, ObFTWordCode &code) const;
+
 private:
   struct Header header_;
 } __attribute__((packed));

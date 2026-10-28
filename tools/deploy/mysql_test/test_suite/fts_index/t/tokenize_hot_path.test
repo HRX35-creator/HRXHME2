@@ -1,0 +1,53 @@
+# tags: fts
+# description: preserve character classification and stopword semantics on the tokenization hot path.
+
+SET NAMES utf8mb4;
+SET ob_query_timeout = 10000000000;
+
+# Keep classification order, fullwidth letters/numbers, CJK and punctuation.
+SELECT tokenize('OceanBase数据库 ABC123 １２３ ＡＢＣ 1.2亿 一百二十公斤 你好世界，かな カナ 한글 😀', 'ik', '[{"output":"all"}]');
+SELECT tokenize('中华人民共和国人民大会堂 ABC-123 foo@example.com 3.14万元', 'ik', '[{"output":"all"},{"additional_args":[{"ik_mode":"max_word"}]}]');
+SELECT tokenize('中华人民共和国人民大会堂 ABC-123 foo@example.com 3.14万元', 'ik', '[{"output":"all"},{"additional_args":[{"ik_mode":"smart"}]}]');
+SELECT tokenize('，。！？😀', 'ik');
+SELECT tokenize('', 'ik');
+
+# UTF8 collations must still use the stopword dictionary's comparison rules.
+SELECT tokenize(_utf8mb4'THE the The ABOUT About database DATABASE quick quick' COLLATE utf8mb4_bin, 'beng', '[{"output":"all"}]');
+SELECT tokenize(_utf8mb4'THe about database café naïve résumé' COLLATE utf8mb4_general_ci, 'beng', '[{"output":"all"}]');
+SELECT tokenize(_utf8mb4'THe thé THE database' COLLATE utf8mb4_bin, 'beng', '[{"output":"all"}]');
+SELECT tokenize(_utf8mb4'cafex caféx caféx cafex resumex résumex' COLLATE utf8mb4_general_ci, 'beng', '[{"output":"all"}]');
+SELECT tokenize(_utf8mb4'caféx cafex cafex caféx résumex resumex' COLLATE utf8mb4_general_ci, 'beng', '[{"output":"all"}]');
+SELECT tokenize(_utf8mb4'DATABASE database DATABASE database' COLLATE utf8mb4_bin, 'space', '[{"output":"all"}]');
+SELECT tokenize('the about with from where', 'beng');
+SELECT tokenize('THE database DATABASE about', 'space', '[{"output":"all"}]');
+SELECT tokenize('全文索引数据库 THE quick', 'ngram', '[{"output":"all"}]');
+
+# Keep the public API's rejection of unsupported input charsets.
+--error 1583
+SELECT tokenize(_latin1'THE quick QUICK database about', 'beng', '[{"output":"all"}]');
+
+--disable_warnings
+DROP TABLE IF EXISTS fts_hot_path;
+--enable_warnings
+CREATE TABLE fts_hot_path (
+  id INT PRIMARY KEY,
+  zh TEXT,
+  en TEXT
+) DEFAULT CHARSET=utf8mb4;
+INSERT INTO fts_hot_path VALUES
+  (1, 'OceanBase数据库全文索引 1.2亿 ABC123', 'THE database database quick brown fox'),
+  (2, '中华人民共和国人民大会堂 １２３ ＡＢＣ', 'about audit performance database'),
+  (3, '你好世界 かな カナ 한글 😀', 'the about with from'),
+  (4, 'OceanBase数据库全文索引', 'quick audit');
+ALTER TABLE fts_hot_path ADD FULLTEXT INDEX zh_ik(zh) WITH PARSER ik;
+ALTER TABLE fts_hot_path ADD FULLTEXT INDEX en_beng(en) WITH PARSER beng;
+SELECT id FROM fts_hot_path WHERE MATCH(zh) AGAINST('全文索引') ORDER BY id;
+SELECT id FROM fts_hot_path WHERE MATCH(zh) AGAINST('1.2亿 ABC123') ORDER BY id;
+SELECT id FROM fts_hot_path WHERE MATCH(en) AGAINST('database audit') ORDER BY id;
+SELECT id FROM fts_hot_path WHERE MATCH(en) AGAINST('the about') ORDER BY id;
+UPDATE fts_hot_path SET zh='你好世界 数据库', en='with audit database' WHERE id=3;
+DELETE FROM fts_hot_path WHERE id=2;
+INSERT INTO fts_hot_path VALUES (5, '全文索引 数据库', 'THE database audit');
+SELECT id FROM fts_hot_path WHERE MATCH(zh) AGAINST('全文索引') ORDER BY id;
+SELECT id FROM fts_hot_path WHERE MATCH(en) AGAINST('database audit') ORDER BY id;
+DROP TABLE fts_hot_path;

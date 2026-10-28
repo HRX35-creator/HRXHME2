@@ -1,0 +1,59 @@
+--disable_warnings
+DROP TABLE IF EXISTS membership_aggregate;
+--enable_warnings
+CREATE TABLE membership_aggregate (
+  id INT PRIMARY KEY,
+  body TEXT,
+  FULLTEXT INDEX ft_body(body) WITH PARSER beng
+);
+INSERT INTO membership_aggregate VALUES
+  (1, 'database performance audit'),
+  (2, 'database database storage'),
+  (3, 'audit security'),
+  (4, 'different words'),
+  (5, NULL);
+
+SELECT COUNT(*), SUM(id), MAX(id) FROM membership_aggregate
+  WHERE MATCH(body) AGAINST('database audit');
+SELECT COUNT(*) FROM membership_aggregate WHERE MATCH(body) AGAINST('database database');
+SELECT COUNT(*) FROM membership_aggregate WHERE MATCH(body) AGAINST('absent');
+SELECT COUNT(*) FROM membership_aggregate WHERE MATCH(body) AGAINST('');
+SELECT COUNT(*) FROM membership_aggregate WHERE MATCH(body) AGAINST(NULL);
+SELECT COUNT(*) FROM membership_aggregate WHERE id >= 2 AND MATCH(body) AGAINST('database audit');
+SELECT COUNT(*) FROM membership_aggregate WHERE MATCH(body) AGAINST('database audit') > 0;
+SELECT COUNT(*) FROM membership_aggregate WHERE MATCH(body) AGAINST('database audit') > 0.1;
+SELECT COUNT(*), ROUND(SUM(MATCH(body) AGAINST('database audit')), 6)
+  FROM membership_aggregate WHERE MATCH(body) AGAINST('database audit');
+SELECT MOD(id, 2), COUNT(*) FROM membership_aggregate
+  WHERE MATCH(body) AGAINST('database audit') GROUP BY MOD(id, 2) ORDER BY 1;
+SELECT id, ROUND(MATCH(body) AGAINST('database audit'), 6)
+  FROM membership_aggregate WHERE MATCH(body) AGAINST('database audit') ORDER BY id;
+SELECT COUNT(*) FROM (SELECT id FROM membership_aggregate
+  WHERE MATCH(body) AGAINST('database audit') LIMIT 2) t;
+SELECT COUNT(*) FROM membership_aggregate WHERE MATCH(body) AGAINST('+database -storage' IN BOOLEAN MODE);
+
+PREPARE membership_query FROM 'SELECT COUNT(*) FROM membership_aggregate WHERE MATCH(body) AGAINST(?)';
+SET @term = 'database';
+EXECUTE membership_query USING @term;
+SET @term = 'audit';
+EXECUTE membership_query USING @term;
+SET @term = 'absent';
+EXECUTE membership_query USING @term;
+
+--echo Membership-only query with more than 256 distinct terms uses TaaT.
+--disable_query_log
+SET @long_query = 'database audit uniqueterm0000 uniqueterm0001 uniqueterm0002 uniqueterm0003 uniqueterm0004 uniqueterm0005 uniqueterm0006 uniqueterm0007 uniqueterm0008 uniqueterm0009 uniqueterm0010 uniqueterm0011 uniqueterm0012 uniqueterm0013 uniqueterm0014 uniqueterm0015 uniqueterm0016 uniqueterm0017 uniqueterm0018 uniqueterm0019 uniqueterm0020 uniqueterm0021 uniqueterm0022 uniqueterm0023 uniqueterm0024 uniqueterm0025 uniqueterm0026 uniqueterm0027 uniqueterm0028 uniqueterm0029 uniqueterm0030 uniqueterm0031 uniqueterm0032 uniqueterm0033 uniqueterm0034 uniqueterm0035 uniqueterm0036 uniqueterm0037 uniqueterm0038 uniqueterm0039 uniqueterm0040 uniqueterm0041 uniqueterm0042 uniqueterm0043 uniqueterm0044 uniqueterm0045 uniqueterm0046 uniqueterm0047 uniqueterm0048 uniqueterm0049 uniqueterm0050 uniqueterm0051 uniqueterm0052 uniqueterm0053 uniqueterm0054 uniqueterm0055 uniqueterm0056 uniqueterm0057 uniqueterm0058 uniqueterm0059 uniqueterm0060 uniqueterm0061 uniqueterm0062 uniqueterm0063 uniqueterm0064 uniqueterm0065 uniqueterm0066 uniqueterm0067 uniqueterm0068 uniqueterm0069 uniqueterm0070 uniqueterm0071 uniqueterm0072 uniqueterm0073 uniqueterm0074 uniqueterm0075 uniqueterm0076 uniqueterm0077 uniqueterm0078 uniqueterm0079 uniqueterm0080 uniqueterm0081 uniqueterm0082 uniqueterm0083 uniqueterm0084 uniqueterm0085 uniqueterm0086 uniqueterm0087 uniqueterm0088 uniqueterm0089 uniqueterm0090 uniqueterm0091 uniqueterm0092 uniqueterm0093 uniqueterm0094 uniqueterm0095 uniqueterm0096 uniqueterm0097 uniqueterm0098 uniqueterm0099 uniqueterm0100 uniqueterm0101 uniqueterm0102 uniqueterm0103 uniqueterm0104 uniqueterm0105 uniqueterm0106 uniqueterm0107 uniqueterm0108 uniqueterm0109 uniqueterm0110 uniqueterm0111 uniqueterm0112 uniqueterm0113 uniqueterm0114 uniqueterm0115 uniqueterm0116 uniqueterm0117 uniqueterm0118 uniqueterm0119 uniqueterm0120 uniqueterm0121 uniqueterm0122 uniqueterm0123 uniqueterm0124 uniqueterm0125 uniqueterm0126 uniqueterm0127 uniqueterm0128 uniqueterm0129 uniqueterm0130 uniqueterm0131 uniqueterm0132 uniqueterm0133 uniqueterm0134 uniqueterm0135 uniqueterm0136 uniqueterm0137 uniqueterm0138 uniqueterm0139 uniqueterm0140 uniqueterm0141 uniqueterm0142 uniqueterm0143 uniqueterm0144 uniqueterm0145 uniqueterm0146 uniqueterm0147 uniqueterm0148 uniqueterm0149 uniqueterm0150 uniqueterm0151 uniqueterm0152 uniqueterm0153 uniqueterm0154 uniqueterm0155 uniqueterm0156 uniqueterm0157 uniqueterm0158 uniqueterm0159 uniqueterm0160 uniqueterm0161 uniqueterm0162 uniqueterm0163 uniqueterm0164 uniqueterm0165 uniqueterm0166 uniqueterm0167 uniqueterm0168 uniqueterm0169 uniqueterm0170 uniqueterm0171 uniqueterm0172 uniqueterm0173 uniqueterm0174 uniqueterm0175 uniqueterm0176 uniqueterm0177 uniqueterm0178 uniqueterm0179 uniqueterm0180 uniqueterm0181 uniqueterm0182 uniqueterm0183 uniqueterm0184 uniqueterm0185 uniqueterm0186 uniqueterm0187 uniqueterm0188 uniqueterm0189 uniqueterm0190 uniqueterm0191 uniqueterm0192 uniqueterm0193 uniqueterm0194 uniqueterm0195 uniqueterm0196 uniqueterm0197 uniqueterm0198 uniqueterm0199 uniqueterm0200 uniqueterm0201 uniqueterm0202 uniqueterm0203 uniqueterm0204 uniqueterm0205 uniqueterm0206 uniqueterm0207 uniqueterm0208 uniqueterm0209 uniqueterm0210 uniqueterm0211 uniqueterm0212 uniqueterm0213 uniqueterm0214 uniqueterm0215 uniqueterm0216 uniqueterm0217 uniqueterm0218 uniqueterm0219 uniqueterm0220 uniqueterm0221 uniqueterm0222 uniqueterm0223 uniqueterm0224 uniqueterm0225 uniqueterm0226 uniqueterm0227 uniqueterm0228 uniqueterm0229 uniqueterm0230 uniqueterm0231 uniqueterm0232 uniqueterm0233 uniqueterm0234 uniqueterm0235 uniqueterm0236 uniqueterm0237 uniqueterm0238 uniqueterm0239 uniqueterm0240 uniqueterm0241 uniqueterm0242 uniqueterm0243 uniqueterm0244 uniqueterm0245 uniqueterm0246 uniqueterm0247 uniqueterm0248 uniqueterm0249 uniqueterm0250 uniqueterm0251 uniqueterm0252 uniqueterm0253 uniqueterm0254 uniqueterm0255 uniqueterm0256 uniqueterm0257 uniqueterm0258 uniqueterm0259 uniqueterm0260 uniqueterm0261 uniqueterm0262 uniqueterm0263 uniqueterm0264 uniqueterm0265 uniqueterm0266 uniqueterm0267 uniqueterm0268 uniqueterm0269 uniqueterm0270 uniqueterm0271 uniqueterm0272 uniqueterm0273 uniqueterm0274 uniqueterm0275 uniqueterm0276 uniqueterm0277 uniqueterm0278 uniqueterm0279 uniqueterm0280 uniqueterm0281 uniqueterm0282 uniqueterm0283 uniqueterm0284 uniqueterm0285 uniqueterm0286 uniqueterm0287 uniqueterm0288 uniqueterm0289 uniqueterm0290 uniqueterm0291 uniqueterm0292 uniqueterm0293 uniqueterm0294 uniqueterm0295 uniqueterm0296 uniqueterm0297 uniqueterm0298 uniqueterm0299';
+EXECUTE membership_query USING @long_query;
+SET @long_query = CONCAT(@long_query, ' database audit');
+EXECUTE membership_query USING @long_query;
+--enable_query_log
+DEALLOCATE PREPARE membership_query;
+
+START TRANSACTION;
+DELETE FROM membership_aggregate WHERE id = 1;
+SELECT COUNT(*) FROM membership_aggregate WHERE MATCH(body) AGAINST('database audit');
+ROLLBACK;
+SELECT COUNT(*) FROM membership_aggregate WHERE MATCH(body) AGAINST('database audit');
+UPDATE membership_aggregate SET body = 'audit database' WHERE id = 4;
+SELECT COUNT(*) FROM membership_aggregate WHERE MATCH(body) AGAINST('database audit');
+DROP TABLE membership_aggregate;

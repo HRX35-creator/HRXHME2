@@ -217,7 +217,14 @@ int ObGranuleUtil::split_block_granule(ObExecContext &exec_ctx,
   // 3. calc the total number of tasks for all partitions
   int64_t esti_task_cnt_by_data_size = 0;
   if (OB_SUCC(ret)) {
-    data_plane::ObParallelRangeTaskParams params(config::px_task_size() >> 10);
+    // Word segmentation of a fulltext index build costs far more cpu per byte than a plain scan,
+    // so its granules are kept small enough for a table of a few MB to reach every worker.
+    static const int64_t FTS_DDL_MAX_TASK_SIZE_KB = 128;
+    int64_t min_task_size_kb = config::px_task_size() >> 10;
+    if (nullptr != tsc && tsc->is_fts_ddl_) {
+      min_task_size_kb = MAX(1L, MIN(min_task_size_kb, FTS_DDL_MAX_TASK_SIZE_KB));
+    }
+    data_plane::ObParallelRangeTaskParams params(min_task_size_kb);
     params.parallelism_ = parallelism;
     params.expected_task_load_kb_ = tablet_size/1024;
     if (OB_FAIL(data_plane::ObParallelRangeTaskPlanner::compute_total_task_count(
