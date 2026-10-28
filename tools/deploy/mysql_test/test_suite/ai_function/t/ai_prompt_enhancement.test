@@ -1,0 +1,59 @@
+# AI_PROMPT enhancement regression
+
+--disable_warnings
+DROP TABLE IF EXISTS t_ai_prompt_enhancement;
+--enable_warnings
+
+CREATE TABLE t_ai_prompt_enhancement (
+  id INT PRIMARY KEY,
+  template_text TEXT,
+  argument_text LONGTEXT
+);
+
+INSERT INTO t_ai_prompt_enhancement
+VALUES (1, '你好 {0}', '世界');
+
+# Existing VARCHAR behavior
+SELECT JSON_UNQUOTE(
+  JSON_EXTRACT(AI_PROMPT('Hello {0}', 'world'), '$.args[0]')
+) AS string_arg;
+
+# JSON Object argument
+SELECT JSON_UNQUOTE(
+  JSON_EXTRACT(
+    AI_PROMPT('Describe {0}', JSON_OBJECT('name', 'Alice')),
+    '$.args[0].name'
+  )
+) AS object_arg;
+
+# JSON Array argument
+SELECT JSON_UNQUOTE(
+  JSON_EXTRACT(
+    AI_PROMPT('Summarize {0}', JSON_ARRAY('a', 'b')),
+    '$.args[0][1]'
+  )
+) AS array_arg;
+
+# Repeated placeholders: verify template and original argument structure
+# Actual replacement must also be checked via AI_COMPLETE or a C++ unit test.
+SELECT JSON_UNQUOTE(
+  JSON_EXTRACT(
+    AI_PROMPT('{0}{0}{0}{0}', 'hello'),
+    '$.template'
+  )
+) AS repeated_template;
+
+# TEXT/LONGTEXT + Unicode
+SELECT JSON_UNQUOTE(
+  JSON_EXTRACT(
+    AI_PROMPT(template_text, argument_text),
+    '$.args[0]'
+  )
+) AS longtext_arg
+FROM t_ai_prompt_enhancement;
+
+# Empty JSON Object / Array
+SELECT AI_PROMPT('{0}', JSON_OBJECT());
+SELECT AI_PROMPT('{0}', JSON_ARRAY());
+
+DROP TABLE t_ai_prompt_enhancement;
