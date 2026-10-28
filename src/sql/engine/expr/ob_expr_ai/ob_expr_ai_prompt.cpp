@@ -52,17 +52,17 @@ int ObExprAIPrompt::calc_result_typeN(ObExprResType &type,
 {
   int ret = OB_SUCCESS;
   ObExprResType template_type = types_stack[0];
-  if (!ob_is_string_tc(template_type.get_type())) {
+  // Accept both string types (varchar/char/...) and TEXT/LONGTEXT lob types;
+  // the lob payload is read at eval time via ObTextStringHelper.
+  if (!ob_is_string_type(template_type.get_type())) {
     ret = OB_ERR_INVALID_TYPE_FOR_OP;
   } else {
-    // Keep TEXT/LONGTEXT templates working by casting to varchar for
-    // evaluation; the actual LOB payload is read at eval time.
     types_stack[0].set_calc_type(ObVarcharType);
     types_stack[0].set_calc_collation_type(CS_TYPE_UTF8MB4_BIN);
   }
 
   for (int64_t i = 1; i < param_num && OB_SUCC(ret); i++) {
-    if (ob_is_string_tc(types_stack[i].get_type())) {
+    if (ob_is_string_type(types_stack[i].get_type())) {
       types_stack[i].set_calc_type(ObVarcharType);
       types_stack[i].set_calc_collation_type(CS_TYPE_UTF8MB4_BIN);
     } else if (ob_is_json(types_stack[i].get_type())) {
@@ -109,7 +109,7 @@ int ObExprAIPrompt::eval_ai_prompt(const ObExpr &expr, ObEvalCtx &ctx, ObDatum &
       ObString arg_str;
       ObJsonString *arg_json_str = NULL;
       if (OB_FAIL(tmp_allocator.eval_arg(arg, ctx, datum))) {
-      } else if (ob_is_string_tc(arg->datum_meta_.type_)) {
+      } else if (ob_is_string_type(arg->datum_meta_.type_)) {
         if (OB_FAIL(ObTextStringHelper::read_real_string_data(ctx.exec_ctx_, tmp_allocator,
                     *datum, arg->datum_meta_, arg->obj_meta_.has_lob_header(), arg_str))) {
         } else if (OB_FAIL(ObAIFuncJsonUtils::get_json_string(tmp_allocator, arg_str, arg_json_str))) {
