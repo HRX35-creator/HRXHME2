@@ -448,6 +448,7 @@ void ObExecContext::reset_op_ctx()
 
 void ObExecContext::reset_op_env()
 {
+  ai_column_changes_.reset();
   reset_op_ctx();
   op_kit_store_.reset();
   phy_op_size_ = 0;

@@ -18,6 +18,7 @@
 #include "ob_expr_ai_complete.h"
 #include "query/ai/ob_ai_endpoint_resolver.h"
 #include "share/rc/ob_server_runtime.h"
+#include "share/schema/ai_column_definition.h"
 
 using namespace oceanbase::common;
 using namespace oceanbase::sql;
@@ -124,18 +125,31 @@ int ObExprAIComplete::eval_ai_complete(const ObExpr &expr,
         ret = OB_INVALID_ARGUMENT;
         LOG_USER_ERROR(OB_INVALID_ARGUMENT, "prompt is not valid");
         res.set_null();
-      } else if (!ObAIFuncJsonUtils::ob_is_json_array_all_str(static_cast<ObJsonArray *>(prompt_object->get_value(ObAIFuncPromptObjectUtils::prompt_args_key)))) {
-        ret = OB_NOT_SUPPORTED;
-        LOG_USER_ERROR(OB_NOT_SUPPORTED, "prompt object is not support");
       } else if (OB_FAIL(ObAIFuncPromptObjectUtils::replace_all_str_args_in_template(temp_allocator, prompt_object, prompt))) {
       }
     } else if (OB_FAIL(ObTextStringHelper::read_real_string_data(ctx.exec_ctx_, temp_allocator, *arg_prompt, expr.args_[1]->datum_meta_, expr.args_[1]->obj_meta_.has_lob_header(), prompt))) {
     }
 
     if (OB_FAIL(ret)) {
-    } else if (OB_NOT_NULL(arg_config)) {
-      if (OB_FAIL(ObTextStringHelper::read_real_string_data(ctx.exec_ctx_, temp_allocator, *arg_config, expr.args_[2]->datum_meta_, expr.args_[2]->obj_meta_.has_lob_header(), config_str))) {
-      } else if (OB_FAIL(ObAIFuncJsonUtils::get_json_object_form_str(temp_allocator, config_str, config))) {
+    } else if (OB_NOT_NULL(arg_config) && !arg_config->is_null()) {
+      if (expr.args_[CONFIG_IDX]->datum_meta_.type_ == ObJsonType) {
+        ObIJsonBase *config_base = nullptr;
+        bool is_null = false;
+        if (OB_FAIL(ObJsonExprHelper::get_json_doc(
+                expr, ctx, temp_allocator, CONFIG_IDX, config_base, is_null))) {
+        } else if (is_null) {
+        } else if (OB_ISNULL(config_base)
+                   || config_base->json_type() != ObJsonNodeType::J_OBJECT) {
+          ret = OB_INVALID_ARGUMENT;
+        } else {
+          config = static_cast<ObJsonObject *>(config_base);
+        }
+      } else if (OB_FAIL(ObTextStringHelper::read_real_string_data(
+                     ctx.exec_ctx_, temp_allocator, *arg_config,
+                     expr.args_[CONFIG_IDX]->datum_meta_,
+                     expr.args_[CONFIG_IDX]->obj_meta_.has_lob_header(), config_str))) {
+      } else if (OB_FAIL(ObAIFuncJsonUtils::get_json_object_form_str(
+                     temp_allocator, config_str, config))) {
       }
     }
 
@@ -155,7 +169,8 @@ int ObExprAIComplete::eval_ai_complete(const ObExpr &expr,
     } else {
       ObAIFuncModel model(temp_allocator, *info, *endpoint_info);
       ObString result;
-      if (OB_FAIL(model.call_completion(prompt, config, result))) {
+      if (OB_FAIL(model.call_completion(prompt, config, result,
+                   share::schema::AiColumnExecutionGuard::type_prompt()))) {
       } else if (OB_FAIL(ObAIFuncUtils::set_string_result(expr, ctx, res, result))) {
       }
     }

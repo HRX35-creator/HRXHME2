@@ -33,6 +33,7 @@
 #include "sql/monitor/ob_phy_operator_stats.h"
 #include "sql/monitor/ob_plan_info_manager.h"
 #include "sql/engine/ob_subschema_ctx.h"
+#include "share/schema/ai_column_definition.h"
 
 namespace oceanbase
 {
@@ -60,6 +61,7 @@ typedef common::ObFixedArray<ObPlanPwjConstraint, common::ObIAllocator> PlanPwjC
 class ObPhysicalPlan : public ObPlanCacheObject
 {
 public:
+  common::ObSEArray<share::schema::AiColumnReference, 4> ai_column_references_;
   static const int32_t SLOW_QUERY_TIME = 100000; //100ms
   static const int64_t SLOW_QUERY_TIME_FOR_PLAN_EXPIRE = 5000; // 5ms
   static const int64_t SLOW_QUERY_ROW_COUNT_THRESOLD = 5000;

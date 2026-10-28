@@ -17,6 +17,7 @@
 #define USING_LOG_PREFIX SQL_ENG
 #include "rust/config.h"
 #include "sql/engine/dml/ob_dml_service.h"
+#include "sql/engine/dml/ai_column_dml.h"
 #include "sql/engine/expr/ob_datum_cast.h"
 #include "share/rc/ob_server_runtime.h"
 #include "sql/das/ob_das_insert_op.h"
@@ -853,6 +854,7 @@ int ObDMLService::insert_row(const ObInsCtDef &ins_ctdef,
                                 dml_rtctx,
                                 ins_ctdef.new_row_,
                                 stored_row))) {
+  } else if (OB_FAIL(AiColumnDml::record_row(ins_ctdef, dml_rtctx.get_eval_ctx(), dml_rtctx.get_exec_ctx(), true, false))) {
   }
   return ret;
 }
@@ -894,6 +896,7 @@ int ObDMLService::delete_row(const ObDelCtDef &del_ctdef,
                                                               del_ctdef.old_row_,
                                                               del_ctdef.trans_info_expr_,
                                                               stored_row))) {
+  } else if (OB_FAIL(AiColumnDml::record_row(del_ctdef, dml_rtctx.get_eval_ctx(), dml_rtctx.get_exec_ctx(), false, true))) {
   }
   return ret;
 }
@@ -1091,6 +1094,9 @@ int ObDMLService::update_row(const ObUpdCtDef &upd_ctdef,
                 "old row", ROWEXPR2STR(dml_rtctx.get_eval_ctx(), upd_ctdef.old_row_),
                 "new row", ROWEXPR2STR(dml_rtctx.get_eval_ctx(), upd_ctdef.new_row_));
     }
+  }
+  if (OB_SUCC(ret) && (upd_rtdef.is_row_changed_ || share::schema::AiColumnRetryGuard::active())) {
+    ret = AiColumnDml::record_row(upd_ctdef, dml_rtctx.get_eval_ctx(), dml_rtctx.get_exec_ctx(), false, false);
   }
   return ret;
 }
@@ -1897,6 +1903,7 @@ int ObDMLService::set_heap_table_hidden_pk(const ObInsCtDef &ins_ctdef,
 int ObDMLService::check_nested_sql_legality(ObExecContext &ctx, common::ObTableID ref_table_id)
 {
   int ret = OB_SUCCESS;
+  if (share::schema::AiColumnExecutionGuard::active()) { return ret; }
   ObSQLSessionInfo *session = ctx.get_my_session();
   if (session->get_is_deserialized() && ctx.get_parent_ctx() != nullptr) {
     // Nested SQL in a distributed worker lacks transaction scheduler control.

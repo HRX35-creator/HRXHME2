@@ -1,0 +1,79 @@
+drop database if exists ai_column_regression;
+create database ai_column_regression;
+call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('regression_ep');
+call DBMS_AI_SERVICE.DROP_AI_MODEL('regression_model');
+call DBMS_AI_SERVICE.CREATE_AI_MODEL('regression_model',
+'{"type":"completion","model_name":"mock-complete"}');
+call DBMS_AI_SERVICE.CREATE_AI_MODEL_ENDPOINT('regression_ep',
+'{"ai_model_name":"regression_model","url":"http://127.0.0.1:19124/v1/chat/completions","access_key":"regression-key","provider":"openai"}');
+call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('regression_embed_ep');
+call DBMS_AI_SERVICE.DROP_AI_MODEL('regression_embed');
+call DBMS_AI_SERVICE.CREATE_AI_MODEL('regression_embed',
+'{"type":"dense_embedding","model_name":"mock-embed"}');
+call DBMS_AI_SERVICE.CREATE_AI_MODEL_ENDPOINT('regression_embed_ep',
+'{"ai_model_name":"regression_embed","url":"http://127.0.0.1:19124/v1/embeddings","access_key":"regression-key","provider":"openai"}');
+create table ai_column_regression.docs(
+tenant int,
+id varchar(40),
+content text,
+category int,
+result varchar(400) AI COLUMN (AI_COMPLETE('regression_model', content))
+WITH (sync_mode='async', max_retries=0),
+primary key(tenant, id)
+);
+create procedure ai_column_regression.add_doc()
+begin
+insert into ai_column_regression.docs(tenant, id, content, category)
+values(7, '引号''键', 'row-one', 0);
+end|
+create procedure ai_column_regression.overwrite_result()
+begin
+update ai_column_regression.docs set result = 'forbidden' where tenant = 7;
+end|
+call ai_column_regression.add_doc();
+select 1 = 1 as procedure_insert_generates_result;
+procedure_insert_generates_result
+1
+call ai_column_regression.overwrite_result();
+ERROR 0A000: direct assignment to an AI column not supported
+select result <> 'forbidden' as procedure_cannot_assign_result from ai_column_regression.docs;
+procedure_cannot_assign_result
+1
+alter table ai_column_regression.docs add column label varchar(400)
+AI COLUMN (AI_COMPLETE('regression_model', concat('Label: ', content))) WITH(max_retries=0);
+select 1 = 1 as added_column_backfilled;
+added_column_backfilled
+1
+alter table ai_column_regression.docs modify column label varchar(400)
+AI COLUMN (AI_COMPLETE('regression_model', concat('New: ', content))) WITH(max_retries=0);
+select 1 = 1 as modified_definition_recomputed;
+modified_definition_recomputed
+1
+create table ai_column_regression.null_docs(
+id int primary key,
+content text,
+result vector(4) AI COLUMN (AI_EMBED('regression_embed', content))
+WITH (sync_mode='async', max_retries=0)
+);
+insert into ai_column_regression.null_docs(id, content) values(8, null);
+select 0 = 0 as null_result_task_completed;
+null_result_task_completed
+1
+set session ai_column_strict_read = on;
+select result is null as ready_null_is_readable from ai_column_regression.null_docs where id = 8;
+ready_null_is_readable
+1
+mock_no_requests=ok
+update ai_column_regression.docs set content = 'changed' where tenant = 7;
+update ai_column_regression.docs set category = 9 where tenant = 7;
+select category = 9 as ordinary_update_under_strict_read from ai_column_regression.docs where tenant = 7;
+ordinary_update_under_strict_read
+1
+select result from ai_column_regression.docs limit 0;
+ERROR HY000: AI column has unfinished tasks for table_id=<table_id>, column_id=<column_id>
+set session ai_column_strict_read = off;
+drop database ai_column_regression;
+call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('regression_ep');
+call DBMS_AI_SERVICE.DROP_AI_MODEL('regression_model');
+call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('regression_embed_ep');
+call DBMS_AI_SERVICE.DROP_AI_MODEL('regression_embed');

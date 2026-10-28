@@ -51,6 +51,27 @@ using namespace pl;
 
 namespace sql
 {
+namespace
+{
+int remember_ai_column_reference(ObResolverParams &params, const TableItem &table, const ColumnItem &item)
+{
+  int ret = OB_SUCCESS;
+  if (!table.is_basic_table() || AiColumnExecutionGuard::active()
+      || (params.session_info_->is_inner() && !params.session_info_->is_user_session())) { return ret; }
+  const ObColumnSchemaV2 *column = nullptr;
+  if (OB_FAIL(params.schema_checker_->get_column_schema(table.ref_id_, item.column_id_, column, true))) {
+  } else if (column != nullptr && column->is_ai_column()) {
+    auto &refs = params.query_ctx_->ai_column_references_;
+    bool exists = false;
+    for (int64_t i = 0; !exists && i < refs.count(); ++i) {
+      exists = refs.at(i).table_id_ == table.ref_id_ && refs.at(i).column_id_ == item.column_id_;
+    }
+    if (!exists) { ret = refs.push_back(AiColumnReference(table.ref_id_, item.column_id_)); }
+  }
+  return ret;
+}
+} // namespace
+
 ObDMLResolver::ObDMLResolver(ObResolverParams &params)
     : ObStmtResolver(params),
       current_scope_(T_NONE_SCOPE),
@@ -1820,6 +1841,7 @@ int ObDMLResolver::resolve_basic_column_ref(const ObQualifiedName &q_name, ObRaw
       }
       if (OB_SUCC(ret)) {
         real_ref_expr = column_item->expr_;
+        ret = remember_ai_column_reference(params_, *table_item, *column_item);
       }
     }
   }
@@ -1836,6 +1858,9 @@ int ObDMLResolver::resolve_basic_column_item(const TableItem &table_item,
   ObColumnRefRawExpr *col_expr = NULL;
   ObSchemaGetterGuard *schema_guard = NULL;
   ColumnItem column_item;
+  include_hidden = include_hidden || share::schema::AiColumnExecutionGuard::active()
+                   || share::schema::AiColumnRetryGuard::active()
+                   || (session_info_ != nullptr && session_info_->is_inner());
   if (NULL == stmt) {
     stmt = get_stmt();
   }
@@ -3054,6 +3079,7 @@ int ObDMLResolver::resolve_table_column_expr(const ObQualifiedName &q_name, ObRa
         ret = OB_ERR_UNEXPECTED;
       } else {
         real_ref_expr = col_item->expr_;
+        ret = remember_ai_column_reference(params_, *table_item, *col_item);
       }
     }
   }
@@ -5001,6 +5027,7 @@ int ObDMLResolver::resolve_all_basic_table_columns(const TableItem &table_item, 
           continue;
         } else if (OB_FAIL(resolve_basic_column_item(table_item, column_schema->get_column_name_str(),
                                                      include_hidden, col_item))) {
+        } else if (!include_hidden && OB_FAIL(remember_ai_column_reference(params_, table_item, *col_item))) {
         } else if (column_items != NULL) {
           if (OB_FAIL(column_items->push_back(*col_item))) {
           }

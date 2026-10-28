@@ -26,6 +26,9 @@
 #include "common/storage/ob_sequence.h"
 #include "share/ob_server_struct.h"
 #include "sql/monitor/show_trace/ob_show_trace.h"
+#include "sql/engine/dml/ai_column_dml.h"
+#include "sql/engine/ob_exec_context.h"
+#include "sql/engine/ob_physical_plan.h"
 
 #ifdef CHECK_SESSION
 #error "redefine macro CHECK_SESSION"
@@ -548,6 +551,7 @@ int ObSqlTransControl::start_stmt(ObExecContext &exec_ctx)
   if (OB_SUCC(ret) && !session->has_start_stmt()) {
     OZ (session->set_start_stmt());
   }
+  OZ (AiColumnDml::check_strict_read(exec_ctx));
   if (OB_SUCC(ret)
       && !ObSQLUtils::is_nested_sql(&exec_ctx)
       && das_ctx.get_snapshot().core_.version_.is_valid()) {
@@ -941,6 +945,9 @@ int ObSqlTransControl::end_stmt(ObExecContext &exec_ctx, const bool rollback, co
       LOG_WARN("trans result incomplete, trans aborted", K(ret));
     } else {
       int save_ret = OB_SUCCESS;
+      if (OB_SUCC(ret) && OB_FAIL(AiColumnDml::finish_statement(exec_ctx, need_rollback))) {
+        need_rollback = true;
+      }
       if (OB_FAIL(ret)) {
         LOG_WARN("pre step failed, will do rollback stmt", K(ret));
         need_rollback = true;

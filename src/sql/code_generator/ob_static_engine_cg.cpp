@@ -5799,6 +5799,9 @@ int ObStaticEngineCG::set_properties_post(const ObLogPlan &log_plan, ObPhysicalP
   if (OB_SUCC(ret)) {
     ret = phy_plan.set_vars(log_plan.get_stmt()->get_query_ctx()->variables_);
   }
+  if (OB_SUCC(ret)) {
+    ret = phy_plan.ai_column_references_.assign(log_plan.get_stmt()->get_query_ctx()->ai_column_references_);
+  }
 
   if (OB_SUCC(ret) && !log_plan.get_stmt()->is_explain_stmt()) {
     const ObIArray<ObRawExpr*> &var_init_exprs = log_plan.get_stmt()->get_query_ctx()->var_init_exprs_;

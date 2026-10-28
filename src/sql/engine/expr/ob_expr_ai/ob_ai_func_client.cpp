@@ -16,6 +16,7 @@
 
 #define USING_LOG_PREFIX SQL_ENG
 #include "ob_ai_func_client.h"
+#include "share/schema/ai_column_definition.h"
 
 namespace oceanbase 
 {
@@ -29,7 +30,9 @@ ObAIFuncClient::ObAIFuncClient()
 {
   is_finished_.store(false);
   abs_timeout_ts_ = 0;
-  max_retry_times_ = 3;  // default retry 3 times
+  // Persistent AI-column tasks own retry accounting. One task attempt must not
+  // hide extra HTTP attempts (including a response lost after inference).
+  max_retry_times_ = share::schema::AiColumnExecutionGuard::active() ? 0 : 3;
   timeout_sec_ = 60; // default timeout 1 minute
 }
 
@@ -137,8 +140,11 @@ int ObAIFuncClient::init(common::ObIAllocator &allocator, const common::ObString
     } else {
       url_ = url_str.ptr();
     } 
-    timeout_sec_ = std::min(std::max(static_cast<int64_t>(1), remain_timeout_us / 1000000), static_cast<int64_t>(CURL_MAX_TIMEOUT_SEC));
-    abs_timeout_ts_ = remain_timeout_us + ObTimeUtility::current_time();
+    timeout_sec_ = std::min(timeout_sec_, std::min(
+        std::max(static_cast<int64_t>(1), remain_timeout_us / 1000000),
+        static_cast<int64_t>(CURL_MAX_TIMEOUT_SEC)));
+    abs_timeout_ts_ = std::min(remain_timeout_us, timeout_sec_ * 1000000)
+        + ObTimeUtility::current_time();
     if (OB_SUCC(ret)){
       const uint32_t num_headers = headers.count();
       for (uint32_t i = 0; OB_SUCC(ret) && i < num_headers; ++i) {
@@ -208,6 +214,8 @@ int ObAIFuncClient::send_post(ObJsonObject *data, ObJsonObject *&response)
       } else if (res != CURLE_OK) {
         // retry
       } else if (!is_retryable_status_code(http_code)) {
+        break;
+      } else if (i == max_retry_times_) {
         break;
       } else {
         LOG_WARN("retryable http status code", K(http_code), K(i));
