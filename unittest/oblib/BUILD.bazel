@@ -36,5 +36,11 @@ cc_library(
 cc_test(
     name = "test_sql_identifier",
     linkstatic = True,
+    # The string test does not use OBLib's server-side networking objects.
+    linkopts = select({
+        "@platforms//os:linux": ["-Wl,--gc-sections"],
+        "@platforms//os:macos": ["-Wl,-dead_strip"],
+        "//conditions:default": [],
+    }),
     deps = [":sql_identifier_cases", "//src/oblib:oblib_test_runtime"],
 )
