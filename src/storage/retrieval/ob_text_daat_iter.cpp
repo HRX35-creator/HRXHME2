@@ -206,14 +206,23 @@ int ObTextDaaTIter::get_next_rows(const int64_t capacity, int64_t &count)
   int ret = OB_SUCCESS;
   count = 0;
   const int64_t real_capacity = MIN(capacity, iter_param_->max_batch_size_);
+  if (OB_UNLIKELY(real_capacity > buffered_domain_ids_.count()
+      || real_capacity > buffered_relevances_.count())) {
+    return OB_INVALID_ARGUMENT;
+  }
   const bool integer_ids = iter_param_->id_proj_expr_->datum_meta_.type_ == common::ObUInt64Type;
   const bool binary_ids = iter_param_->id_proj_expr_->datum_meta_.type_ == common::ObVarcharType
       && iter_param_->id_proj_expr_->datum_meta_.cs_type_ == common::CS_TYPE_BINARY;
+  // Heads that did not win the previous merge are still valid. Revisit all
+  // posting buffers only at output-batch entry or when one buffer is exhausted.
+  bool need_refill = true;
   while (OB_SUCC(ret) && count < real_capacity) {
     const ObDatum *first = nullptr;
     ObSRMergeItem first_item;
     uint32_t matching_dims = 0;
-    if (OB_FAIL(refill_postings())) {
+    if (need_refill) {
+      ret = refill_postings();
+      need_refill = false;
     }
     for (int64_t i = 0; OB_SUCC(ret) && i < dim_iters_->count(); ++i) {
       const ObDatum *id = iter_domain_ids_[i];
@@ -248,13 +257,26 @@ int ObTextDaaTIter::get_next_rows(const int64_t capacity, int64_t &count)
     } else if (OB_SUCC(ret)) {
       const int matched = __builtin_popcount(matching_dims);
       if (matched >= minimum_should_match_) {
-        ret = cache_result(count, *first, static_cast<double>(matched));
+        // This path has no LIMIT/OFFSET. Posting IDs already own their bytes,
+        // so copy the value object rather than deep-copying its generic datum
+        // through the row-wise cache API for every result.
+        const PostingCursor &winner = cursors_[first_item.iter_idx_];
+        buffered_domain_ids_[count] = winner.ids_[winner.pos_];
+        buffered_relevances_[count] = static_cast<double>(matched);
+        ++count;
+        ++input_row_cnt_;
+        ++output_row_cnt_;
       }
-      // Current batch views remain valid through cache_result(). Refill only
-      // on the next merge round, after its output has been copied into owned IDs.
+      // Refill on the next merge round, after output IDs have been copied.
       for (int64_t i = 0; i < dim_iters_->count(); ++i) {
         if (matching_dims & (uint32_t(1) << i)) {
-          ++cursors_[i].pos_;
+          PostingCursor &cursor = cursors_[i];
+          ++cursor.pos_;
+          if (cursor.pos_ < cursor.count_) {
+            iter_domain_ids_[i] = &cursor.ids_[cursor.pos_].get_datum();
+          } else {
+            need_refill = true;
+          }
         }
       }
     }
