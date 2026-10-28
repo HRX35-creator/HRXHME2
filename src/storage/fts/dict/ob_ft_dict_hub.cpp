@@ -43,9 +43,114 @@ int ObFTDictHub::init()
 int ObFTDictHub::destroy()
 {
   int ret = OB_SUCCESS;
+  lib::ObMutexGuard guard(cached_dict_mutex_);
   is_inited_ = false;
+  for (int64_t i = 0; i < MAX_CACHED_DICT_NUM; ++i) {
+    CachedDict &cached = cached_dicts_[i];
+    // Release the pinned KV cache handles before dropping the arena that owns
+    // the handle objects.
+    if (OB_NOT_NULL(cached.container_)) {
+      cached.container_->reset();
+      cached.container_ = nullptr;
+    }
+    if (OB_NOT_NULL(cached.dict_)) {
+      cached.dict_->~ObIFTDict();
+      cached.dict_ = nullptr;
+    }
+    cached.alloc_.reset();
+    cached.inited_ = false;
+  }
   return ret;
 }
+
+int64_t ObFTDictHub::dict_type_to_slot(const ObFTDictType type)
+{
+  int64_t slot = -1;
+  switch (type) {
+  case ObFTDictType::DICT_IK_MAIN:
+    slot = 0;
+    break;
+  case ObFTDictType::DICT_IK_QUAN:
+    slot = 1;
+    break;
+  case ObFTDictType::DICT_IK_STOP:
+    slot = 2;
+    break;
+  default:
+    slot = -1;
+    break;
+  }
+  return slot;
+}
+
+int ObFTDictHub::build_cached_dict(const ObFTDictDesc &desc, CachedDict &cached)
+{
+  int ret = OB_SUCCESS;
+  ObFTRangeDict *range_dict = nullptr;
+  if (OB_ISNULL(cached.container_ = OB_NEWx(ObFTCacheRangeContainer, &cached.alloc_, cached.alloc_))) {
+    ret = OB_ALLOCATE_MEMORY_FAILED;
+  } else if (OB_FAIL(load_cache(desc, *cached.container_))) {
+    if (OB_ENTRY_NOT_EXIST == ret) {
+      // Not built yet (normally the first tokenization in this process).
+      ret = build_cache(desc, *cached.container_);
+    }
+  }
+
+  if (OB_SUCC(ret)) {
+    if (OB_ISNULL(range_dict = OB_NEWx(ObFTRangeDict,
+                                       &cached.alloc_,
+                                       cached.alloc_,
+                                       cached.container_,
+                                       desc))) {
+      ret = OB_ALLOCATE_MEMORY_FAILED;
+    } else if (OB_FAIL(range_dict->init())) {
+      LOG_WARN("failed to init shared range dict", K(ret), K(desc.type_));
+    } else {
+      cached.dict_ = range_dict;
+    }
+  }
+
+  if (OB_FAIL(ret)) {
+    LOG_WARN("failed to build shared fts dict", K(ret), K(desc.type_));
+    if (OB_NOT_NULL(cached.container_)) {
+      cached.container_->reset();
+      cached.container_ = nullptr;
+    }
+    if (OB_NOT_NULL(range_dict)) {
+      range_dict->~ObFTRangeDict();
+    }
+  }
+  return ret;
+}
+
+int ObFTDictHub::get_cached_dict(const ObFTDictDesc &desc, ObIFTDict *&dict)
+{
+  int ret = OB_SUCCESS;
+  dict = nullptr;
+  const int64_t slot = dict_type_to_slot(desc.type_);
+  if (OB_UNLIKELY(!is_inited_)) {
+    ret = OB_NOT_INIT;
+  } else if (OB_UNLIKELY(slot < 0 || slot >= MAX_CACHED_DICT_NUM)) {
+    ret = OB_NOT_SUPPORTED;
+    LOG_WARN("unsupported dict type for shared cache", K(ret), K(desc.type_));
+  } else {
+    lib::ObMutexGuard guard(cached_dict_mutex_);
+    CachedDict &cached = cached_dicts_[slot];
+    if (OB_UNLIKELY(!is_inited_)) {
+      ret = OB_NOT_INIT;
+    } else if (!cached.inited_) {
+      if (OB_FAIL(build_cached_dict(desc, cached))) {
+      } else {
+        cached.inited_ = true;
+      }
+    }
+    if (OB_SUCC(ret)) {
+      dict = cached.dict_;
+    }
+  }
+  return ret;
+}
+
 int ObFTDictHub::build_cache(const ObFTDictDesc &desc, ObFTCacheRangeContainer &container)
 {
   int ret = OB_SUCCESS;

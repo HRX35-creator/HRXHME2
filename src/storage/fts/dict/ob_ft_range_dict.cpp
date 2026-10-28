@@ -378,26 +378,76 @@ int ObFTRangeDict::match_with_hit(const ObString &single_word,
   return last_hit.dict_->match_with_hit(single_word, last_hit, hit);
 }
 
+namespace
+{
+// Binary comparison for the UTF8MB4_BIN collation used by the built-in
+// dictionaries.  It avoids the general collation dispatch on the tokenization
+// hot path while preserving byte-wise ordering semantics.
+inline int ft_bin_strcmp(const ObString &lhs, const ObString &rhs)
+{
+  const int64_t len = MIN(lhs.length(), rhs.length());
+  int cmp = 0;
+  if (len > 0) {
+    cmp = MEMCMP(lhs.ptr(), rhs.ptr(), len);
+  }
+  if (0 == cmp) {
+    if (lhs.length() < rhs.length()) {
+      cmp = -1;
+    } else if (lhs.length() > rhs.length()) {
+      cmp = 1;
+    }
+  }
+  return cmp;
+}
+} // namespace
+
 int ObFTRangeDict::find_first_char_range(const ObString &single_word, ObIFTDict *&dict) const
 {
   int ret = OB_SUCCESS;
   bool found = false;
-  for (int i = 0; OB_SUCC(ret) && !found && i < range_dicts_.size(); ++i) {
-    if (ObCharset::strcmp(ObCollationType::CS_TYPE_UTF8MB4_BIN,
-                          range_dicts_[i].start_.get_word(),
-                          single_word)
-            <= 0
-        && ObCharset::strcmp(ObCollationType::CS_TYPE_UTF8MB4_BIN,
-                             range_dicts_[i].end_.get_word(),
-                             single_word)
-               >= 0) {
-      dict = range_dicts_[i].dict_;
-      found = true;
-    }
-  }
-  if (!found) {
-    // not found, dis match
+  const int64_t range_count = range_dicts_.size();
+  if (OB_UNLIKELY(0 == range_count)) {
     ret = OB_ENTRY_NOT_EXIST;
+  } else if (OB_LIKELY(ObCollationType::CS_TYPE_UTF8MB4_BIN == desc_.coll_type_)) {
+    // Ranges are sorted and contiguous, so the owning range can be located with
+    // a binary search instead of scanning every range for every character.
+    int64_t left = 0;
+    int64_t right = range_count - 1;
+    while (OB_SUCC(ret) && !found && left <= right) {
+      const int64_t mid = left + ((right - left) >> 1);
+      const ObFTRange &range = range_dicts_[mid];
+      const int start_cmp = ft_bin_strcmp(range.start_.get_word(), single_word);
+      if (start_cmp <= 0) {
+        if (ft_bin_strcmp(range.end_.get_word(), single_word) >= 0) {
+          dict = range.dict_;
+          found = true;
+        } else {
+          left = mid + 1;
+        }
+      } else {
+        right = mid - 1;
+      }
+    }
+    if (OB_SUCC(ret) && !found) {
+      ret = OB_ENTRY_NOT_EXIST;
+    }
+  } else {
+    for (int64_t i = 0; OB_SUCC(ret) && !found && i < range_count; ++i) {
+      if (ObCharset::strcmp(ObCollationType::CS_TYPE_UTF8MB4_BIN,
+                            range_dicts_[i].start_.get_word(),
+                            single_word)
+              <= 0
+          && ObCharset::strcmp(ObCollationType::CS_TYPE_UTF8MB4_BIN,
+                               range_dicts_[i].end_.get_word(),
+                               single_word)
+                 >= 0) {
+        dict = range_dicts_[i].dict_;
+        found = true;
+      }
+    }
+    if (OB_SUCC(ret) && !found) {
+      ret = OB_ENTRY_NOT_EXIST;
+    }
   }
   return ret;
 }

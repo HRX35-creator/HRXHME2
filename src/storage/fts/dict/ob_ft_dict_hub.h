@@ -17,14 +17,17 @@
 #ifndef _OCEANBASE_STORAGE_FTS_DICT_OB_FT_DICT_HUB_H_
 #define _OCEANBASE_STORAGE_FTS_DICT_OB_FT_DICT_HUB_H_
 
+#include "lib/allocator/page_arena.h"
 #include "lib/charset/ob_charset.h"
 #include "lib/lock/ob_bucket_lock.h"
+#include "lib/lock/ob_mutex.h"
 #include "storage/fts/dict/ob_ft_dict_def.h"
 
 namespace oceanbase
 {
 namespace storage
 {
+class ObIFTDict;
 // typedef uint64_t ObFTTableID;
 // typedef ObFTTableID ObFTDictTableID;
 
@@ -96,7 +99,7 @@ class ObFTCacheRangeContainer;
 class ObFTDictHub
 {
 public:
-  ObFTDictHub() : is_inited_(false), dict_map_(), rw_dict_lock_() {}
+  ObFTDictHub() : is_inited_(false), dict_map_(), rw_dict_lock_(), cached_dict_mutex_() {}
   ~ObFTDictHub() {}
 
   int init();
@@ -107,17 +110,43 @@ public:
 
   int load_cache(const ObFTDictDesc &desc, ObFTCacheRangeContainer &container);
 
+  // Returns the process-wide immutable dictionary for a built-in parser.  The
+  // dictionary (including its pinned cache ranges) is built once and shared by
+  // every tokenizer instance, so creating a parser no longer walks the KV cache
+  // and rebuilds the range wrappers for every document.
+  int get_cached_dict(const ObFTDictDesc &desc, ObIFTDict *&dict);
+
 private:
+  struct CachedDict
+  {
+    CachedDict()
+      : alloc_(lib::ObMemAttr("FTDictShared")),
+        container_(nullptr),
+        dict_(nullptr),
+        inited_(false)
+    {}
+    common::ObArenaAllocator alloc_;
+    ObFTCacheRangeContainer *container_;
+    ObIFTDict *dict_;
+    bool inited_;
+  };
+
   int get_dict_info(const ObFTDictInfoKey &key, ObFTDictInfo &info);
 
   int put_dict_info(const ObFTDictInfoKey &key, const ObFTDictInfo &info);
 
+  int build_cached_dict(const ObFTDictDesc &desc, CachedDict &cached);
+
+  static int64_t dict_type_to_slot(const ObFTDictType type);
 
 private:
+  static constexpr int64_t MAX_CACHED_DICT_NUM = 3;
   bool is_inited_;
   // holds info of dict
   hash::ObHashMap<ObFTDictInfoKey, ObFTDictInfo> dict_map_;
   ObBucketLock rw_dict_lock_;
+  CachedDict cached_dicts_[MAX_CACHED_DICT_NUM];
+  lib::ObMutex cached_dict_mutex_;
 };
 
 } //  namespace storage

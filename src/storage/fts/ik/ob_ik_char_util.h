@@ -511,98 +511,22 @@ inline int ObFTCharUtil::classify_utf8mb4_fast(const char *input,
   }
 
   // 3-byte UTF8: 0xE0-0xEF (U+0800 to U+FFFF)
-  // This is where CJK characters live
+  // Only classify the common CJK Unified Ideographs block here.  Everything
+  // else (full-width letters and digits, kana, Hangul, compatibility forms,
+  // ...) falls back to do_classify() so that the original classification
+  // semantics are preserved exactly.
   if (first_byte < 0xF0) {
     if (char_len < 2) {
       return do_classify<CHARSET_UTF8MB4>(input, char_len, type);
     }
     const unsigned char second_byte = static_cast<unsigned char>(input[1]);
-
-    // CJK Unified Ideographs: U+4E00 to U+9FFF
-    // UTF8: E4 B8 80 to E9 BF BF
-    // First byte: 0xE4-0xE9
-    if (first_byte >= 0xE4 && first_byte <= 0xE9) {
+    // CJK Unified Ideographs: U+4E00 to U+9FFF.
+    // UTF8: E4 B8 80 to E9 BF BF.
+    if (first_byte >= 0xE4 && first_byte <= 0xE9
+        && (first_byte > 0xE4 || second_byte >= 0xB8)) {
       type = CharType::CHINESE;
       return OB_SUCCESS;
     }
-
-    // CJK Unified Ideographs Extension A: U+3400 to U+4DBF
-    // UTF8: E3 90 80 to E4 B6 BF
-    // First byte: 0xE3 (with second byte >= 0x90) or 0xE4 (with second byte < 0xB6)
-    if (first_byte == 0xE3 && second_byte >= 0x90) {
-      type = CharType::CHINESE;
-      return OB_SUCCESS;
-    }
-    if (first_byte == 0xE4 && second_byte < 0xB6) {
-      type = CharType::CHINESE;
-      return OB_SUCCESS;
-    }
-
-    // CJK Compatibility Ideographs: U+F900 to U+FAFF
-    // UTF8: EF A4 80 to EF AB BF
-    // First byte: 0xEF, second byte: 0xA4-0xAB
-    if (first_byte == 0xEF && second_byte >= 0xA4 && second_byte <= 0xAB) {
-      type = CharType::CHINESE;
-      return OB_SUCCESS;
-    }
-
-    // Hiragana: U+3040 to U+309F
-    // UTF8: E3 81 80 to E3 82 9F
-    // First byte: 0xE3, second byte: 0x81-0x82
-    if (first_byte == 0xE3 && second_byte >= 0x81 && second_byte <= 0x82) {
-      type = CharType::OTHER_CJK;
-      return OB_SUCCESS;
-    }
-
-    // Katakana: U+30A0 to U+30FF
-    // UTF8: E3 82 A0 to E3 83 BF
-    // First byte: 0xE3, second byte: 0x82-0x83
-    if (first_byte == 0xE3 && second_byte >= 0x82 && second_byte <= 0x83) {
-      type = CharType::OTHER_CJK;
-      return OB_SUCCESS;
-    }
-
-    // Hangul Syllables: U+AC00 to U+D7AF
-    // UTF8: EA B0 80 to ED 9E AF
-    // First byte: 0xEA-0xED
-    if (first_byte >= 0xEA && first_byte <= 0xED) {
-      type = CharType::OTHER_CJK;
-      return OB_SUCCESS;
-    }
-
-    // Hangul Jamo: U+1100 to U+11FF
-    // UTF8: E1 84 80 to E1 87 BF
-    // First byte: 0xE1, second byte: 0x84-0x87
-    if (first_byte == 0xE1 && second_byte >= 0x84 && second_byte <= 0x87) {
-      type = CharType::OTHER_CJK;
-      return OB_SUCCESS;
-    }
-
-    // Hangul Compatibility Jamo: U+3130 to U+318F
-    // UTF8: E3 84 B0 to E3 86 8F
-    // First byte: 0xE3, second byte: 0x84-0x86
-    if (first_byte == 0xE3 && second_byte >= 0x84 && second_byte <= 0x86) {
-      type = CharType::OTHER_CJK;
-      return OB_SUCCESS;
-    }
-
-    // Katakana Phonetic Extensions: U+31F0 to U+31FF
-    // UTF8: E3 87 B0 to E3 87 BF
-    // First byte: 0xE3, second byte: 0x87
-    if (first_byte == 0xE3 && second_byte == 0x87) {
-      type = CharType::OTHER_CJK;
-      return OB_SUCCESS;
-    }
-
-    // Halfwidth and Fullwidth Forms: U+FF00 to U+FFEF
-    // UTF8: EF BC 80 to EF BF BF
-    // First byte: 0xEF, second byte: 0xBC-0xBF
-    if (first_byte == 0xEF && second_byte >= 0xBC) {
-      type = CharType::OTHER_CJK;
-      return OB_SUCCESS;
-    }
-
-    // For other 3-byte sequences, fall through to full decode
     return do_classify<CHARSET_UTF8MB4>(input, char_len, type);
   }
 
