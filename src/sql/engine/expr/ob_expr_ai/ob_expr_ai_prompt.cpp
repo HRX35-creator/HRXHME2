@@ -64,8 +64,7 @@ int ObExprAIPrompt::calc_result_typeN(ObExprResType &type,
       types_stack[i].set_calc_type(ObVarcharType);
       types_stack[i].set_calc_collation_type(CS_TYPE_UTF8MB4_BIN);
     } else if (ob_is_json(types_stack[i].get_type())) {
-      ret = OB_NOT_SUPPORTED;
-      LOG_USER_ERROR(OB_NOT_SUPPORTED, "json type is not supported");
+      // json args are passed through and embedded as-is
     } else {
       ret = OB_ERR_INVALID_TYPE_FOR_OP;
     }
@@ -106,16 +105,32 @@ int ObExprAIPrompt::eval_ai_prompt(const ObExpr &expr, ObEvalCtx &ctx, ObDatum &
       ObExpr *arg = expr.args_[i];
       ObString arg_str;
       ObJsonString *arg_json_str = NULL;
+      ObJsonNull *arg_json_null = NULL;
       if (OB_FAIL(tmp_allocator.eval_arg(arg, ctx, datum))) {
+      } else if (datum->is_null()) {
+        // null arg is embedded as json null
+        if (OB_ISNULL(arg_json_null = OB_NEWx(ObJsonNull, &tmp_allocator))) {
+          ret = OB_ALLOCATE_MEMORY_FAILED;
+        } else if (OB_FAIL(args_array->append(arg_json_null))) {
+        }
       } else if (ob_is_string_tc(arg->datum_meta_.type_)) {
         arg_str = datum->get_string();
         if (OB_FAIL(ObAIFuncJsonUtils::get_json_string(tmp_allocator, arg_str, arg_json_str))) {
         } else if (OB_FAIL(args_array->append(arg_json_str))) {
         }
       } else if (ob_is_json(arg->datum_meta_.type_)) {
-        ret = OB_NOT_SUPPORTED;
-        LOG_USER_ERROR(OB_NOT_SUPPORTED, "json type is not supported");
-      } else if (datum->is_null()) {
+        // json arg is embedded as-is, keeping its original type
+        ObIJsonBase *j_base = NULL;
+        bool is_null = false;
+        if (OB_FAIL(ObJsonExprHelper::get_json_doc(expr, ctx, tmp_allocator, i, j_base, is_null))) {
+        } else if (is_null || OB_ISNULL(j_base)) {
+          if (OB_ISNULL(arg_json_null = OB_NEWx(ObJsonNull, &tmp_allocator))) {
+            ret = OB_ALLOCATE_MEMORY_FAILED;
+          } else if (OB_FAIL(args_array->append(arg_json_null))) {
+          }
+        } else if (OB_FAIL(args_array->append(j_base))) {
+        }
+      } else {
         ret = OB_ERR_INVALID_TYPE_FOR_OP;
       }
     }
