@@ -149,6 +149,31 @@ int ObAlterTableResolver::resolve(const ParseNode &parse_tree)
       alter_table_stmt->get_alter_table_arg().alter_table_schema_.set_collation_type(table_schema_->get_collation_type());
     }
     //resolve action list
+    if (OB_SUCC(ret) && parse_tree.children_[ACTION_LIST] != nullptr) {
+      const ParseNode &actions = *parse_tree.children_[ACTION_LIST];
+      for (int64_t i = 0; i < actions.num_child_; ++i) {
+        const ParseNode *action = actions.children_[i];
+        if (action != nullptr && action->type_ == T_AI_COLUMN_RETRY) {
+          const ObColumnSchemaV2 *column = action->children_[0] == nullptr ? nullptr
+              : table_schema_->get_column_schema(ObString(action->children_[0]->str_len_, action->children_[0]->str_value_));
+            if (actions.num_child_ != 1) {
+            ret = OB_NOT_SUPPORTED;
+              LOG_USER_ERROR(OB_NOT_SUPPORTED, "combining AI COLUMN RETRY with another ALTER action");
+            } else if (column == nullptr || !column->is_ai_column()) {
+              ret = OB_NOT_SUPPORTED;
+              LOG_USER_ERROR(OB_NOT_SUPPORTED, "retrying a column that is not an AI column");
+          } else {
+            alter_table_stmt->ai_retry_column_id_ = column->get_column_id();
+            const ParseNode *where = action->children_[1];
+            if (where != nullptr) {
+              ret = ob_write_string(*allocator_, ObString(where->str_len_, where->str_value_),
+                                    alter_table_stmt->ai_retry_predicate_);
+            }
+          }
+          return ret;
+        }
+      }
+    }
     if (OB_SUCCESS == ret && NULL != parse_tree.children_[ACTION_LIST]){
       if (OB_FAIL(resolve_action_list(*(parse_tree.children_[ACTION_LIST])))) {
       } else if (OB_FAIL(set_table_options())) {
@@ -3541,7 +3566,7 @@ int ObAlterTableResolver::resolve_alter_table_column_definition(AlterColumnSchem
   // }
   if (OB_SUCC(ret)) {
     ParseNode *pos_node = NULL;
-    if (OB_UNLIKELY(GEN_COLUMN_DEFINITION_NUM_CHILD == node->num_child_)) {
+    if (OB_UNLIKELY(GEN_COLUMN_DEFINITION_NUM_CHILD == node->num_child_ || 6 == node->num_child_)) {
     // generated column with pos_column
       pos_node = node->children_[5];
     } else {
@@ -3551,6 +3576,42 @@ int ObAlterTableResolver::resolve_alter_table_column_definition(AlterColumnSchem
     if (NULL != pos_node) {
       if (OB_FAIL(resolve_pos_column(pos_node, column))) {
       }
+    }
+  }
+  if (OB_SUCC(ret)) {
+    const ObColumnSchemaV2 *original = table_schema_->get_column_schema(column.get_column_id());
+    if (original != nullptr && original->is_ai_column()) {
+      AiColumnDefinition previous;
+      AiColumnDefinition next;
+      if (OB_FAIL(original->get_ai_column_definition(previous))) {
+      } else if (!column.is_ai_column()) {
+        // Omitting AI COLUMN during a type-only MODIFY must not silently turn
+        // a protected result into an ordinary writable column.
+        if (column.get_data_type() != original->get_data_type()
+            || column.get_accuracy() != original->get_accuracy()) {
+          ret = OB_NOT_SUPPORTED;
+          LOG_USER_ERROR(OB_NOT_SUPPORTED, "changing an AI column type without its AI definition");
+        } else { ret = column.set_ai_column_info(original->get_ai_column_info()); }
+      } else if (OB_FAIL(column.get_ai_column_definition(next))) {
+      } else {
+        next.dependency_ids_.reset();
+        for (int64_t j = 0; OB_SUCC(ret) && j < next.dependency_names_.count(); ++j) {
+          const ObColumnSchemaV2 *dependency = table_schema_->get_column_schema(next.dependency_names_.at(j));
+          if (dependency == nullptr) { ret = OB_ERR_BAD_FIELD_ERROR; }
+          else if (dependency->is_ai_column() || dependency->is_hidden() || dependency->is_generated_column()) {
+            ret = OB_NOT_SUPPORTED;
+            LOG_USER_ERROR(OB_NOT_SUPPORTED, "AI COLUMN dependencies on AI, hidden or generated columns");
+          } else { ret = next.dependency_ids_.push_back(dependency->get_column_id()); }
+        }
+        next.state_column_id_ = previous.state_column_id_;
+        next.request_column_id_ = previous.request_column_id_;
+        next.result_spec_column_id_ = previous.result_spec_column_id_;
+        next.definition_version_ = previous.definition_version_ + 1;
+        if (OB_SUCC(ret)) { ret = column.set_ai_column_definition(next); }
+      }
+    } else if (original != nullptr && column.is_ai_column()) {
+      ret = OB_NOT_SUPPORTED;
+      LOG_USER_ERROR(OB_NOT_SUPPORTED, "converting an existing ordinary column to AI COLUMN; use ADD COLUMN");
     }
   }
   return ret;
@@ -4205,6 +4266,18 @@ int ObAlterTableResolver::resolve_drop_column(
                                                         node.children_[i], true))) {
       } else if (OB_FAIL(alter_column_schema.set_column_name(alter_column_schema.get_origin_column_name()))) {
       } else {
+        const ObColumnSchemaV2 *dropped = table_schema_->get_column_schema(alter_column_schema.get_column_name_str());
+        for (int64_t j = 0; OB_SUCC(ret) && dropped != nullptr && j < table_schema_->get_column_count(); ++j) {
+          const ObColumnSchemaV2 *candidate = table_schema_->get_column_schema_by_idx(j);
+          AiColumnDefinition ai;
+          if (candidate->is_ai_column()) {
+            if (OB_FAIL(candidate->get_ai_column_definition(ai))) {
+            } else if (ai.has_dependency(dropped->get_column_id())) {
+              ret = OB_NOT_SUPPORTED;
+              LOG_USER_ERROR(OB_NOT_SUPPORTED, "dropping a column referenced by an AI COLUMN");
+            }
+          }
+        }
         if (OB_SUCC(ret)) {
           alter_column_schema.alter_type_ = OB_DDL_DROP_COLUMN;
           ObAlterTableArg::AlterAlgorithm algorithm = ObAlterTableArg::AlterAlgorithm::INPLACE;
@@ -4408,6 +4481,13 @@ int ObAlterTableResolver::check_mysql_rename_column(const AlterColumnSchema &alt
        OB_SUCC(ret) && (col_iter != origin_table_schema.column_end()); col_iter++) {
     if (OB_ISNULL(column = *col_iter)) {
       ret = OB_ERR_UNEXPECTED;
+    } else if (column->is_ai_column()) {
+      AiColumnDefinition ai;
+      if (OB_FAIL(column->get_ai_column_definition(ai))) {
+      } else if (ai.has_dependency(alter_column_schema.get_column_id())) {
+        ret = OB_NOT_SUPPORTED;
+        LOG_USER_ERROR(OB_NOT_SUPPORTED, "renaming a column referenced by an AI COLUMN");
+      }
     } else if (column->has_cascaded_column_id(alter_column_schema.get_column_id())
                && column->is_generated_column()) {
       if (!column->is_hidden()) {

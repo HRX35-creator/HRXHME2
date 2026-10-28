@@ -205,6 +205,19 @@ cc_library(
     visibility = ["//src/sql:__subpackages__"],
 )
 
+cc_library(
+    name = "hnsw_filter_test_headers",
+    testonly = True,
+    hdrs = [
+        "das/iter/ob_das_hnsw_scan_iter.h",
+        "engine/ob_exec_context.h",
+        "engine/ob_physical_plan_ctx.h",
+    ],
+    deps = [":sql_runtime_internal_headers"] + _SQL_INTERFACE_NATIVE_DEPS + _SQL_PRIVATE_HEADER_SHARE_DEPS,
+    tags = ["manual"],
+    visibility = ["//unittest/sql/optimizer:__pkg__"],
+)
+
 _SQL_RUNTIME_UNITY_GROUPS = groups_without(
     SQL_UNITY_GROUPS,
     OPTIMIZER_GROUP_NAMES,

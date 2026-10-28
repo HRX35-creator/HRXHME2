@@ -24,6 +24,7 @@
 #include "share/schema/ob_schema_struct.h"
 #include "share/schema/ob_schema_utils.h"
 #include "common/rowkey/ob_rowkey_info.h"
+#include "share/schema/ai_column_definition.h"
 
 namespace oceanbase
 {
@@ -141,6 +142,11 @@ int assign(const ObColumnSchemaV2 &src_schema);
   inline int set_column_name(const common::ObString &col_name) { return deep_copy_str(col_name, column_name_); }
   inline int set_comment(const char *comment) { return deep_copy_str(comment, comment_); }
   inline int set_comment(const common::ObString &comment) { return deep_copy_str(comment, comment_); }
+  bool is_ai_column() const { return !ai_column_info_.empty(); }
+  const common::ObString &get_ai_column_info() const { return ai_column_info_; }
+  int set_ai_column_info(const common::ObString &info);
+  int set_ai_column_definition(const AiColumnDefinition &definition);
+  int get_ai_column_definition(AiColumnDefinition &definition) const;
   inline void set_on_update_current_timestamp(const bool is_on_update_for_timestamp) { on_update_current_timestamp_ = is_on_update_for_timestamp; }
   int set_extended_type_info(const common::ObIArray<common::ObString> &info);
   int add_type_info(const common::ObString &type_info);
@@ -380,6 +386,7 @@ private:
   common::ObObj cur_default_value_; //collation must be same with the column
   common::ObString column_name_;
   common::ObString comment_;
+  common::ObString ai_column_info_;
   common::ObArrayHelper<common::ObString> extended_type_info_;//used for enum and set
   uint64_t prev_column_id_;
   uint64_t next_column_id_;

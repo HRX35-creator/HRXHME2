@@ -20,6 +20,7 @@
 #include "lib/net/ob_addr.h"
 #include "lib/allocator/page_arena.h"
 #include "sql/engine/ob_phy_operator_type.h"
+#include "sql/engine/dml/ai_column_dml.h"
 #include "sql/engine/table/ob_virtual_table_ctx.h"
 #include "sql/engine/ob_procedural_context.h"
 #include "sql/executor/ob_sql_executor_ctx.h"
@@ -467,6 +468,7 @@ public:
    */
   common::ObIAllocator &get_sche_allocator();
   common::ObIAllocator &get_allocator();
+  common::ObSEArray<AiColumnChange, 4> &get_ai_column_changes() { return ai_column_changes_; }
 
   int64_t to_string(char *buf, const int64_t buf_len) const { UNUSED(buf); UNUSED(buf_len); return 0; }
   static const uint64_t VERSION_SHIFT = 32;
@@ -950,6 +952,7 @@ protected:
   AutoDopHashMap auto_dop_map_;
   bool force_local_plan_;
   ObDiagnosisManager diagnosis_manager_;
+  common::ObSEArray<AiColumnChange, 4> ai_column_changes_;
   
   // Granule type for current GI task
   ObGranuleType current_granule_type_;

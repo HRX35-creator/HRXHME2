@@ -662,4 +662,115 @@ order by p.cardinality, p.plan_id;
 
 drop table t_issue1439_or_selectivity;
 
+# issue #1471: an all-match residual filter must not force a full pre-scan.
+--disable_warnings
+drop table if exists t_issue1471_filter;
+--enable_warnings
+create table t_issue1471_filter(
+  id bigint primary key,
+  embedding vector(3) not null,
+  category int,
+  vector key idx_embedding(embedding)
+    with (distance=l2, type=hnsw, lib=vsag, m=16, ef_construction=128, sync_mode=immediate))
+  organization heap;
+--disable_query_log
+--let $row = 0
+while ($row < 100)
+{
+  eval insert into t_issue1471_filter values ($row, '[$row,1,0]', mod($row,5)+1);
+  --inc $row
+}
+--enable_query_log
+
+# No ANALYZE: the range estimate may use the default 5% selectivity.
+alter system flush plan cache;
+--disable_result_log
+select id from t_issue1471_filter where category between 1 and 5
+order by l2_distance(embedding, '[0,1,0]') approximate limit 10;
+--enable_result_log
+select p.operator
+from oceanbase.`V$OB_PLAN_CACHE_PLAN_STAT` s
+join oceanbase.__all_virtual_sql_plan p on p.plan_id = s.plan_id
+where instr(s.statement, 't_issue1471_filter') > 0
+  and p.operator like 'VECTOR INDEX ADAPTIVE SCAN%';
+
+# Accurate statistics must not bring back the small-candidate shortcut.
+--disable_result_log
+analyze table t_issue1471_filter;
+--enable_result_log
+alter system flush plan cache;
+--disable_result_log
+select id from t_issue1471_filter where category between 1 and 5
+order by l2_distance(embedding, '[0,1,0]') approximate limit 10;
+--enable_result_log
+select p.operator
+from oceanbase.`V$OB_PLAN_CACHE_PLAN_STAT` s
+join oceanbase.__all_virtual_sql_plan p on p.plan_id = s.plan_id
+where instr(s.statement, 't_issue1471_filter') > 0
+  and p.operator like 'VECTOR INDEX ADAPTIVE SCAN%';
+
+# The predicate is only all-match for the original data, not a SQL tautology.
+# Put NULL and out-of-range values closest to the query, then check that ANN
+# still filters them, including across repeated execution of a prepared query.
+update t_issue1471_filter set category = null where id = 0;
+update t_issue1471_filter set category = 6 where id = 1;
+select count(*) as matched, sum(category is null or category not between 1 and 5) as invalid
+from (select id, category from t_issue1471_filter where category between 1 and 5
+      order by l2_distance(embedding, '[0,1,0]') approximate limit 10) q;
+prepare issue1471_stmt from 'select count(*) as matched, sum(category is null or category not between ? and ?) as invalid from (select id, category from t_issue1471_filter where category between ? and ? order by l2_distance(embedding, ''[0,1,0]'') approximate limit 10) q';
+set @lo = 1, @hi = 5;
+execute issue1471_stmt using @lo, @hi, @lo, @hi;
+set @lo = 6, @hi = 6;
+execute issue1471_stmt using @lo, @hi, @lo, @hi;
+deallocate prepare issue1471_stmt;
+
+# Sparse matches and an empty result still finish correctly on the iterative path.
+select count(*) as matched
+from (select id from t_issue1471_filter where mod(id, 97) = 0
+      order by l2_distance(embedding, '[0,1,0]') approximate limit 10) q;
+select count(*) as matched
+from (select id from t_issue1471_filter where mod(id, 101) = 100
+      order by l2_distance(embedding, '[0,1,0]') approximate limit 10) q;
+
+# A selective scalar index range retains pre-filtering, but an all-match
+# indexed range must also respect the selectivity limit on a small table.
+create index idx_category on t_issue1471_filter(category);
+--disable_result_log
+analyze table t_issue1471_filter;
+--enable_result_log
+alter system flush plan cache;
+--disable_result_log
+select id from t_issue1471_filter where category = 6
+order by l2_distance(embedding, '[0,1,0]') approximate limit 10;
+--enable_result_log
+select p.operator
+from oceanbase.`V$OB_PLAN_CACHE_PLAN_STAT` s
+join oceanbase.__all_virtual_sql_plan p on p.plan_id = s.plan_id
+where instr(s.statement, 't_issue1471_filter') > 0
+  and p.operator like 'VECTOR INDEX ADAPTIVE SCAN%';
+alter system flush plan cache;
+--disable_result_log
+select id from t_issue1471_filter where category between 1 and 6
+order by l2_distance(embedding, '[0,1,0]') approximate limit 10;
+--enable_result_log
+select p.operator
+from oceanbase.`V$OB_PLAN_CACHE_PLAN_STAT` s
+join oceanbase.__all_virtual_sql_plan p on p.plan_id = s.plan_id
+where instr(s.statement, 't_issue1471_filter') > 0
+  and p.operator like 'VECTOR INDEX ADAPTIVE SCAN%';
+
+# Explicit index hints still force the requested pre-filter path.
+alter system flush plan cache;
+--disable_result_log
+select /*+ index(t_issue1471_filter idx_category) */ id
+from t_issue1471_filter where category between 1 and 6
+order by l2_distance(embedding, '[0,1,0]') approximate limit 10;
+--enable_result_log
+select p.operator
+from oceanbase.`V$OB_PLAN_CACHE_PLAN_STAT` s
+join oceanbase.__all_virtual_sql_plan p on p.plan_id = s.plan_id
+where instr(s.statement, 't_issue1471_filter') > 0
+  and p.operator like 'VECTOR INDEX ADAPTIVE SCAN%';
+drop table t_issue1471_filter;
+
 alter system set vector_memory_limit = 0;

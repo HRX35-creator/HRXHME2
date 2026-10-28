@@ -896,6 +896,10 @@ int ObCreateTableResolver::resolve_table_elements(const ParseNode *node,
       }
     }
 
+    if (OB_SUCC(ret) && RESOLVE_NON_COL != resolve_rule) {
+      ret = finalize_ai_columns(table_schema, cur_column_id_);
+    }
+
     // A table must have at least one column as a visible column
     if (OB_SUCC(ret)) {
       // RESOLVE_NON_COL == resolve_rule when, only parse non-column definitions

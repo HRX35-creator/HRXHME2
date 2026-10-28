@@ -613,6 +613,11 @@ protected:
     int resolve_collection_column(
       const ParseNode *type_node,
       share::schema::ObColumnSchemaV2 &column);
+  int resolve_ai_column_definition(const ParseNode &node, ObColumnSchemaV2 &column);
+public:
+  static int finalize_ai_columns(ObTableSchema &table_schema, uint64_t &last_column_id,
+                                 uint64_t target_column_id = common::OB_INVALID_ID);
+protected:
 
 
   static int is_gen_col_with_udf(const ObTableSchema &table_schema,

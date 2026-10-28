@@ -752,4 +752,94 @@ operator	cardinality	hit_count
 VECTOR INDEX ADAPTIVE SCAN (PRE-FILTER)	2	1
 VECTOR INDEX ADAPTIVE SCAN (POST-ITERATIVE-FILTER)	64	1
 drop table t_issue1439_or_selectivity;
+drop table if exists t_issue1471_filter;
+create table t_issue1471_filter(
+id bigint primary key,
+embedding vector(3) not null,
+category int,
+vector key idx_embedding(embedding)
+with (distance=l2, type=hnsw, lib=vsag, m=16, ef_construction=128, sync_mode=immediate))
+organization heap;
+alter system flush plan cache;
+select id from t_issue1471_filter where category between 1 and 5
+order by l2_distance(embedding, '[0,1,0]') approximate limit 10;
+select p.operator
+from oceanbase.`V$OB_PLAN_CACHE_PLAN_STAT` s
+join oceanbase.__all_virtual_sql_plan p on p.plan_id = s.plan_id
+where instr(s.statement, 't_issue1471_filter') > 0
+and p.operator like 'VECTOR INDEX ADAPTIVE SCAN%';
+operator
+VECTOR INDEX ADAPTIVE SCAN (POST-ITERATIVE-FILTER)
+analyze table t_issue1471_filter;
+alter system flush plan cache;
+select id from t_issue1471_filter where category between 1 and 5
+order by l2_distance(embedding, '[0,1,0]') approximate limit 10;
+select p.operator
+from oceanbase.`V$OB_PLAN_CACHE_PLAN_STAT` s
+join oceanbase.__all_virtual_sql_plan p on p.plan_id = s.plan_id
+where instr(s.statement, 't_issue1471_filter') > 0
+and p.operator like 'VECTOR INDEX ADAPTIVE SCAN%';
+operator
+VECTOR INDEX ADAPTIVE SCAN (POST-ITERATIVE-FILTER)
+update t_issue1471_filter set category = null where id = 0;
+update t_issue1471_filter set category = 6 where id = 1;
+select count(*) as matched, sum(category is null or category not between 1 and 5) as invalid
+from (select id, category from t_issue1471_filter where category between 1 and 5
+order by l2_distance(embedding, '[0,1,0]') approximate limit 10) q;
+matched	invalid
+10	0
+prepare issue1471_stmt from 'select count(*) as matched, sum(category is null or category not between ? and ?) as invalid from (select id, category from t_issue1471_filter where category between ? and ? order by l2_distance(embedding, ''[0,1,0]'') approximate limit 10) q';
+set @lo = 1, @hi = 5;
+execute issue1471_stmt using @lo, @hi, @lo, @hi;
+matched	invalid
+10	0
+set @lo = 6, @hi = 6;
+execute issue1471_stmt using @lo, @hi, @lo, @hi;
+matched	invalid
+1	0
+deallocate prepare issue1471_stmt;
+select count(*) as matched
+from (select id from t_issue1471_filter where mod(id, 97) = 0
+order by l2_distance(embedding, '[0,1,0]') approximate limit 10) q;
+matched
+2
+select count(*) as matched
+from (select id from t_issue1471_filter where mod(id, 101) = 100
+order by l2_distance(embedding, '[0,1,0]') approximate limit 10) q;
+matched
+0
+create index idx_category on t_issue1471_filter(category);
+analyze table t_issue1471_filter;
+alter system flush plan cache;
+select id from t_issue1471_filter where category = 6
+order by l2_distance(embedding, '[0,1,0]') approximate limit 10;
+select p.operator
+from oceanbase.`V$OB_PLAN_CACHE_PLAN_STAT` s
+join oceanbase.__all_virtual_sql_plan p on p.plan_id = s.plan_id
+where instr(s.statement, 't_issue1471_filter') > 0
+and p.operator like 'VECTOR INDEX ADAPTIVE SCAN%';
+operator
+VECTOR INDEX ADAPTIVE SCAN (PRE-FILTER)
+alter system flush plan cache;
+select id from t_issue1471_filter where category between 1 and 6
+order by l2_distance(embedding, '[0,1,0]') approximate limit 10;
+select p.operator
+from oceanbase.`V$OB_PLAN_CACHE_PLAN_STAT` s
+join oceanbase.__all_virtual_sql_plan p on p.plan_id = s.plan_id
+where instr(s.statement, 't_issue1471_filter') > 0
+and p.operator like 'VECTOR INDEX ADAPTIVE SCAN%';
+operator
+VECTOR INDEX ADAPTIVE SCAN (POST-ITERATIVE-FILTER)
+alter system flush plan cache;
+select /*+ index(t_issue1471_filter idx_category) */ id
+from t_issue1471_filter where category between 1 and 6
+order by l2_distance(embedding, '[0,1,0]') approximate limit 10;
+select p.operator
+from oceanbase.`V$OB_PLAN_CACHE_PLAN_STAT` s
+join oceanbase.__all_virtual_sql_plan p on p.plan_id = s.plan_id
+where instr(s.statement, 't_issue1471_filter') > 0
+and p.operator like 'VECTOR INDEX ADAPTIVE SCAN%';
+operator
+VECTOR INDEX ADAPTIVE SCAN (PRE-FILTER)
+drop table t_issue1471_filter;
 alter system set vector_memory_limit = 0;

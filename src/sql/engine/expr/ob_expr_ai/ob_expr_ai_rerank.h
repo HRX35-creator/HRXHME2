@@ -53,6 +53,15 @@ private:
   static int eval_ai_rerank_with_doc_key(const ObExpr &expr, ObEvalCtx &ctx, common::ObIAllocator &allocator,
                                          common::ObString &model_id, common::ObString &query, common::ObJsonArray *document_array,
                                          common::ObString &doc_key, const common::ObAIFuncExprInfo &info, const share::ObAiModelEndpointInfo &endpoint_info, ObDatum &res);
+  static int rerank_in_batches(common::ObIAllocator &allocator,
+                               const common::ObAIFuncExprInfo &info,
+                               const share::ObAiModelEndpointInfo &endpoint_info,
+                               common::ObString &query,
+                               common::ObJsonArray *document_array,
+                               common::ObJsonArray *&result_array);
+  static int validate_rerank_result(common::ObIAllocator &allocator,
+                                    common::ObJsonArray *result_array,
+                                    const int64_t document_count);
   static int get_doc_array_from_documents_array_with_key(ObIAllocator &allocator, ObJsonArray *document_object_array, ObString &doc_key, ObJsonArray *&doc_array);
   static int sort_document_array_by_model_result(common::ObIAllocator &allocator, common::ObJsonArray *document_array, common::ObJsonArray *model_result_array, common::ObJsonArray *&sorted_document_array);
   static int construct_config_json(common::ObIAllocator &allocator, int64_t top_k, int64_t return_doc, common::ObJsonObject *&config_json);

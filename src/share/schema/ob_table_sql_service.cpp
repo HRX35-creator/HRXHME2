@@ -3184,6 +3184,10 @@ int ObTableSqlService::gen_column_dml_without_check(
       }
     }
     ObString local_session_var;
+    AiColumnDefinition ai_definition;
+    if (OB_SUCC(ret) && column.is_ai_column()
+        && OB_FAIL(column.get_ai_column_definition(ai_definition))) {
+    }
     if (OB_SUCC(ret) && column.is_generated_column()
         && OB_FAIL(column.get_local_session_var().gen_local_session_var_str(allocator, local_session_var))) {
     }
@@ -3221,6 +3225,13 @@ int ObTableSqlService::gen_column_dml_without_check(
                          || (OB_FAIL(dml.add_column("skip_index_attr", column.get_skip_index_attr().get_packed_value())))
                          || (OB_FAIL(dml.add_column("lob_chunk_size", column.get_lob_chunk_size())))
                          || (OB_FAIL(dml.add_column("local_session_vars", ObHexEscapeSqlStr(local_session_var))))
+                         || OB_FAIL(dml.add_column("ai_column_info", ObHexEscapeSqlStr(column.get_ai_column_info())))
+                         || OB_FAIL(dml.add_column("ai_normalized_expr", ObHexEscapeSqlStr(ai_definition.normalized_expression_)))
+                         || OB_FAIL(dml.add_column("ai_max_retries", ai_definition.max_retries_))
+                         || OB_FAIL(dml.add_column("ai_definition_version", ai_definition.definition_version_))
+                         || OB_FAIL(dml.add_column("ai_state_column_id", column.is_ai_column() ? ai_definition.state_column_id_ : 0))
+                         || OB_FAIL(dml.add_column("ai_request_column_id", column.is_ai_column() ? ai_definition.request_column_id_ : 0))
+                         || OB_FAIL(dml.add_column("ai_result_spec_column_id", column.is_ai_column() ? ai_definition.result_spec_column_id_ : 0))
                          || OB_FAIL(dml.add_gmt_create())
                          || OB_FAIL(dml.add_gmt_modified()))) {
     }
