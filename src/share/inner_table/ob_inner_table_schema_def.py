@@ -7936,56 +7936,7 @@ def_table_schema(
   )
 #
 
-def_table_schema(
-  owner = 'xiaochu.yh',
-  database_id    = 'OB_INFORMATION_SCHEMA_ID',
-  table_name     = 'FILES',
-  table_id       = '21157',
-  table_type = 'SYSTEM_VIEW',
-  gm_columns = [],
-  rowkey_columns = [],
-  view_definition = """SELECT CAST(0 AS SIGNED) AS FILE_ID,
-                              CAST(NULL AS CHAR(64)) AS FILE_NAME,
-                              CAST('' AS CHAR(20)) AS FILE_TYPE,
-                              CAST(NULL AS CHAR(64)) AS TABLESPACE_NAME,
-                              CAST('' AS CHAR(64)) AS TABLE_CATALOG,
-                              CAST(NULL AS CHAR(64)) AS TABLE_SCHEMA,
-                              CAST(NULL AS CHAR(64)) AS TABLE_NAME,
-                              CAST(NULL AS CHAR(64)) AS LOGFILE_GROUP_NAME,
-                              CAST(NULL AS SIGNED) AS LOGFILE_GROUP_NUMBER,
-                              CAST('' AS CHAR(64)) AS ENGINE,
-                              CAST(NULL AS CHAR(64)) AS FULLTEXT_KEYS,
-                              CAST(NULL AS SIGNED) AS DELETED_ROWS,
-                              CAST(NULL AS SIGNED) AS UPDATE_COUNT,
-                              CAST(NULL AS SIGNED) AS FREE_EXTENTS,
-                              CAST(NULL AS SIGNED) AS TOTAL_EXTENTS,
-                              CAST(0 AS SIGNED) AS EXTENT_SIZE,
-                              CAST(NULL AS UNSIGNED) AS INITIAL_SIZE,
-                              CAST(NULL AS UNSIGNED) AS MAXIMUM_SIZE,
-                              CAST(NULL AS UNSIGNED) AS AUTOEXTEND_SIZE,
-                              CAST(NULL AS DATETIME(6)) AS CREATION_TIME,
-                              CAST(NULL AS DATETIME(6)) AS LAST_UPDATE_TIME,
-                              CAST(NULL AS DATETIME(6)) AS LAST_ACCESS_TIME,
-                              CAST(NULL AS SIGNED) AS RECOVER_TIME,
-                              CAST(NULL AS SIGNED) AS TRANSACTION_COUNTER,
-                              CAST(NULL AS UNSIGNED) AS VERSION,
-                              CAST(NULL AS CHAR(10)) AS ROW_FORMAT,
-                              CAST(NULL AS UNSIGNED) AS TABLE_ROWS,
-                              CAST(NULL AS UNSIGNED) AS AVG_ROW_LENGTH,
-                              CAST(NULL AS UNSIGNED) AS DATA_LENGTH,
-                              CAST(NULL AS UNSIGNED) AS MAX_DATA_LENGTH,
-                              CAST(NULL AS UNSIGNED) AS INDEX_LENGTH,
-                              CAST(NULL AS UNSIGNED) AS DATA_FREE,
-                              CAST(NULL AS DATETIME(6)) AS CREATE_TIME,
-                              CAST(NULL AS DATETIME(6)) AS UPDATE_TIME,
-                              CAST(NULL AS DATETIME(6)) AS CHECK_TIME,
-                              CAST(NULL AS UNSIGNED) AS CHECKSUM,
-                              CAST('' AS CHAR(20)) AS STATUS,
-                              CAST(NULL AS CHAR(255)) AS EXTRA
-                   FROM DUAL WHERE 0 = 1""".replace("\n", " "),
-  normal_columns = [
-  ]
-  )
+# 21157: INFORMATION_SCHEMA.FILES # removed (ID reserved)
 
 # 21158: DBA_OB_TENANTS (abandoned)
 # 21159: DBA_OB_UNITS (abandoned)
