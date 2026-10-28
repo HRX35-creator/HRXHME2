@@ -37,7 +37,8 @@ const char *VALID_PROVIDERS[] = {
   "SILICONFLOW",
   "COHERE",
   "HUNYUAN-OPENAI",
-  "OPENAI"
+  "OPENAI",
+  "OLLAMA"
 };
 
 #define EXTRACT_JSON_ELEM_STR(json_key, member) \
@@ -80,16 +81,18 @@ int ObAiModelEndpointInfo::deep_copy(
   int ret = OB_SUCCESS;
   reset();
   endpoint_id_ = other.endpoint_id_;
-  if (OB_FAIL(ob_write_string(allocator, other.name_, name_))) {
-  } else if (OB_FAIL(ob_write_string(allocator, other.scope_, scope_))) {
-  } else if (OB_FAIL(ob_write_string(allocator, other.ai_model_name_, ai_model_name_))) {
-  } else if (OB_FAIL(ob_write_string(allocator, other.url_, url_))) {
-  } else if (OB_FAIL(ob_write_string(allocator, other.access_key_, access_key_))) {
-  } else if (OB_FAIL(ob_write_string(allocator, other.provider_, provider_))) {
-  } else if (OB_FAIL(ob_write_string(allocator, other.request_model_name_, request_model_name_))) {
-  } else if (OB_FAIL(ob_write_string(allocator, other.parameters_, parameters_))) {
-  } else if (OB_FAIL(ob_write_string(allocator, other.request_transform_fn_, request_transform_fn_))) {
-  } else if (OB_FAIL(ob_write_string(allocator, other.response_transform_fn_, response_transform_fn_))) {
+  // Optional fields may be SQL NULL after an ALTER; treat NULL and the empty
+  // string identically and leave the destination empty instead of failing.
+  const ObString *sources[] = {&other.name_, &other.scope_, &other.ai_model_name_,
+                               &other.url_, &other.access_key_, &other.provider_,
+                               &other.request_model_name_, &other.parameters_,
+                               &other.request_transform_fn_, &other.response_transform_fn_};
+  ObString *targets[] = {&name_, &scope_, &ai_model_name_, &url_, &access_key_,
+                         &provider_, &request_model_name_, &parameters_,
+                         &request_transform_fn_, &response_transform_fn_};
+  for (int64_t i = 0; OB_SUCC(ret) && i < static_cast<int64_t>(ARRAYSIZEOF(sources)); ++i) {
+    if (!sources[i]->empty() && OB_FAIL(ob_write_string(allocator, *sources[i], *targets[i]))) {
+    }
   }
   return ret;
 }
@@ -112,16 +115,17 @@ int ObAiModelEndpointInfo::check_valid() const
   } else if (url_.empty()) {
     ret = OB_AI_FUNC_PARAM_EMPTY;
     LOG_USER_ERROR(OB_AI_FUNC_PARAM_EMPTY, strlen("url"), "url");
-  } else if (access_key_.empty()) {
-    ret = OB_AI_FUNC_PARAM_EMPTY;
-    LOG_USER_ERROR(OB_AI_FUNC_PARAM_EMPTY, strlen("access_key"), "access_key");
-    LOG_WARN("access_key is empty", K(ret), K(*this));
   } else if (provider_.empty()) {
     ret = OB_AI_FUNC_PARAM_EMPTY;
     LOG_USER_ERROR(OB_AI_FUNC_PARAM_EMPTY, strlen("provider"), "provider");
   } else if (!is_valid_provider(provider_)) {
     ret = OB_AI_FUNC_PARAM_VALUE_INVALID;
     LOG_USER_ERROR(OB_AI_FUNC_PARAM_VALUE_INVALID, strlen("provider"), "provider");
+  } else if (access_key_.empty() && provider_.case_compare("OLLAMA") != 0) {
+    // Local Ollama endpoints do not require an API key.
+    ret = OB_AI_FUNC_PARAM_EMPTY;
+    LOG_USER_ERROR(OB_AI_FUNC_PARAM_EMPTY, strlen("access_key"), "access_key");
+    LOG_WARN("access_key is empty", K(ret), K(*this));
   } else if (!parameters_.empty()) {
     ret = OB_AI_FUNC_PARAM_VALUE_INVALID;
     LOG_USER_ERROR(OB_AI_FUNC_PARAM_VALUE_INVALID, strlen("parameters"), "parameters");
@@ -192,7 +196,10 @@ int ObAiModelEndpointInfo::encrypt_access_key_(ObIAllocator &allocator, const Ob
 int ObAiModelEndpointInfo::decrypt_access_key_(ObIAllocator &allocator, const ObString &encrypted_access_key, ObString &unencrypted_access_key) const
 {
   int ret = OB_SUCCESS;
-  if (OB_FAIL(ob_write_string(allocator, encrypted_access_key, unencrypted_access_key))) {
+  if (encrypted_access_key.empty()) {
+    // Local providers such as Ollama do not use an API key.
+    unencrypted_access_key.reset();
+  } else if (OB_FAIL(ob_write_string(allocator, encrypted_access_key, unencrypted_access_key))) {
   }
   return ret;
 }
