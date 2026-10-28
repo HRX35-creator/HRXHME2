@@ -156,7 +156,7 @@ The quantifier processor checks every Chinese character against the set of
 Chinese numerals, and the lookup scanned the 36 code points linearly.  The set
 is now sorted once and searched with a binary search.
 
-## 2.10 Where the index build spends its time
+### 2.10 Where the index build spends its time
 
 The index build was measured with an empty table and with the benchmark data
 to separate the fixed overhead from the per-document cost:
