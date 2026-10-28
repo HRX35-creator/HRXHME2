@@ -6034,6 +6034,12 @@ int ObRawExprUtils::check_need_cast_expr(const ObRawExprResType &src_type,
     if (src_type.is_decimal_int() && dst_type.is_number()) {
       // ignore duplicate cast error caused by decimal int fallback to number
       ignore_dup_cast_error = true;
+    } else if (ob_is_numeric_type(in_type) && ob_is_numeric_type(out_type)) {
+      // Nested numeric expressions (for example a boolean scalar subquery
+      // combined with double-negated LIKE) may legitimately carry an
+      // inner-added cast. Casting the numeric result again preserves the
+      // value, so a duplicate implicit cast is not a type-deduction error.
+      ignore_dup_cast_error = true;
     }
   }
   return ret;
