@@ -2314,7 +2314,12 @@ int ObTransformSimplifyExpr::do_push_not(ObRawExpr *&expr,
         ret = OB_ERR_UNEXPECTED;
         LOG_WARN("unexpected null expr", K(ret));
       } else if (OB_FAIL(temp->formalize(ctx_->session_info_))) {
+      } else if (OB_FAIL(ObTransformUtils::add_cast_for_replace_if_need(
+                            *expr_factory, expr, temp, ctx_->session_info_))) {
       } else {
+        // NOT returns INT32, while predicates such as LIKE return INT64.
+        // Preserve the replaced expression's type so that formalizing its
+        // parent does not invalidate casts already added to other operands.
         expr = temp;
         is_valid = false;
         trans_happened = true;
