@@ -17,6 +17,7 @@
  #define USING_LOG_PREFIX RS
  #include "rootserver/ob_ai_model_ddl_service.h"
  #include "rootserver/ob_ai_model_ddl_operator.h"
+ #include "lib/worker.h"
 
 namespace oceanbase
 {
@@ -26,76 +27,115 @@ namespace rootserver
 int ObAiModelDDLService::create_ai_model(const obcall::ObCreateAiModelArg &arg)
 {
   int ret = OB_SUCCESS;
-  
-  ObSchemaGetterGuard schema_guard;
-  ObAiModelSchema new_schema;
-  const ObAiModelSchema *old_schema = nullptr;
-  if (OB_FAIL(new_schema.assign(arg.model_info_))) {
-  } else if (OB_FAIL(ddl_service_.get_runtime_schema_guard_with_version_in_inner_table(schema_guard))) {
-  } else if (OB_FAIL(schema_guard.get_ai_model_schema( arg.model_info_.get_name(), old_schema))) {
-  } else if (OB_NOT_NULL(old_schema)) {
-    ret = OB_AI_FUNC_MODEL_EXISTS;
-    LOG_USER_ERROR(OB_AI_FUNC_MODEL_EXISTS, arg.model_info_.get_name().length(), arg.model_info_.get_name().ptr());
-  } else {
-    ObDDLSQLTransaction trans(&ddl_service_.get_schema_service());
-    ObAiModelDDLOperator ddl_operator(ddl_service_.get_schema_service());
-    int64_t refreshed_schema_version = 0;
-    if (OB_FAIL(schema_guard.get_schema_version(refreshed_schema_version))) {
-    } else if (OB_FAIL(trans.start(&ddl_service_.get_sql_proxy(), refreshed_schema_version))) {
-    } else if (OB_FAIL(ddl_operator.create_ai_model(new_schema, arg.ddl_stmt_str_, trans))) {
-    }
+  bool retry_start = false;
+  do {
+    retry_start = false;
+    ret = OB_SUCCESS;
 
-    if (trans.is_started()) {
-      int temp_ret = OB_SUCCESS;
-      if (OB_SUCCESS != (temp_ret = trans.end(OB_SUCC(ret)))) {
-        LOG_ERROR("trans end failed", "is_commit", OB_SUCCESS == ret, K(temp_ret));
-        ret = (OB_SUCC(ret)) ? temp_ret : ret;
+    ObSchemaGetterGuard schema_guard;
+    ObAiModelSchema new_schema;
+    const ObAiModelSchema *old_schema = nullptr;
+    if (OB_FAIL(new_schema.assign(arg.model_info_))) {
+    } else if (OB_FAIL(ddl_service_.get_runtime_schema_guard_with_version_in_inner_table(schema_guard))) {
+    } else if (OB_FAIL(schema_guard.get_ai_model_schema( arg.model_info_.get_name(), old_schema))) {
+    } else if (OB_NOT_NULL(old_schema)) {
+      ret = OB_AI_FUNC_MODEL_EXISTS;
+      LOG_USER_ERROR(OB_AI_FUNC_MODEL_EXISTS, arg.model_info_.get_name().length(), arg.model_info_.get_name().ptr());
+    } else {
+      ObDDLSQLTransaction trans(&ddl_service_.get_schema_service());
+      ObAiModelDDLOperator ddl_operator(ddl_service_.get_schema_service());
+      int64_t refreshed_schema_version = 0;
+      if (OB_FAIL(schema_guard.get_schema_version(refreshed_schema_version))) {
+      } else if (OB_FAIL(trans.start(&ddl_service_.get_sql_proxy(), refreshed_schema_version))) {
+        // Schema changed while acquiring the DDL lock; no model mutation has run.
+        retry_start = OB_EAGAIN == ret;
+      } else if (OB_FAIL(ddl_operator.create_ai_model(new_schema, arg.ddl_stmt_str_, trans))) {
+      }
+
+      if (trans.is_started()) {
+        int temp_ret = OB_SUCCESS;
+        if (OB_SUCCESS != (temp_ret = trans.end(OB_SUCC(ret)))) {
+          retry_start = false; // A failed rollback must not start another attempt.
+          LOG_ERROR("trans end failed", "is_commit", OB_SUCCESS == ret, K(temp_ret));
+          ret = (OB_SUCC(ret)) ? temp_ret : ret;
+        }
+      }
+      if (OB_SUCC(ret)) {
+        if (OB_FAIL(ddl_service_.publish_schema())) {
+        }
       }
     }
-    if (OB_SUCC(ret)) {
-      if (OB_FAIL(ddl_service_.publish_schema())) {
+    if (retry_start) {
+      if (OB_UNLIKELY(THIS_WORKER.get_timeout_remain() <= 0)) {
+        ret = OB_TIMEOUT;
+        retry_start = false;
+      } else {
+        const int status = THIS_WORKER.check_status();
+        if (OB_SUCCESS != status) {
+          ret = status;
+          retry_start = false;
+        }
       }
     }
-  }
-
+  } while (retry_start);
   return ret;
 }
 
 int ObAiModelDDLService::drop_ai_model(const obcall::ObDropAiModelArg &arg)
 {
   int ret = OB_SUCCESS;
-  
-  const ObString &ai_model_name = arg.get_ai_model_name();
-  ObSchemaGetterGuard schema_guard;
-  const ObAiModelSchema *old_schema = nullptr;
+  bool retry_start = false;
+  do {
+    retry_start = false;
+    ret = OB_SUCCESS;
 
-  if (OB_FAIL(ddl_service_.get_runtime_schema_guard_with_version_in_inner_table(schema_guard))) {
-  } else if (OB_FAIL(schema_guard.get_ai_model_schema( ai_model_name, old_schema))) {
-  } else if (OB_ISNULL(old_schema)) {
-    ret = OB_AI_FUNC_MODEL_NOT_FOUND;
-    LOG_USER_ERROR(OB_AI_FUNC_MODEL_NOT_FOUND, ai_model_name.length(), ai_model_name.ptr());
-  } else {
-    ObDDLSQLTransaction trans(&ddl_service_.get_schema_service());
-    ObAiModelDDLOperator ddl_operator(ddl_service_.get_schema_service());
-    int64_t refreshed_schema_version = 0;
-    if (OB_FAIL(schema_guard.get_schema_version(refreshed_schema_version))) {
-    } else if (OB_FAIL(trans.start(&ddl_service_.get_sql_proxy(), refreshed_schema_version))) {
-    } else if (OB_FAIL(ddl_operator.drop_ai_model(*old_schema, arg.ddl_stmt_str_, trans))) {
-    }
+    const ObString &ai_model_name = arg.get_ai_model_name();
+    ObSchemaGetterGuard schema_guard;
+    const ObAiModelSchema *old_schema = nullptr;
 
-    if (trans.is_started()) {
-      int temp_ret = OB_SUCCESS;
-      if (OB_SUCCESS != (temp_ret = trans.end(OB_SUCC(ret)))) {
-        LOG_ERROR("trans end failed", "is_commit", OB_SUCCESS == ret, K(temp_ret));
-        ret = (OB_SUCC(ret)) ? temp_ret : ret;
+    if (OB_FAIL(ddl_service_.get_runtime_schema_guard_with_version_in_inner_table(schema_guard))) {
+    } else if (OB_FAIL(schema_guard.get_ai_model_schema( ai_model_name, old_schema))) {
+    } else if (OB_ISNULL(old_schema)) {
+      ret = OB_AI_FUNC_MODEL_NOT_FOUND;
+      LOG_USER_ERROR(OB_AI_FUNC_MODEL_NOT_FOUND, ai_model_name.length(), ai_model_name.ptr());
+    } else {
+      ObDDLSQLTransaction trans(&ddl_service_.get_schema_service());
+      ObAiModelDDLOperator ddl_operator(ddl_service_.get_schema_service());
+      int64_t refreshed_schema_version = 0;
+      if (OB_FAIL(schema_guard.get_schema_version(refreshed_schema_version))) {
+      } else if (OB_FAIL(trans.start(&ddl_service_.get_sql_proxy(), refreshed_schema_version))) {
+        // Schema changed while acquiring the DDL lock; no model mutation has run.
+        retry_start = OB_EAGAIN == ret;
+      } else if (OB_FAIL(ddl_operator.drop_ai_model(*old_schema, arg.ddl_stmt_str_, trans))) {
+      }
+
+      if (trans.is_started()) {
+        int temp_ret = OB_SUCCESS;
+        if (OB_SUCCESS != (temp_ret = trans.end(OB_SUCC(ret)))) {
+          retry_start = false; // A failed rollback must not start another attempt.
+          LOG_ERROR("trans end failed", "is_commit", OB_SUCCESS == ret, K(temp_ret));
+          ret = (OB_SUCC(ret)) ? temp_ret : ret;
+        }
+      }
+
+      if (OB_SUCC(ret)) {
+        if (OB_FAIL(ddl_service_.publish_schema())) {
+        }
       }
     }
-
-    if (OB_SUCC(ret)) {
-      if (OB_FAIL(ddl_service_.publish_schema())) {
+    if (retry_start) {
+      if (OB_UNLIKELY(THIS_WORKER.get_timeout_remain() <= 0)) {
+        ret = OB_TIMEOUT;
+        retry_start = false;
+      } else {
+        const int status = THIS_WORKER.check_status();
+        if (OB_SUCCESS != status) {
+          ret = status;
+          retry_start = false;
+        }
       }
     }
-  }
+  } while (retry_start);
   return ret;
 }
 
