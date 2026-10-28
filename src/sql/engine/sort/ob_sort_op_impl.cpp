@@ -573,7 +573,8 @@ ObSortOpImpl::ObSortOpImpl() :
   max_node_cnt_(0), part_cnt_(0), topn_cnt_(INT64_MAX), outputted_rows_cnt_(0),
   is_fetch_with_ties_(false), topn_heap_(NULL), ties_array_pos_(0), last_ties_row_(NULL),
   pt_buckets_(NULL), use_partition_topn_sort_(false), heap_nodes_(), cur_heap_idx_(0), rows_(NULL),
-  sort_exprs_(nullptr), compress_type_(NONE_COMPRESSOR)
+  sort_exprs_(nullptr), compress_type_(NONE_COMPRESSOR), presort_runs_(false), presort_begin_(0),
+  presort_run_cnt_(0), presort_buf_(NULL), presort_buf_cap_(0)
 {}
 
 ObSortOpImpl::ObSortOpImpl(ObMonitorNode &op_monitor_info)
@@ -594,7 +595,8 @@ ObSortOpImpl::ObSortOpImpl(ObMonitorNode &op_monitor_info)
     is_fetch_with_ties_(false), topn_heap_(NULL), ties_array_pos_(0),
     last_ties_row_(NULL), pt_buckets_(NULL), use_partition_topn_sort_(false), heap_nodes_(), cur_heap_idx_(0), part_group_cnt_(0),
     rows_(NULL), sort_exprs_(nullptr),
-    compress_type_(NONE_COMPRESSOR), use_compact_format_(false)
+    compress_type_(NONE_COMPRESSOR), use_compact_format_(false), presort_runs_(false),
+    presort_begin_(0), presort_run_cnt_(0), presort_buf_(NULL), presort_buf_cap_(0)
 {
 }
 
@@ -815,6 +817,7 @@ void ObSortOpImpl::reuse()
   row_idx_ = 0;
   next_stored_row_func_ = &ObSortOpImpl::array_next_stored_row;
   ties_array_pos_ = 0;
+  reset_presort_runs();
   while (!sort_chunks_.is_empty()) {
     ObSortOpChunk *chunk = sort_chunks_.remove_first();
     chunk->~ObSortOpChunk();
@@ -874,6 +877,8 @@ void ObSortOpImpl::reset()
   compress_type_ = NONE_COMPRESSOR;
   use_compact_format_ = false;
   sort_exprs_ = nullptr;
+  presort_runs_ = false;
+  presort_buf_cap_ = 0;
   // for partition topn sort
   cur_heap_idx_ = 0;
   part_group_cnt_ = 0;
@@ -916,6 +921,10 @@ void ObSortOpImpl::reset()
     if (NULL != last_ties_row_) {
       mem_context_->get_malloc_allocator().free(last_ties_row_);
       last_ties_row_ = NULL;
+    }
+    if (NULL != presort_buf_) {
+      mem_context_->get_malloc_allocator().free(presort_buf_);
+      presort_buf_ = NULL;
     }
     // can not destroy mem_entify here, the memory may hold by %iter_ or %datum_store_
   }
@@ -1185,6 +1194,7 @@ int ObSortOpImpl::add_quick_sort_row(const common::ObIArray<ObExpr*> &exprs,
   if (OB_FAIL(before_add_row())) {
   } else if (OB_FAIL(datum_store_.add_row(exprs, eval_ctx_, &sr))) {
   } else if (OB_FAIL(after_add_row(sr))) {
+  } else if (presort_runs_ && OB_FAIL(presort_run(false))) {
   } else {
     store_row = sr;
   }
@@ -1247,6 +1257,8 @@ int ObSortOpImpl::add_quick_sort_batch(const common::ObIArray<ObExpr *> &exprs,
       if (OB_FAIL(after_add_row(stored_rows_[i]))) {
       }
     }
+    if (OB_SUCC(ret) && presort_runs_ && OB_FAIL(presort_run(false))) {
+    }
     if (OB_NOT_NULL(append_row_count)) {
       *append_row_count = stored_rows_cnt;
     }
@@ -1293,6 +1305,8 @@ int ObSortOpImpl::add_quick_sort_batch(const common::ObIArray<ObExpr *> &exprs,
     for (int64_t i = 0; OB_SUCC(ret) && i < stored_rows_cnt; i++) {
       if (OB_FAIL(after_add_row(stored_rows_[i]))) {
       }
+    }
+    if (OB_SUCC(ret) && presort_runs_ && OB_FAIL(presort_run(false))) {
     }
   }
   return ret;
@@ -1630,6 +1644,7 @@ int ObSortOpImpl::do_dump()
       heap_iter_begin_ = false;
       row_idx_ = 0;
       quick_sort_array_.reset();
+      reset_presort_runs();
       datum_store_.reset();
       inmem_row_size_ = 0;
       mem_check_interval_mask_ = 1;
@@ -1854,6 +1869,94 @@ int ObSortOpImpl::part_topn_heap_next(int64_t &cur_heap_idx,
   return ret;
 }
 
+int ObSortOpImpl::presort_run(const bool finish)
+{
+  int ret = OB_SUCCESS;
+  const int64_t cnt = rows_->count();
+  if (cnt - presort_begin_ >= (finish ? 1 : PRESORT_RUN_ROWS)) {
+    if (OB_UNLIKELY(presort_run_cnt_ >= PRESORT_MAX_RUNS)) {
+      ret = OB_ERR_UNEXPECTED;
+    } else {
+      lib::ob_sort(&rows_->at(presort_begin_), &rows_->at(0) + cnt, CopyableComparer(comp_));
+      if (OB_SUCCESS != comp_.ret_) {
+        ret = comp_.ret_;
+      } else {
+        presort_run_cnts_[presort_run_cnt_++] = cnt - presort_begin_;
+        presort_begin_ = cnt;
+      }
+    }
+  }
+  // merge like a binary counter, runs of the stack keep decreasing in size
+  while (OB_SUCC(ret) && presort_run_cnt_ >= 2
+         && (finish || presort_run_cnts_[presort_run_cnt_ - 2] <= presort_run_cnts_[presort_run_cnt_ - 1])) {
+    const int64_t right_cnt = presort_run_cnts_[presort_run_cnt_ - 1];
+    const int64_t left_cnt = presort_run_cnts_[presort_run_cnt_ - 2];
+    if (OB_FAIL(merge_presort_runs(presort_begin_ - left_cnt - right_cnt, left_cnt, right_cnt))) {
+    } else {
+      presort_run_cnts_[presort_run_cnt_ - 2] = left_cnt + right_cnt;
+      presort_run_cnt_ -= 1;
+    }
+  }
+  return ret;
+}
+
+int ObSortOpImpl::merge_presort_runs(const int64_t start,
+                                     const int64_t left_cnt,
+                                     const int64_t right_cnt)
+{
+  int ret = OB_SUCCESS;
+  typedef ObChunkDatumStore::StoredRow *RowPtr;
+  const int64_t buf_cnt = min(left_cnt, right_cnt);
+  if (presort_buf_cap_ < buf_cnt) {
+    const int64_t new_cap = max(buf_cnt, presort_buf_cap_ * 2);
+    RowPtr *new_buf = static_cast<RowPtr *>(
+        mem_context_->get_malloc_allocator().alloc(new_cap * sizeof(RowPtr)));
+    if (OB_ISNULL(new_buf)) {
+      ret = OB_ALLOCATE_MEMORY_FAILED;
+    } else {
+      if (NULL != presort_buf_) {
+        mem_context_->get_malloc_allocator().free(presort_buf_);
+      }
+      presort_buf_ = new_buf;
+      presort_buf_cap_ = new_cap;
+    }
+  }
+  if (OB_SUCC(ret)) {
+    RowPtr *rows = &rows_->at(start);
+    RowPtr *buf = presort_buf_;
+    if (left_cnt <= right_cnt) {
+      // left run to buffer, merge forward; the right run tail is already in place
+      MEMCPY(buf, rows, left_cnt * sizeof(RowPtr));
+      int64_t i = 0;
+      int64_t j = left_cnt;
+      int64_t out = 0;
+      const int64_t end = left_cnt + right_cnt;
+      while (i < left_cnt && j < end) {
+        rows[out++] = comp_(rows[j], buf[i]) ? rows[j++] : buf[i++];
+      }
+      while (i < left_cnt) {
+        rows[out++] = buf[i++];
+      }
+    } else {
+      // right run to buffer, merge backward; the left run head is already in place
+      MEMCPY(buf, rows + left_cnt, right_cnt * sizeof(RowPtr));
+      int64_t i = left_cnt - 1;
+      int64_t j = right_cnt - 1;
+      int64_t out = left_cnt + right_cnt - 1;
+      while (i >= 0 && j >= 0) {
+        rows[out--] = comp_(buf[j], rows[i]) ? rows[i--] : buf[j--];
+      }
+      while (j >= 0) {
+        rows[out--] = buf[j--];
+      }
+    }
+    if (OB_SUCCESS != comp_.ret_) {
+      ret = comp_.ret_;
+    }
+  }
+  return ret;
+}
+
 int ObSortOpImpl::sort_inmem_data()
 {
   int ret = OB_SUCCESS;
@@ -1871,6 +1974,8 @@ int ObSortOpImpl::sort_inmem_data()
         do_partition_topn_sort();
       } else if (part_cnt_ > 0) {
         OZ(do_partition_sort(*rows_, begin, rows_->count()));
+      } else if (presort_runs_) {
+        OZ(presort_run(true));
       } else if (enable_encode_sortkey_) {
         bool can_encode = true;
         ObAdaptiveQS aqs(*rows_, mem_context_->get_malloc_allocator());

@@ -35,6 +35,7 @@ class ObDASTextRetrievalIterator;
 class ObFtsEvalNode;
 class ObDASTextRetrievalIter;
 class ObDocIdExt;
+struct ObFTSResultCacheEntry;
 
 // Installs the legacy physical retrieval provider into SQL's query-owned
 // dispatcher.  Observer calls this composition entry point explicitly so a
@@ -108,6 +109,21 @@ private:
   int init_topk_limit();
   int init_block_max_iter_param();
   int init_doc_length_est_param();
+  // reuse the output of a previous identical query on unchanged data, see ObFTSResultCache
+  bool can_reuse_result() const;
+  int prepare_result_reuse();
+  int build_result_cache_key(common::ObSqlString &key) const;
+  int replay_cached_rows(int64_t &count, const int64_t capacity);
+  int switch_to_live_rows();
+  int next_result_rows(int64_t &count, const int64_t capacity, const bool row_mode);
+  int record_result_rows(const int64_t count);
+  enum ResultReuseFinish
+  {
+    ABANDON_RECORD, // the recorded rows may be wrong
+    STOP_RECORD,    // the consumer stopped, the recorded rows are a prefix
+    END_RECORD      // all rows are recorded
+  };
+  void finish_result_reuse(const ResultReuseFinish finish);
 private:
   static const int64_t INV_IDX_ROWKEY_COL_CNT = 2;
 private:
@@ -148,6 +164,12 @@ private:
   };
   bool check_rangekey_inited_;
   bool inv_idx_tablet_switched_;
+  // result reuse: replay %cached_entry_ from %replay_pos_, or record into %record_entry_
+  ObFTSResultCacheEntry *cached_entry_;
+  ObFTSResultCacheEntry *record_entry_;
+  int64_t replay_pos_;
+  int64_t skip_rows_; // rows already replayed from a prefix entry, not output again
+  bool children_scanned_; // children are not opened while a cached result is replayed
   bool is_inited_;
   DISALLOW_COPY_AND_ASSIGN(ObDASLegacyTRMergeIter);
 };

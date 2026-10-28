@@ -349,6 +349,15 @@ public:
   // %dumped is true when rows are really dumped.
   int try_extend_mem_or_dump(bool &dumped);
 
+  // Sort the input in runs while rows are added and merge neighbour runs of similar size, so most
+  // of the sorting is done while the child is still producing rows (e.g. on the other side of an
+  // exchange). Only for plain in-memory quick sort; call after init().
+  void enable_presort_runs()
+  {
+    presort_runs_ = is_inited() && !use_heap_sort_ && !use_partition_topn_sort_ && 0 == part_cnt_
+                    && !enable_encode_sortkey_ && !local_merge_sort_ && !need_rewind_;
+  }
+
   virtual int sort();
 
   virtual int get_next_row(const common::ObIArray<ObExpr*> &exprs)
@@ -688,6 +697,15 @@ protected:
            && rows_->count() > datum_store_.get_row_cnt();
   }
   int sort_inmem_data();
+  // sort the unsorted tail of rows_ as a run once it is big enough (always if %finish),
+  // then merge runs; with %finish all runs are merged into one
+  int presort_run(const bool finish);
+  int merge_presort_runs(const int64_t start, const int64_t left_cnt, const int64_t right_cnt);
+  void reset_presort_runs()
+  {
+    presort_begin_ = 0;
+    presort_run_cnt_ = 0;
+  }
   int do_dump();
   int inner_dump_part_topn_heap();
 
@@ -820,6 +838,8 @@ protected:
   static const int64_t STORE_ROW_EXTRA_SIZE = sizeof(uint64_t);
   static const int64_t MIN_BUCKET_COUNT = 1L << 14;  //16384;
   static const int64_t MAX_BUCKET_COUNT = 1L << 19; //524288;
+  static const int64_t PRESORT_RUN_ROWS = 1L << 14;
+  static const int64_t PRESORT_MAX_RUNS = 64;
   bool inited_;
   bool local_merge_sort_;
   bool need_rewind_;
@@ -887,6 +907,13 @@ protected:
   common::ObCompressorType compress_type_;
   bool use_compact_format_;
   ObPushDownTopNFilter pd_topn_filter_;
+  // for presort runs: rows_[0, presort_begin_) are sorted runs, sizes in presort_run_cnts_
+  bool presort_runs_;
+  int64_t presort_begin_;
+  int64_t presort_run_cnt_;
+  int64_t presort_run_cnts_[PRESORT_MAX_RUNS];
+  ObChunkDatumStore::StoredRow **presort_buf_;
+  int64_t presort_buf_cap_;
 };
 
 class ObInMemoryTopnSortImpl;

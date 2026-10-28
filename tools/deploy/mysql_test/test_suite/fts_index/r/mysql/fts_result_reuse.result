@@ -1,0 +1,241 @@
+drop database if exists fts_result_reuse;
+create database fts_result_reuse;
+use fts_result_reuse;
+set ob_query_timeout = 10000000000;
+result_format: 4
+select tokenize('The quick brown fox jumps over the lazy dog', 'beng');
++-----------------------------------------------------------------+
+| tokenize('The quick brown fox jumps over the lazy dog', 'beng') |
++-----------------------------------------------------------------+
+| ["lazy", "over", "quick", "dog", "brown", "fox", "jumps"]       |
++-----------------------------------------------------------------+
+select tokenize('The quick brown fox jumps over the lazy dog', 'beng');
++-----------------------------------------------------------------+
+| tokenize('The quick brown fox jumps over the lazy dog', 'beng') |
++-----------------------------------------------------------------+
+| ["lazy", "over", "quick", "dog", "brown", "fox", "jumps"]       |
++-----------------------------------------------------------------+
+select tokenize('The quick brown fox jumps over the lazy dog', 'beng', '[{"additional_args":[{"min_token_size":4}]}]');
++-----------------------------------------------------------------------------------------------------------------+
+| tokenize('The quick brown fox jumps over the lazy dog', 'beng', '[{"additional_args":[{"min_token_size":4}]}]') |
++-----------------------------------------------------------------------------------------------------------------+
+| ["lazy", "over", "quick", "brown", "jumps"]                                                                     |
++-----------------------------------------------------------------------------------------------------------------+
+select tokenize('The quick brown fox jumps over the lazy dog', 'beng', '[{"output":"all"}]');
++------------------------------------------------------------------------------------------------------------------------+
+| tokenize('The quick brown fox jumps over the lazy dog', 'beng', '[{"output":"all"}]')                                  |
++------------------------------------------------------------------------------------------------------------------------+
+| {"tokens": [{"lazy": 1}, {"over": 1}, {"quick": 1}, {"dog": 1}, {"brown": 1}, {"fox": 1}, {"jumps": 1}], "doc_len": 7} |
++------------------------------------------------------------------------------------------------------------------------+
+select tokenize('The quick brown fox jumps over the lazy dog', 'space');
++------------------------------------------------------------------+
+| tokenize('The quick brown fox jumps over the lazy dog', 'space') |
++------------------------------------------------------------------+
+| ["lazy", "over", "quick", "dog", "brown", "fox", "jumps"]        |
++------------------------------------------------------------------+
+select tokenize('The quick brown fox jumps over the lazy dog', 'beng');
++-----------------------------------------------------------------+
+| tokenize('The quick brown fox jumps over the lazy dog', 'beng') |
++-----------------------------------------------------------------+
+| ["lazy", "over", "quick", "dog", "brown", "fox", "jumps"]       |
++-----------------------------------------------------------------+
+select tokenize('中华人民共和国人民大会堂是著名地标', 'ik');
++-------------------------------------------------------------------------+
+| tokenize('中华人民共和国人民大会堂是著名地标', 'ik')                    |
++-------------------------------------------------------------------------+
+| ["著名", "人民大会堂", "地标", "是", "中华人民共和国"]                  |
++-------------------------------------------------------------------------+
+select tokenize('中华人民共和国人民大会堂是著名地标', 'ik', '[{"additional_args":[{"ik_mode":"max_word"}]}]');
++--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| tokenize('中华人民共和国人民大会堂是著名地标', 'ik', '[{"additional_args":[{"ik_mode":"max_word"}]}]')                                                                                                                               |
++--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| ["大会", "著名", "人民大会堂", "大会堂", "共和国", "人民大会", "人民共和国", "中华人民", "共和", "地标", "是", "会堂", "中华", "中华人民共和国", "名地", "国人", "华人", "人民"]                                                     |
++--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+select tokenize('中华人民共和国人民大会堂是著名地标', 'ik');
++-------------------------------------------------------------------------+
+| tokenize('中华人民共和国人民大会堂是著名地标', 'ik')                    |
++-------------------------------------------------------------------------+
+| ["著名", "人民大会堂", "地标", "是", "中华人民共和国"]                  |
++-------------------------------------------------------------------------+
+select tokenize('', 'ik');
++--------------------+
+| tokenize('', 'ik') |
++--------------------+
+| []                 |
++--------------------+
+select tokenize(NULL, 'beng');
++------------------------+
+| tokenize(NULL, 'beng') |
++------------------------+
+| []                     |
++------------------------+
+
+create table t(id int primary key, c varchar(200), fulltext index fi(c) with parser beng);
+insert into t values (1, 'apple banana'), (2, 'banana cherry'), (3, 'cherry date'), (4, 'date apple banana');
+insert into t select id + 4, c from t;
+insert into t select id + 8, c from t;
+insert into t select id + 16, c from t;
+insert into t select id + 32, c from t;
+insert into t select id + 64, c from t;
+insert into t select id + 128, c from t;
+insert into t select id + 256, c from t;
+
+select count(*) from t where match(c) against('banana');
++----------+
+| count(*) |
++----------+
+|      384 |
++----------+
+select count(*) from t where match(c) against('banana');
++----------+
+| count(*) |
++----------+
+|      384 |
++----------+
+
+alter system minor freeze;
+select count(*), sum(id), bit_xor(id) from t where match(c) against('banana');
++----------+---------+-------------+
+| count(*) | sum(id) | bit_xor(id) |
++----------+---------+-------------+
+|      384 |   98432 |         512 |
++----------+---------+-------------+
+select count(*), sum(id), bit_xor(id) from t where match(c) against('banana');
++----------+---------+-------------+
+| count(*) | sum(id) | bit_xor(id) |
++----------+---------+-------------+
+|      384 |   98432 |         512 |
++----------+---------+-------------+
+select count(*), sum(id), round(sum(s), 4) from (select id, match(c) against('banana cherry') s from t where match(c) against('banana cherry')) x;
++----------+---------+------------------+
+| count(*) | sum(id) | round(sum(s), 4) |
++----------+---------+------------------+
+|      512 |  131328 |         235.1110 |
++----------+---------+------------------+
+select count(*), sum(id), round(sum(s), 4) from (select id, match(c) against('banana cherry') s from t where match(c) against('banana cherry')) x;
++----------+---------+------------------+
+| count(*) | sum(id) | round(sum(s), 4) |
++----------+---------+------------------+
+|      512 |  131328 |         235.1110 |
++----------+---------+------------------+
+
+select id, round(match(c) against('cherry date'), 6) from t where match(c) against('cherry date') limit 5;
++-----+-------------------------------------------+
+| id  | round(match(c) against('cherry date'), 6) |
++-----+-------------------------------------------+
+| 263 |                                  0.743243 |
+|  11 |                                  0.743243 |
+|   3 |                                  0.743243 |
+|   7 |                                  0.743243 |
+| 259 |                                  0.743243 |
++-----+-------------------------------------------+
+select id, round(match(c) against('cherry date'), 6) from t where match(c) against('cherry date') limit 5;
++-----+-------------------------------------------+
+| id  | round(match(c) against('cherry date'), 6) |
++-----+-------------------------------------------+
+| 263 |                                  0.743243 |
+|  11 |                                  0.743243 |
+|   3 |                                  0.743243 |
+|   7 |                                  0.743243 |
+| 259 |                                  0.743243 |
++-----+-------------------------------------------+
+select id from t where match(c) against('cherry date') limit 3, 4;
++-----+
+| id  |
++-----+
+|   3 |
+|   7 |
+|  11 |
+| 263 |
++-----+
+select count(*) from (select id from t where match(c) against('apple') limit 10) x;
++----------+
+| count(*) |
++----------+
+|       10 |
++----------+
+select count(*), sum(id) from t where match(c) against('apple');
++----------+---------+
+| count(*) | sum(id) |
++----------+---------+
+|      256 |   65664 |
++----------+---------+
+select count(*), sum(id) from t where match(c) against('apple');
++----------+---------+
+| count(*) | sum(id) |
++----------+---------+
+|      256 |   65664 |
++----------+---------+
+select count(*) from t where match(c) against('apple') and id % 3 = 1;
++----------+
+| count(*) |
++----------+
+|       86 |
++----------+
+
+insert into t values (1000, 'banana split');
+select count(*), sum(id), bit_xor(id) from t where match(c) against('banana');
++----------+---------+-------------+
+| count(*) | sum(id) | bit_xor(id) |
++----------+---------+-------------+
+|      385 |   99432 |         488 |
++----------+---------+-------------+
+delete from t where id = 1;
+select count(*), sum(id), bit_xor(id) from t where match(c) against('banana');
++----------+---------+-------------+
+| count(*) | sum(id) | bit_xor(id) |
++----------+---------+-------------+
+|      384 |   99431 |         489 |
++----------+---------+-------------+
+update t set c = 'plain text' where id = 2;
+select count(*), sum(id), bit_xor(id) from t where match(c) against('banana');
++----------+---------+-------------+
+| count(*) | sum(id) | bit_xor(id) |
++----------+---------+-------------+
+|      383 |   99429 |         491 |
++----------+---------+-------------+
+
+begin;
+insert into t values (2000, 'banana bread'), (2001, 'banana boat');
+select count(*), sum(id) from t where match(c) against('banana');
++----------+---------+
+| count(*) | sum(id) |
++----------+---------+
+|      385 |  103430 |
++----------+---------+
+select count(*), sum(id) from t where match(c) against('banana');
++----------+---------+
+| count(*) | sum(id) |
++----------+---------+
+|      385 |  103430 |
++----------+---------+
+rollback;
+select count(*), sum(id) from t where match(c) against('banana');
++----------+---------+
+| count(*) | sum(id) |
++----------+---------+
+|      383 |   99429 |
++----------+---------+
+
+alter system minor freeze;
+select count(*), sum(id), bit_xor(id) from t where match(c) against('banana');
++----------+---------+-------------+
+| count(*) | sum(id) | bit_xor(id) |
++----------+---------+-------------+
+|      383 |   99429 |         491 |
++----------+---------+-------------+
+select count(*), sum(id), bit_xor(id) from t where match(c) against('banana');
++----------+---------+-------------+
+| count(*) | sum(id) | bit_xor(id) |
++----------+---------+-------------+
+|      383 |   99429 |         491 |
++----------+---------+-------------+
+insert into t values (3000, 'banana again');
+select count(*), sum(id), bit_xor(id) from t where match(c) against('banana');
++----------+---------+-------------+
+| count(*) | sum(id) | bit_xor(id) |
++----------+---------+-------------+
+|      384 |  102429 |        2643 |
++----------+---------+-------------+
+
+drop database fts_result_reuse;

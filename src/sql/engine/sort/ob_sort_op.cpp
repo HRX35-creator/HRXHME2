@@ -439,6 +439,11 @@ int ObSortOp::init_sort(int64_t row_count,
                      MY_SPEC.is_fetch_with_ties_, ObChunkDatumStore::BLOCK_SIZE,
                      MY_SPEC.compress_type_, &MY_SPEC.all_exprs_, est_rows,
                      MY_SPEC.prescan_enabled_, &MY_SPEC.pd_topn_filter_info_));
+  if (OB_SUCC(ret) && OB_NOT_NULL(ctx_.get_my_session())
+      && ctx_.get_my_session()->get_ddl_info().is_ddl()) {
+    // ddl sorts read from an exchange, sort runs while the producer is still scanning
+    sort_impl_.enable_presort_runs();
+  }
   if (is_batch) {
     read_batch_func_ = &ObSortOp::sort_impl_next_batch;
   } else {

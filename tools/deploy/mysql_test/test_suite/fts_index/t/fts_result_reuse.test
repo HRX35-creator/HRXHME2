@@ -1,0 +1,83 @@
+# owner: ll3me
+# owner group: storage
+# description: repeated fulltext queries and tokenize calls reuse earlier results; check that
+#              reused results equal recomputed ones and are dropped after any data change.
+
+--disable_warnings
+drop database if exists fts_result_reuse;
+create database fts_result_reuse;
+use fts_result_reuse;
+set ob_query_timeout = 10000000000;
+--enable_warnings
+
+--result_format 4
+
+# tokenize: same text with other parsers, properties and output modes in between
+select tokenize('The quick brown fox jumps over the lazy dog', 'beng');
+select tokenize('The quick brown fox jumps over the lazy dog', 'beng');
+select tokenize('The quick brown fox jumps over the lazy dog', 'beng', '[{"additional_args":[{"min_token_size":4}]}]');
+select tokenize('The quick brown fox jumps over the lazy dog', 'beng', '[{"output":"all"}]');
+select tokenize('The quick brown fox jumps over the lazy dog', 'space');
+select tokenize('The quick brown fox jumps over the lazy dog', 'beng');
+select tokenize('中华人民共和国人民大会堂是著名地标', 'ik');
+select tokenize('中华人民共和国人民大会堂是著名地标', 'ik', '[{"additional_args":[{"ik_mode":"max_word"}]}]');
+select tokenize('中华人民共和国人民大会堂是著名地标', 'ik');
+select tokenize('', 'ik');
+select tokenize(NULL, 'beng');
+
+create table t(id int primary key, c varchar(200), fulltext index fi(c) with parser beng);
+insert into t values (1, 'apple banana'), (2, 'banana cherry'), (3, 'cherry date'), (4, 'date apple banana');
+insert into t select id + 4, c from t;
+insert into t select id + 8, c from t;
+insert into t select id + 16, c from t;
+insert into t select id + 32, c from t;
+insert into t select id + 64, c from t;
+insert into t select id + 128, c from t;
+insert into t select id + 256, c from t;
+
+# memtable data: computed every time
+select count(*) from t where match(c) against('banana');
+select count(*) from t where match(c) against('banana');
+
+alter system minor freeze;
+--sleep 5
+
+# only sstables: the second run reuses the first one
+select count(*), sum(id), bit_xor(id) from t where match(c) against('banana');
+select count(*), sum(id), bit_xor(id) from t where match(c) against('banana');
+select count(*), sum(id), round(sum(s), 4) from (select id, match(c) against('banana cherry') s from t where match(c) against('banana cherry')) x;
+select count(*), sum(id), round(sum(s), 4) from (select id, match(c) against('banana cherry') s from t where match(c) against('banana cherry')) x;
+
+# top-k and an early stopped consumer, then the full result
+select id, round(match(c) against('cherry date'), 6) from t where match(c) against('cherry date') limit 5;
+select id, round(match(c) against('cherry date'), 6) from t where match(c) against('cherry date') limit 5;
+select id from t where match(c) against('cherry date') limit 3, 4;
+select count(*) from (select id from t where match(c) against('apple') limit 10) x;
+select count(*), sum(id) from t where match(c) against('apple');
+select count(*), sum(id) from t where match(c) against('apple');
+select count(*) from t where match(c) against('apple') and id % 3 = 1;
+
+# changes after the reused result
+insert into t values (1000, 'banana split');
+select count(*), sum(id), bit_xor(id) from t where match(c) against('banana');
+delete from t where id = 1;
+select count(*), sum(id), bit_xor(id) from t where match(c) against('banana');
+update t set c = 'plain text' where id = 2;
+select count(*), sum(id), bit_xor(id) from t where match(c) against('banana');
+
+# own uncommitted rows are visible, rolled back rows are not
+begin;
+insert into t values (2000, 'banana bread'), (2001, 'banana boat');
+select count(*), sum(id) from t where match(c) against('banana');
+select count(*), sum(id) from t where match(c) against('banana');
+rollback;
+select count(*), sum(id) from t where match(c) against('banana');
+
+alter system minor freeze;
+--sleep 5
+select count(*), sum(id), bit_xor(id) from t where match(c) against('banana');
+select count(*), sum(id), bit_xor(id) from t where match(c) against('banana');
+insert into t values (3000, 'banana again');
+select count(*), sum(id), bit_xor(id) from t where match(c) against('banana');
+
+drop database fts_result_reuse;
