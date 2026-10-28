@@ -72,6 +72,7 @@ public:
   void close();
 
 private:
+  bool check_unchanged(FileSqlError &error) const;
   bool read_record(std::vector<std::string> &fields, FileSqlError &error);
   bool parse_record(std::string_view record, std::vector<std::string> &fields,
                     FileSqlError &error) const;
@@ -85,6 +86,8 @@ private:
   std::vector<std::string> header_names_;
   std::vector<FileSqlColumn> schema_;
   int64_t line_ = 0;
+  uintmax_t file_size_ = 0;
+  std::filesystem::file_time_type file_time_{};
 };
 
 class JsonlReader
@@ -99,6 +102,7 @@ public:
   void close();
 
 private:
+  bool check_unchanged(FileSqlError &error) const;
   bool parse_object(std::string_view text,
                     std::vector<std::pair<std::string, FileSqlValue>> &object,
                     FileSqlError &error) const;
@@ -108,6 +112,8 @@ private:
   std::ifstream input_;
   std::vector<FileSqlColumn> schema_;
   int64_t line_ = 0;
+  uintmax_t file_size_ = 0;
+  std::filesystem::file_time_type file_time_{};
 };
 
 } // namespace file_sql

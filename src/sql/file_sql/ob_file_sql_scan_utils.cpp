@@ -22,6 +22,9 @@ namespace file_sql
 namespace
 {
 
+constexpr size_t MAX_RECORD_BYTES = 64ULL * 1024ULL * 1024ULL;
+constexpr size_t MAX_FIELDS = 4096;
+
 std::string trim(std::string_view value)
 {
   size_t first = 0;
@@ -188,6 +191,10 @@ bool CsvReader::open(const std::filesystem::path &path, bool header, char delimi
     set_error(error, 0, 0, "cannot open CSV file");
     return false;
   }
+  std::error_code stat_error;
+  file_size_ = std::filesystem::file_size(path_, stat_error);
+  file_time_ = std::filesystem::last_write_time(path_, stat_error);
+  if (stat_error) { set_error(error, 0, 0, "cannot stat CSV file"); return false; }
   line_ = 0;
   if (header_) {
     std::vector<std::string> fields;
@@ -212,6 +219,7 @@ bool CsvReader::open(const std::filesystem::path &path, bool header, char delimi
 
 bool CsvReader::read_record(std::vector<std::string> &fields, FileSqlError &error)
 {
+  if (!check_unchanged(error)) { return false; }
   fields.clear();
   std::string record;
   bool quoted = false;
@@ -227,6 +235,10 @@ bool CsvReader::read_record(std::vector<std::string> &fields, FileSqlError &erro
       return parse_record(record, fields, error);
     }
     record.push_back(c);
+    if (record.size() > MAX_RECORD_BYTES) {
+      set_error(error, line_ + 1, 0, "CSV record exceeds the resource limit");
+      return false;
+    }
   }
   if (quoted) { set_error(error, line_ + 1, 0, "unterminated quoted field"); return false; }
   if (read_any || !record.empty()) {
@@ -259,6 +271,22 @@ bool CsvReader::parse_record(std::string_view record, std::vector<std::string> &
   }
   if (quoted) { set_error(error, line_, 0, "unterminated quoted field"); return false; }
   fields.push_back(std::move(field));
+  if (fields.size() > MAX_FIELDS) {
+    set_error(error, line_, fields.size(), "CSV record has too many fields");
+    return false;
+  }
+  return true;
+}
+
+bool CsvReader::check_unchanged(FileSqlError &error) const
+{
+  std::error_code stat_error;
+  const auto size = std::filesystem::file_size(path_, stat_error);
+  const auto time = std::filesystem::last_write_time(path_, stat_error);
+  if (stat_error || size != file_size_ || time != file_time_) {
+    set_error(error, line_ + 1, 0, "file changed while it was being scanned");
+    return false;
+  }
   return true;
 }
 
@@ -329,6 +357,10 @@ bool JsonlReader::open(const std::filesystem::path &path, FileSqlError &error)
   path_ = path;
   input_.open(path_, std::ios::binary);
   if (!input_.is_open()) { set_error(error, 0, 0, "cannot open JSONL file"); return false; }
+  std::error_code stat_error;
+  file_size_ = std::filesystem::file_size(path_, stat_error);
+  file_time_ = std::filesystem::last_write_time(path_, stat_error);
+  if (stat_error) { set_error(error, 0, 0, "cannot stat JSONL file"); return false; }
   line_ = 0;
   return true;
 }
@@ -387,6 +419,11 @@ bool JsonlReader::infer_schema(std::vector<FileSqlColumn> &columns, FileSqlError
   std::vector<FileSqlType> types;
   std::string line;
   while (std::getline(input_, line)) {
+    if (!check_unchanged(error)) { return false; }
+    if (line.size() > MAX_RECORD_BYTES) {
+      set_error(error, line_, 0, "JSONL record exceeds the resource limit");
+      return false;
+    }
     ++line_;
     if (!line.empty() && line.back() == '\r') { line.pop_back(); }
     if (trim(line).empty()) { continue; }
@@ -413,6 +450,11 @@ bool JsonlReader::next(std::vector<FileSqlValue> &row, FileSqlError &error)
 {
   std::string line;
   while (std::getline(input_, line)) {
+    if (!check_unchanged(error)) { return false; }
+    if (line.size() > MAX_RECORD_BYTES) {
+      set_error(error, line_, 0, "JSONL record exceeds the resource limit");
+      return false;
+    }
     ++line_;
     if (!line.empty() && line.back() == '\r') { line.pop_back(); }
     if (trim(line).empty()) { continue; }
@@ -429,11 +471,24 @@ bool JsonlReader::next(std::vector<FileSqlValue> &row, FileSqlError &error)
   return false;
 }
 
+bool JsonlReader::check_unchanged(FileSqlError &error) const
+{
+  std::error_code stat_error;
+  const auto size = std::filesystem::file_size(path_, stat_error);
+  const auto time = std::filesystem::last_write_time(path_, stat_error);
+  if (stat_error || size != file_size_ || time != file_time_) {
+    set_error(error, line_ + 1, 0, "file changed while it was being scanned");
+    return false;
+  }
+  return true;
+}
+
 void JsonlReader::close()
 {
   if (input_.is_open()) { input_.close(); }
   schema_.clear();
   line_ = 0;
+  file_size_ = 0;
 }
 
 } // namespace file_sql
