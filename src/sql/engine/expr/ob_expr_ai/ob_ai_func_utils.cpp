@@ -1063,6 +1063,8 @@ int ObAIFuncUtils::get_complete_provider(ObIAllocator &allocator, const ObString
     complete_provider = OB_NEWx(ObOpenAIUtils::ObOpenAIComplete, &allocator);
   } else if (ob_provider_check(provider, ObAIFuncProviderUtils::DASHSCOPE)) {
     complete_provider = OB_NEWx(ObDashscopeUtils::ObDashscopeComplete, &allocator);
+  } else if (ob_provider_check(provider, ObAIFuncProviderUtils::OLLAMA)) {
+    complete_provider = OB_NEWx(ObOllamaUtils::ObOllamaComplete, &allocator);
   } else {
     ret = OB_NOT_SUPPORTED;
     LOG_USER_ERROR(OB_NOT_SUPPORTED, "this provider current is");
@@ -1086,6 +1088,8 @@ int ObAIFuncUtils::get_embed_provider(ObIAllocator &allocator, const ObString &p
     embed_provider = OB_NEWx(ObOpenAIUtils::ObOpenAIEmbed, &allocator);
   } else if (ob_provider_check(provider, ObAIFuncProviderUtils::DASHSCOPE)) {
     embed_provider = OB_NEWx(ObDashscopeUtils::ObDashscopeEmbed, &allocator);
+  } else if (ob_provider_check(provider, ObAIFuncProviderUtils::OLLAMA)) {
+    embed_provider = OB_NEWx(ObOllamaUtils::ObOllamaEmbed, &allocator);
   } else {
     ret = OB_NOT_SUPPORTED;
     LOG_USER_ERROR(OB_NOT_SUPPORTED, "this provider current is");
@@ -1591,14 +1595,73 @@ bool ObAIFuncPromptObjectUtils::is_valid_prompt_object(ObJsonObject *prompt_obje
     ObJsonArray *args_array = static_cast<ObJsonArray *>(args_node);
     for (int64_t i = 0; is_valid && i < args_array->element_count(); i++) {
       ObJsonNode *node = args_array->get_value(i);
-      if (OB_ISNULL(node)) {  
+      if (OB_ISNULL(node)) {
         is_valid = false;
-      } else if (node->json_type() != ObJsonNodeType::J_STRING && node->json_type() != ObJsonNodeType::J_OBJECT) {
+      } else if (!is_textualizable_json_node(node->json_type())) {
         is_valid = false;
       }
     }
   }
   return is_valid;
+}
+
+bool ObAIFuncPromptObjectUtils::is_textualizable_json_node(ObJsonNodeType node_type)
+{
+  switch (node_type) {
+    case ObJsonNodeType::J_STRING:
+    case ObJsonNodeType::J_OBJECT:
+    case ObJsonNodeType::J_ARRAY:
+    case ObJsonNodeType::J_BOOLEAN:
+    case ObJsonNodeType::J_DECIMAL:
+    case ObJsonNodeType::J_INT:
+    case ObJsonNodeType::J_UINT:
+    case ObJsonNodeType::J_DOUBLE:
+    case ObJsonNodeType::J_OFLOAT:
+    case ObJsonNodeType::J_ODOUBLE:
+    case ObJsonNodeType::J_ODECIMAL:
+      return true;
+    default:
+      return false;
+  }
+}
+
+int ObAIFuncPromptObjectUtils::json_node_to_text(ObIAllocator &allocator, ObJsonNode &node, ObString &text)
+{
+  int ret = OB_SUCCESS;
+  if (node.json_type() == ObJsonNodeType::J_STRING) {
+    ObJsonString *json_str = static_cast<ObJsonString *>(&node);
+    text = json_str->get_str();
+  } else if (!is_textualizable_json_node(node.json_type())) {
+    ret = OB_INVALID_ARGUMENT;
+  } else if (OB_FAIL(ObAIFuncJsonUtils::print_json_to_str(allocator, &node, text))) {
+  }
+  return ret;
+}
+
+bool ObAIFuncPromptObjectUtils::parse_placeholder(const ObString &template_str, int64_t pos,
+                                                  int64_t &index, int64_t &close_pos)
+{
+  bool is_placeholder = false;
+  const char *ptr = template_str.ptr();
+  int64_t len = template_str.length();
+  if (OB_ISNULL(ptr) || pos < 0 || pos >= len || ptr[pos] != '{') {
+    // 不是占位符起始位置
+  } else {
+    int64_t j = pos + 1;
+    int64_t value = 0;
+    int64_t digits = 0;
+    while (j < len && ptr[j] >= '0' && ptr[j] <= '9' && digits < 18) {
+      value = value * 10 + (ptr[j] - '0');
+      ++digits;
+      ++j;
+    }
+    if (digits > 0 && j < len && ptr[j] == '}') {
+      index = value;
+      close_pos = j;
+      is_placeholder = true;
+    }
+  }
+  return is_placeholder;
 }
 
 int ObAIFuncPromptObjectUtils::replace_all_str_args_in_template(ObIAllocator &allocator, ObJsonObject* prompt_object, ObString& replaced_prompt_str)
@@ -1607,7 +1670,7 @@ int ObAIFuncPromptObjectUtils::replace_all_str_args_in_template(ObIAllocator &al
   ObJsonString *template_json_str = NULL;
   ObJsonArray *args_array = NULL;
   ObString template_str;
-  ObString result_str;
+  ObArray<ObString> arg_texts;
   if (OB_ISNULL(prompt_object) ||
       OB_ISNULL(template_json_str = static_cast<ObJsonString *>(prompt_object->get_value(ObAIFuncPromptObjectUtils::prompt_template_key))) ||
       OB_ISNULL(args_array = static_cast<ObJsonArray *>(prompt_object->get_value(ObAIFuncPromptObjectUtils::prompt_args_key))) ||
@@ -1616,93 +1679,69 @@ int ObAIFuncPromptObjectUtils::replace_all_str_args_in_template(ObIAllocator &al
     ret = OB_INVALID_ARGUMENT;
   } else {
     uint64_t args_count = args_array->element_count();
-    int64_t max_result_len = template_str.length();
-    char *result_buf = NULL;
+    // 先把所有参数统一转换成文本，字符串取原值，其它 json 节点序列化后取文本
     for (uint64_t i = 0; OB_SUCC(ret) && i < args_count; i++) {
       ObJsonNode *arg_node = args_array->get_value(i);
-      if (OB_NOT_NULL(arg_node) && arg_node->json_type() == ObJsonNodeType::J_STRING) {
-        ObJsonString *arg_str = static_cast<ObJsonString *>(arg_node);
-        max_result_len += arg_str->get_str().length();
-      } else {
+      ObString arg_text;
+      if (OB_ISNULL(arg_node)) {
         ret = OB_INVALID_ARGUMENT;
+      } else if (OB_FAIL(json_node_to_text(allocator, *arg_node, arg_text))) {
+      } else if (OB_FAIL(arg_texts.push_back(arg_text))) {
       }
     }
-    if (OB_FAIL(ret)) {
-    } else if (OB_ISNULL(result_buf = static_cast<char *>(allocator.alloc(max_result_len)))) {
-      ret = OB_ALLOCATE_MEMORY_FAILED;
-    } else {
-      int64_t result_pos = 0;
+    if (OB_SUCC(ret)) {
       const char *template_ptr = template_str.ptr();
       int64_t template_len = template_str.length();
-      
+      // 占位符可能被重复引用，需要按出现次数累加长度
+      int64_t result_len = 0;
       for (int64_t i = 0; i < template_len && OB_SUCC(ret); i++) {
-        if (template_ptr[i] == '{') {
-          int64_t start_pos = i;
-          int64_t end_pos = start_pos;
-          bool found_end = false;
-          
-          for (int64_t j = start_pos + 1; j < template_len && !found_end; j++) {
-            if (template_ptr[j] == '}') {
-              end_pos = j;
-              found_end = true;
-            } else if (template_ptr[j] < '0' || template_ptr[j] > '9') {
-              break;
-            }
-          }
-          
-          if (found_end && end_pos > start_pos + 1) {
-            ObString index_str;
-            index_str.assign_ptr(template_ptr + start_pos + 1, static_cast<int32_t>(end_pos - start_pos - 1));
-            
-            int64_t index = 0;
-            bool valid_index = true;
-            for (int64_t k = 0; k < index_str.length() && valid_index; k++) {
-              if (index_str.ptr()[k] >= '0' && index_str.ptr()[k] <= '9') {
-                index = index * 10 + (index_str.ptr()[k] - '0');
-              } else {
-                valid_index = false;
-              }
-            }
-            
-            if (valid_index && index >= 0 && static_cast<uint64_t>(index) < args_count) {
-              ObJsonNode *arg_node = args_array->get_value(static_cast<uint64_t>(index));
-              if (OB_NOT_NULL(arg_node) && arg_node->json_type() == ObJsonNodeType::J_STRING) {
-                ObJsonString *arg_str = static_cast<ObJsonString *>(arg_node);
-                ObString arg_value = arg_str->get_str();
-                
-                if (result_pos + arg_value.length() <= max_result_len) {
-                  MEMCPY(result_buf + result_pos, arg_value.ptr(), arg_value.length());
-                  result_pos += arg_value.length();
-                } else {
-                  ret = OB_BUF_NOT_ENOUGH;
-                }
-              } else {
-                //do nothing
-              }
-              
-              i = end_pos;
-            } else {
-              ret = OB_INVALID_ARGUMENT;
-              LOG_USER_ERROR(OB_INVALID_ARGUMENT, "ai_prompt: invalid placeholder index");
-            }
+        int64_t index = 0;
+        int64_t close_pos = 0;
+        if (parse_placeholder(template_str, i, index, close_pos)) {
+          if (index < 0 || static_cast<uint64_t>(index) >= args_count) {
+            ret = OB_INVALID_ARGUMENT;
+            LOG_USER_ERROR(OB_INVALID_ARGUMENT, "ai_prompt: invalid placeholder index");
           } else {
-            if (result_pos < max_result_len) {
-              result_buf[result_pos++] = template_ptr[i];
-            } else {
-              ret = OB_BUF_NOT_ENOUGH;
-            }
+            result_len += arg_texts[index].length();
+            i = close_pos;
           }
         } else {
-          if (result_pos < max_result_len) {
-            result_buf[result_pos++] = template_ptr[i];
-          } else {
-            ret = OB_BUF_NOT_ENOUGH;
-          }
+          result_len += 1;
         }
       }
-      
       if (OB_SUCC(ret)) {
-        replaced_prompt_str.assign_ptr(result_buf, static_cast<int32_t>(result_pos));
+        char *result_buf = NULL;
+        int64_t buf_len = result_len > 0 ? result_len : 1;
+        if (OB_ISNULL(result_buf = static_cast<char *>(allocator.alloc(buf_len)))) {
+          ret = OB_ALLOCATE_MEMORY_FAILED;
+        } else {
+          int64_t result_pos = 0;
+          for (int64_t i = 0; i < template_len && OB_SUCC(ret); i++) {
+            int64_t index = 0;
+            int64_t close_pos = 0;
+            if (parse_placeholder(template_str, i, index, close_pos)) {
+              const ObString &arg_value = arg_texts[index];
+              if (result_pos + arg_value.length() <= result_len) {
+                if (arg_value.length() > 0) {
+                  MEMCPY(result_buf + result_pos, arg_value.ptr(), arg_value.length());
+                }
+                result_pos += arg_value.length();
+              } else {
+                ret = OB_BUF_NOT_ENOUGH;
+              }
+              i = close_pos;
+            } else {
+              if (result_pos < result_len) {
+                result_buf[result_pos++] = template_ptr[i];
+              } else {
+                ret = OB_BUF_NOT_ENOUGH;
+              }
+            }
+          }
+          if (OB_SUCC(ret)) {
+            replaced_prompt_str.assign_ptr(result_buf, static_cast<int32_t>(result_pos));
+          }
+        }
       }
     }
   }
