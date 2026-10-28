@@ -1,0 +1,23 @@
+{
+  "status": "pending_formal_results",
+  "question_id": 600072,
+  "base_commit": "76f871eb5a84b664d487b03b3412ce50194135b5",
+  "candidate_revision": 108,
+  "candidate_commit": null,
+  "pull_request_url": null,
+  "environment": null,
+  "dataset": null,
+  "configuration": null,
+  "official_speedup_target": null,
+  "official_quality_threshold": null,
+  "rounds": [],
+  "cpu_build_median_seconds": null,
+  "gpu_build_median_seconds": null,
+  "construction_speedup": null,
+  "cpu_recall_at_k": null,
+  "gpu_recall_at_k": null,
+  "no_cpu_fallback_proven": null,
+  "formal_evidence_paths": [],
+  "conclusion": null,
+  "validation_build_base_commit": "e6a26ec7c0f5adca3a4b07dfdc39a1b9bc53b925"
+}

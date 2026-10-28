@@ -1,0 +1,323 @@
+{
+  "base_commit": "76f871eb5a84b664d487b03b3412ce50194135b5",
+  "branch": "feat/amd-hipvs-hnsw-build108",
+  "formal_results_pending": true,
+  "manifest_excludes_itself": true,
+  "files": [
+    {
+      "path": "docs/amd/DIAGNOSTICS.md",
+      "size": 1407,
+      "sha256": "2ad88930fdf49dcf7a6457b13dfb03dfad8145a538edaa0dac57541ef78f6fc9"
+    },
+    {
+      "path": "docs/amd/PARAMETER_CONTRACT108.md",
+      "size": 4705,
+      "sha256": "6054306f7ec44c93b7a3f0a9caf9eaafbe5de2f46545bc8ab4a3da40efe56540"
+    },
+    {
+      "path": "docs/amd/README.md",
+      "size": 2851,
+      "sha256": "3c24fc70ddaa66b0adfca365554c2a2760d0d5f109797e4f057e9cf385a18034"
+    },
+    {
+      "path": "docs/amd/REPORT.md",
+      "size": 3831,
+      "sha256": "e8f81d35ae94906517f25e136d866663fd85dd4f28fe93d76fe6155cda045ab7"
+    },
+    {
+      "path": "docs/amd/SUBMISSION.md",
+      "size": 1732,
+      "sha256": "ea7f2925f5a820a743e20de905b1982be6c5a55937aaf77d34d0e768c77b06ee"
+    },
+    {
+      "path": "docs/amd/THIRD_PARTY_NOTICES.md",
+      "size": 1631,
+      "sha256": "9d3157fe6eebf836e97a6fa86b3b93cb9e7bead2e953ce3a280868f16c4fa84b"
+    },
+    {
+      "path": "docs/amd/evidence/cloud/bridge-fd-smoke.txt",
+      "size": 3829,
+      "sha256": "acc37ccd26984c09dd9a25486bfabba8295e2de8b5a67e2447027135496f223f"
+    },
+    {
+      "path": "docs/amd/evidence/cloud/environment.json",
+      "size": 4283,
+      "sha256": "09e3a2bfa65d0afd626c5266ceeaf7307a937afe2e9d5f43715013966dc485c8"
+    },
+    {
+      "path": "docs/amd/evidence/local/bridge-fd-fix-local-validation.json",
+      "size": 1006,
+      "sha256": "899a250954399f5d229765f1251d3e1cf0b549a26231bc4453fdf88c89841200"
+    },
+    {
+      "path": "docs/amd/evidence/local/bridge-local-validation.json",
+      "size": 865,
+      "sha256": "0bf1dcf73d9f4f5a5f2c4b106e20f4171d2f4093fa334061e86830162fe14161"
+    },
+    {
+      "path": "docs/amd/evidence/local/completion-proof-local-check.json",
+      "size": 1544,
+      "sha256": "e98b6669bba85685803510938cd721d94d1a07925ad58be52784393c2750cc67"
+    },
+    {
+      "path": "docs/amd/evidence/local/delivery108-secret-scan.json",
+      "size": 162,
+      "sha256": "90e392627fb31a9dfe80fe7a6ea4475d566cdbb17f5afceda51ca2f29b75a988"
+    },
+    {
+      "path": "docs/amd/evidence/local/export-receipt108.json",
+      "size": 496,
+      "sha256": "c9eced700cc77b3126408e87d361cb3732cece9be44c4f78030db7d2fe53dffd"
+    },
+    {
+      "path": "docs/amd/evidence/local/ground-truth-selftest-receipt.json",
+      "size": 2111,
+      "sha256": "31603a621a1bf9e2261d83d9c9d8393bddab691fafeba47767712e884ba3320c"
+    },
+    {
+      "path": "docs/amd/evidence/local/portable108/bridge-build-shell-syntax.txt",
+      "size": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "docs/amd/evidence/local/portable108/delivery108-portable-validation.json",
+      "size": 4790,
+      "sha256": "8205395d8b85f151394557ba2628eaf19151d8369066e5c6814465e5d961bc8e"
+    },
+    {
+      "path": "docs/amd/evidence/local/portable108/documented-exact-gt-small.txt",
+      "size": 117,
+      "sha256": "6ddffedf67bbbc3fcbb8feaedc9c8c622de85e94dda550ddfd4badbed51b590e"
+    },
+    {
+      "path": "docs/amd/evidence/local/portable108/documented-generation-small.txt",
+      "size": 404,
+      "sha256": "64179b250c07764646ce14fc9e8f39786b3ed0211d0e96c4cdba4a69c23ba225"
+    },
+    {
+      "path": "docs/amd/evidence/local/portable108/help-completion_proof.txt",
+      "size": 1159,
+      "sha256": "9b659872ad926faa664f7f9d09d4aad7011768e9d004e1cc396e253373b5c85e"
+    },
+    {
+      "path": "docs/amd/evidence/local/portable108/help-evaluate_files_ctypes.txt",
+      "size": 551,
+      "sha256": "cc33101e7e25cab2baec1eac6e9733ef4af6159c1e802771f8d2c5fae355689f"
+    },
+    {
+      "path": "docs/amd/evidence/local/portable108/help-generate_dataset.txt",
+      "size": 370,
+      "sha256": "f834149d80a2a929112783a967bf5588fc42e0baaef9404046bdeb4399cb67ba"
+    },
+    {
+      "path": "docs/amd/evidence/local/portable108/help-prepare_ground_truth.txt",
+      "size": 808,
+      "sha256": "b4b7d9782343769ed163541b0fa9891b38046d1d91fdd6fedc78caaeeb8612a9"
+    },
+    {
+      "path": "docs/amd/evidence/local/portable108/help-smoke_ctypes.txt",
+      "size": 452,
+      "sha256": "2df703240423c5f6dfd4f13fbb1383ab9046755014893944ac235888bff99d89"
+    },
+    {
+      "path": "docs/amd/evidence/local/portable108/help-sql_benchmark.txt",
+      "size": 2010,
+      "sha256": "09c86d62acf04d57cf1b07f51a650de3b87b3dcba02d0c16795664456ea12486"
+    },
+    {
+      "path": "docs/amd/evidence/local/portable108/snapshot_io_contract.txt",
+      "size": 290,
+      "sha256": "3ec7e8da2de6d40e89ca2a3b13122a45753740113c3a8ff3403a38a0b92f921d"
+    },
+    {
+      "path": "docs/amd/evidence/local/portable108/test_completion_proof.txt",
+      "size": 580,
+      "sha256": "4ea0f91565a2d561aaa5b6770cb3d9aeb9397bc36b9a080bc320b66b83ad8153"
+    },
+    {
+      "path": "docs/amd/evidence/local/portable108/test_dispatch.txt",
+      "size": 511,
+      "sha256": "b70ee2f99b7728ff1e049e835e1f7f3c7babe96726e13d7d39b991abdf1c07f9"
+    },
+    {
+      "path": "docs/amd/evidence/local/portable108/test_prepare_ground_truth.txt",
+      "size": 1107,
+      "sha256": "d1dd47cf72eec4607221f8334a4ee8225a327f316b82465ca3d96ac548637f92"
+    },
+    {
+      "path": "docs/amd/evidence/local/receipt108.json",
+      "size": 41518,
+      "sha256": "250bfb653fa24125f389c81c1e018526792481564cfa9afdff3f9da849e4ec73"
+    },
+    {
+      "path": "docs/amd/evidence/local/semantic-regression108-receipt.json",
+      "size": 1019,
+      "sha256": "639adfb7d20d883f8c2af93b7f35f503f9ac21d7851f6e499c9078a258b00bf6"
+    },
+    {
+      "path": "docs/amd/evidence/local/smoke108-receipt.json",
+      "size": 9091,
+      "sha256": "0807fb3e9371aa85eeab7c95b0ddd2e0695f9e8ea2b5d7d9b52c88718d74d4ac"
+    },
+    {
+      "path": "docs/amd/evidence/local/sql-benchmark-local-check.json",
+      "size": 1024,
+      "sha256": "2a23ee3a6613e0ba26f5e41ce31b9b5f8d3a680c04528980ce3468245510bafa"
+    },
+    {
+      "path": "docs/amd/licenses/cuvs-25.06-LICENSE.txt",
+      "size": 11348,
+      "sha256": "756005f963846334943e8bfc08ef98cd254257d8467ac7a7ffd42a1be262f442"
+    },
+    {
+      "path": "docs/amd/licenses/seekdb-author-v5-LICENSE.txt",
+      "size": 11357,
+      "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+    },
+    {
+      "path": "docs/amd/provenance/bridge-reference-downloads.json",
+      "size": 3993,
+      "sha256": "af496adc18afc2b2b12663869030536d725ed03936bd79d80eaa6b74a4822887"
+    },
+    {
+      "path": "docs/amd/provenance/cuvs108-backport.patch",
+      "size": 49718,
+      "sha256": "1e199f56280f60e4f4521a6d185ee36eb784d57145fdebed89d9577a34e5aa77"
+    },
+    {
+      "path": "docs/amd/provenance/enum-usage-audit.json",
+      "size": 2587,
+      "sha256": "c1bf94ce26e914405c4c2982ef566b21eeecf6be1d56522ebd92197072aa30b1"
+    },
+    {
+      "path": "docs/amd/provenance/manifest108.json",
+      "size": 4780,
+      "sha256": "30d6c2b83f0f27d66e3ef24d7941274438992732ae3509b13c20102f7f01eb6f"
+    },
+    {
+      "path": "docs/amd/provenance/official-requirements-snapshot.txt",
+      "size": 15145,
+      "sha256": "ea03136e6f3a402adb988ac66b2e258b26582a765f5a0a34319d619622b32034"
+    },
+    {
+      "path": "docs/amd/provenance/public-base-audit108.json",
+      "size": 1390,
+      "sha256": "2e72428bd5d74d87e759bca8e2ef34ae5de888414806d8b65104ac343aeaa055"
+    },
+    {
+      "path": "docs/amd/provenance/sources-provenance.json",
+      "size": 1076,
+      "sha256": "06b6a920ef0fde96e18268e50591cd5c1f63afce4f4339f6e47896b4a45cc425"
+    },
+    {
+      "path": "docs/amd/provenance/staged-inputs.json",
+      "size": 8928,
+      "sha256": "8e7ddc9478532e25a419ccf5d45fe2cdd6a634e46f316e8469b216f168e65aed"
+    },
+    {
+      "path": "docs/amd/results.json",
+      "size": 714,
+      "sha256": "d14a4f7759dd908994df842b06a8ce40b738db71168294cb370fc43237c800d6"
+    },
+    {
+      "path": "src/oblib/lib/vector/ob_cuvs_hooks.h",
+      "size": 222,
+      "sha256": "511e43bbec7909ae6642200dab9a8e4fc0ba2ed2ea2b1d3affbc18aff9ff0313"
+    },
+    {
+      "path": "src/oblib/lib/vector/ob_vsag_adaptor.cpp",
+      "size": 85970,
+      "sha256": "85dbc1bd6e23837af1d7d0fe9e90c8408fc5f8a7c518e1a4fe539632ce0575e5"
+    },
+    {
+      "path": "src/observer/vector_index/ob_plugin_vector_index_adaptor.cpp",
+      "size": 201404,
+      "sha256": "f1269d50a8568f1684de34fc8a01de55e98d48131945bfba24d88d90bc1630b5"
+    },
+    {
+      "path": "src/observer/vector_index/ob_vector_index_util.cpp",
+      "size": 286963,
+      "sha256": "342429c9aa68b40309a0875d585894a6c5740dee7991178ee47fa6e03faf8319"
+    },
+    {
+      "path": "tools/benchmark/amd_hnsw/README.md",
+      "size": 4342,
+      "sha256": "5416367002e3633c475ab16adc2332b76e8ae625e8737fd97dbf5cf52f4ba79a"
+    },
+    {
+      "path": "tools/benchmark/amd_hnsw/completion_proof.py",
+      "size": 18474,
+      "sha256": "f00dd54003e57864af93ffff94b65ecfc1195effd42b2d5cbd3bd66a0cd6b44c"
+    },
+    {
+      "path": "tools/benchmark/amd_hnsw/contract.example.json",
+      "size": 1074,
+      "sha256": "ebe4ac9ea7d0b5815301aeacfcb82d59d593c551efa36a307d482e726af4284c"
+    },
+    {
+      "path": "tools/benchmark/amd_hnsw/generate_dataset.py",
+      "size": 1776,
+      "sha256": "c58b73d7540862fcb53f953e944234493547fd209a5b5fe8e43c8eaf4028570e"
+    },
+    {
+      "path": "tools/benchmark/amd_hnsw/prepare_ground_truth.py",
+      "size": 8919,
+      "sha256": "986b3a82dee52dcf1fc5538f815bc7812f1a24df44d943298cc5235cc0442b24"
+    },
+    {
+      "path": "tools/benchmark/amd_hnsw/sql_benchmark.py",
+      "size": 26669,
+      "sha256": "280ace5911ebd1af83bd59b9188852f28e86d4aa669f79507d94c9131bccee1e"
+    },
+    {
+      "path": "tools/hipvs_bridge/README.md",
+      "size": 3468,
+      "sha256": "934b093fa177476581cb17270b26e4900de65ef03340f57f13d0edc3b25c3f7c"
+    },
+    {
+      "path": "tools/hipvs_bridge/build.sh",
+      "size": 1353,
+      "sha256": "28c07d23c5ce572faebd5fce860c6df34f5bc365e9b041fddc39dd535fc9599f"
+    },
+    {
+      "path": "tools/hipvs_bridge/evaluate_files_ctypes.py",
+      "size": 9367,
+      "sha256": "2bf5062615755c379cd97a26d1f87a947ee63d21e72c70fe97808d155f1e3998"
+    },
+    {
+      "path": "tools/hipvs_bridge/seekdb_cuvs_bridge.c",
+      "size": 19331,
+      "sha256": "864e7aa6fd12c0903108556d6b49fd683f105781b58bb0a8b0867f4719dfe220"
+    },
+    {
+      "path": "tools/hipvs_bridge/seekdb_cuvs_bridge.h",
+      "size": 1240,
+      "sha256": "c337c5a749c42ea3eb10daad91ca71a49927b0c5c4d064c94483d8c9cff34d66"
+    },
+    {
+      "path": "tools/hipvs_bridge/smoke_ctypes.py",
+      "size": 15622,
+      "sha256": "3fa93fd5ad9ec7d58d7f798e1c8cef025735e82e5512b529f276aa71ef95cc9f"
+    },
+    {
+      "path": "unittest/amd_hipvs/snapshot_io_contract.py",
+      "size": 7269,
+      "sha256": "8f6f26b5ed335fc32383d9c4d037a1c41e78727f8997806c01c2403986982f87"
+    },
+    {
+      "path": "unittest/amd_hipvs/test_completion_proof.py",
+      "size": 9230,
+      "sha256": "6cef34b4b04edda1ac11e1c2c4b10237e1ffc0b113ee41cfa3f00304bdea18ba"
+    },
+    {
+      "path": "unittest/amd_hipvs/test_dispatch.py",
+      "size": 6364,
+      "sha256": "909946352120c4e1c178813e9d12adc8535560863d1098e2edb66f45f8b6b5ac"
+    },
+    {
+      "path": "unittest/amd_hipvs/test_prepare_ground_truth.py",
+      "size": 4484,
+      "sha256": "10bd4f874f9e9a9c25c4d74939d06c98ca3264659e080062c8071e17cc19f5d0"
+    }
+  ]
+}
