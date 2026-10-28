@@ -175,8 +175,8 @@ struct ObDatumDesc {
   bool is_ext() const { return flag_ == FlagType::EXT; }
   void set_outrow() { null_ = 0; flag_ = FlagType::OUTROW; }
   bool is_outrow() const { return flag_ == FlagType::OUTROW; }
-  
-  void set_flag(const FlagType &flag_type) { flag_ = flag_type; } 
+
+  void set_flag(const FlagType &flag_type) { flag_ = flag_type; }
   void set_has_lob_header() { flag_ = FlagType::HAS_LOB_HEADER; }
   bool has_lob_header() const { return flag_ == FlagType::HAS_LOB_HEADER; }
   void set_flag_none() { flag_ = FlagType::NONE; }
@@ -352,7 +352,7 @@ public:
     return inner_value.deserialize(ptr_, len_, pos);
   }
   inline void get_mem_lob(ObLobLocatorV2 &lob_locator) const
-  { 
+  {
     lob_locator.assign_ptr(mem_lob_, len_, has_lob_header());
   }
   inline const ObLobCommon &get_lob_data() const { return *lob_data_; }
@@ -422,7 +422,7 @@ public:
   OB_INLINE void set_decimal_int(const ObDecimalInt *decint, int32_t len);
   OB_INLINE void set_decimal_int_shallow(const ObDecimalInt *decint, int32_t len);
   template<typename T>
-  OB_INLINE void set_decimal_int(const T &decint) 
+  OB_INLINE void set_decimal_int(const T &decint)
   {
     memcpy(no_cv(ptr_), &decint, sizeof(T));
     pack_ = sizeof(T);
