@@ -65,7 +65,6 @@
 #include "observer/virtual_table/ob_all_virtual_tx_scheduler_stat.h"
 #include "observer/virtual_table/ob_all_virtual_tx_ctx_mgr_stat.h"
 #include "observer/virtual_table/ob_all_virtual_engine_table.h"
-#include "observer/virtual_table/ob_all_virtual_files_table.h"
 #include "observer/virtual_table/ob_all_virtual_ls_info.h"
 #include "observer/virtual_table/ob_plan_cache_plan_explain.h"
 #include "observer/virtual_table/ob_all_virtual_ps_stat.h"
@@ -73,15 +72,12 @@
 #include "observer/virtual_table/ob_show_processlist.h"
 #include "observer/virtual_table/ob_all_virtual_session_info.h"
 #include "observer/virtual_table/ob_all_virtual_memory_info.h"
-#include "observer/virtual_table/ob_all_virtual_raid_stat.h"
 #include "observer/virtual_table/ob_all_virtual_tablet_sstable_macro_info.h"
 #include "observer/virtual_table/ob_all_virtual_sys_task_status.h"
 #include "observer/virtual_table/ob_all_virtual_macro_block_marker_status.h"
 #include "observer/virtual_table/ob_all_virtual_lock_wait_stat.h"
 #include "observer/virtual_table/ob_all_virtual_long_ops_status.h"
 #include "observer/virtual_table/ob_all_virtual_memstore_allocator_info.h"
-#include "observer/virtual_table/ob_all_virtual_server_object_pool.h"
-#include "observer/virtual_table/ob_all_virtual_io_stat.h"
 #include "observer/virtual_table/ob_all_virtual_bad_block_table.h"
 #include "observer/virtual_table/ob_all_virtual_id_service.h"
 #include "observer/virtual_table/ob_all_virtual_timestamp_service.h"
@@ -100,7 +96,6 @@
 #include "observer/virtual_table/ob_all_virtual_px_worker_stat.h"
 #include "observer/virtual_table/ob_all_virtual_tablet_store_stat.h"
 #include "observer/virtual_table/ob_all_virtual_server_schema_info.h"
-#include "observer/virtual_table/ob_all_virtual_memory_context_stat.h"
 #include "observer/virtual_table/ob_all_virtual_dump_info.h"
 #include "observer/virtual_table/ob_all_virtual_dag_warning_history.h"
 #include "observer/virtual_table/ob_all_virtual_dag.h"
@@ -607,15 +602,6 @@ int ObVTIterCreator::create_vt_iter(ObVTableScanParam &params,
             }
             break;
           }
-          case OB_ALL_VIRTUAL_RAID_STAT_TID: {
-            ObAllVirtualRaidStat *raid_stat = NULL;
-            if (OB_FAIL(NEW_VIRTUAL_TABLE(ObAllVirtualRaidStat, raid_stat))) {
-            } else if (OB_FAIL(raid_stat->init(addr_))) {
-            } else {
-              vt_iter = static_cast<ObVirtualTableIterator *>(raid_stat);
-            }
-            break;
-          }
           case OB_ALL_VIRTUAL_TABLET_DDL_KV_INFO_TID: {
             ObAllVirtualTabletDDLKVInfo *ddl_kv_info = NULL;
             if (OB_FAIL(NEW_VIRTUAL_TABLE(ObAllVirtualTabletDDLKVInfo, ddl_kv_info))) {
@@ -1040,13 +1026,6 @@ int ObVTIterCreator::create_vt_iter(ObVTableScanParam &params,
             }
             break;
           }
-          case OB_ALL_VIRTUAL_SERVER_OBJECT_POOL_TID: {
-            ObAllVirtualServerObjectPool *server_object_pool = NULL;
-            if (OB_SUCC(NEW_VIRTUAL_TABLE(ObAllVirtualServerObjectPool, server_object_pool))) {
-              vt_iter = static_cast<ObVirtualTableIterator *>(server_object_pool);
-            }
-            break;
-          }
           case OB_ALL_VIRTUAL_ENGINE_TID: {
             ObAllVirtualEngineTable *all_engines_table = NULL;
             if (OB_SUCC(NEW_VIRTUAL_TABLE(ObAllVirtualEngineTable, all_engines_table))) {
@@ -1082,14 +1061,6 @@ int ObVTIterCreator::create_vt_iter(ObVTableScanParam &params,
         END_CREATE_VT_ITER_SWITCH_LAMBDA
 
         BEGIN_CREATE_VT_ITER_SWITCH_LAMBDA
-          case OB_ALL_VIRTUAL_FILES_TID: {
-            ObAllVirtualFilesTable *all_files_table = NULL;
-            if (OB_SUCC(NEW_VIRTUAL_TABLE(ObAllVirtualFilesTable, all_files_table))) {
-              all_files_table->set_allocator(&allocator);
-              vt_iter = static_cast<ObVirtualTableIterator *>(all_files_table);
-            }
-            break;
-          }
           case OB_ALL_VIRTUAL_TABLET_SSTABLE_MACRO_INFO_TID: {
             ObAllVirtualTabletSSTableMacroInfo *sstable_macro_info = NULL;
             if (OB_SUCC(NEW_VIRTUAL_TABLE(ObAllVirtualTabletSSTableMacroInfo, sstable_macro_info))) {
@@ -1185,14 +1156,6 @@ int ObVTIterCreator::create_vt_iter(ObVTableScanParam &params,
             }
             break;
           }
-          case OB_ALL_VIRTUAL_IO_STAT_TID: {
-            ObAllVirtualIOStat *all_io_stat = NULL;
-            if (OB_FAIL(NEW_VIRTUAL_TABLE(ObAllVirtualIOStat, all_io_stat))) {
-            } else {
-              vt_iter = static_cast<ObAllVirtualIOStat *>(all_io_stat);
-            }
-            break;
-          }
           case OB_ALL_VIRTUAL_BAD_BLOCK_TABLE_TID: {
             ObVirtualBadBlockTable *bad_block_table = NULL;
             if (OB_SUCC(NEW_VIRTUAL_TABLE(ObVirtualBadBlockTable, bad_block_table))) {
@@ -1279,14 +1242,6 @@ int ObVTIterCreator::create_vt_iter(ObVTableScanParam &params,
         END_CREATE_VT_ITER_SWITCH_LAMBDA
 
         BEGIN_CREATE_VT_ITER_SWITCH_LAMBDA
-          case OB_ALL_VIRTUAL_MEMORY_CONTEXT_STAT_TID: {
-            ObAllVirtualMemoryContextStat *memory_context_stat = NULL;
-            if (OB_FAIL(NEW_VIRTUAL_TABLE(ObAllVirtualMemoryContextStat, memory_context_stat))) {
-            } else {
-              vt_iter = static_cast<ObVirtualTableIterator *>(memory_context_stat);
-            }
-            break;
-          }
           case OB_ALL_VIRTUAL_DUMP_INFO_TID: {
             ObAllVirtualDumpInfo *dump_info = NULL;
             if (OB_FAIL(NEW_VIRTUAL_TABLE(ObAllVirtualDumpInfo, dump_info))) {

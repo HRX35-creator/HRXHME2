@@ -339,11 +339,10 @@ static struct VarsInit{
 
     [&] (){
       ObSysVars[15].default_value_ = "281018368" ;
-      ObSysVars[15].on_update_func_ = "ObSysVarOnUpdateFuncs::update_sql_mode" ;
+      ObSysVars[15].info_ = "" ;
       ObSysVars[15].name_ = "sql_mode" ;
       ObSysVars[15].data_type_ = ObUInt64Type ;
       ObSysVars[15].to_show_str_func_ = "ObSysVarToStrFuncs::to_str_sql_mode" ;
-      ObSysVars[15].info_ = "" ;
       ObSysVars[15].flags_ = ObSysVarFlag::GLOBAL_SCOPE | ObSysVarFlag::SESSION_SCOPE | ObSysVarFlag::INFLUENCE_PLAN | ObSysVarFlag::NEED_SERIALIZE | ObSysVarFlag::MYSQL_ONLY ;
       ObSysVars[15].base_class_ = "ObSqlModeVar" ;
       ObSysVars[15].to_select_obj_func_ = "ObSysVarToObjFuncs::to_obj_sql_mode" ;

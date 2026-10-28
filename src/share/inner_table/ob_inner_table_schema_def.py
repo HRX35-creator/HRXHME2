@@ -3369,24 +3369,7 @@ def_table_schema(
 
 # 11076: __all_virtual_tenant_disk_stat # abandoned in 4.0
 
-def_table_schema(
-  owner = 'chaser.ch',
-  table_name     = '__all_virtual_io_stat',
-  table_id       = '11080',
-  table_type     = 'VIRTUAL_TABLE',
-  gm_columns     = [],
-  rowkey_columns = [
-      ],
-
-  normal_columns = [
-      ('fd', 'int', 'false'),
-      ('disk_type', 'varchar:OB_MAX_DISK_TYPE_LENGTH'),
-      ('sys_io_up_limit_in_mb', 'int'),
-      ('sys_io_bandwidth_in_mb', 'int'),
-      ('sys_io_low_watermark_in_mb', 'int'),
-      ('sys_io_high_watermark_in_mb', 'int'),
-      ('io_bench_result', 'varchar:OB_MAX_IO_BENCH_RESULT_LENGTH')
-  ],  )
+# 11080: __all_virtual_io_stat # removed (always-empty virtual table; ID reserved)
 
 
 def_table_schema(
@@ -3414,30 +3397,7 @@ def_table_schema(
   )
 
 
-def_table_schema(
-  owner = 'nijia.nj',
-  table_name     = '__all_virtual_server_object_pool',
-  table_id       = '11084',
-  table_type = 'VIRTUAL_TABLE',
-  gm_columns     = [],
-  rowkey_columns = [
-      ('object_type', 'varchar:OB_MAX_SYS_PARAM_VALUE_LENGTH'),
-      ('arena_id', 'int')
-  ],
-
-  normal_columns = [
-      ('lock', 'int'),
-      ('borrow_count', 'int'),
-      ('return_count', 'int'),
-      ('miss_count', 'int'),
-      ('miss_return_count', 'int'),
-      ('free_num', 'int'),
-      ('last_borrow_ts', 'int'),
-      ('last_return_ts', 'int'),
-      ('last_miss_ts', 'int'),
-      ('last_miss_return_ts', 'int'),
-      ('next', 'int')
-  ],  )
+# 11084: __all_virtual_server_object_pool # removed (always-empty virtual table; ID reserved)
 
 def_table_schema(
   owner = 'shanyan.g',
@@ -3508,26 +3468,7 @@ def_table_schema(
     ("schema_count", 'int')
                    ],  )
 
-def_table_schema(
-  owner = 'nijia.nj',
-  table_name     = '__all_virtual_memory_context_stat',
-  table_id       = '11094',
-  table_type = 'VIRTUAL_TABLE',
-  gm_columns = [],
-  rowkey_columns = [
-  ],
-
-  normal_columns = [
-    ('entity', 'varchar:128'),
-    ('p_entity', 'varchar:128'),
-    ('hold', 'bigint:20'),
-    ('malloc_hold', 'bigint:20'),
-    ('malloc_used', 'bigint:20'),
-    ('arena_hold', 'bigint:20'),
-    ('arena_used', 'bigint:20'),
-    ('create_time', 'timestamp'),
-    ('location', 'varchar:512')
-  ],  )
+# 11094: __all_virtual_memory_context_stat # removed (always-empty virtual table; ID reserved)
 
 def_table_schema(
   owner = 'nijia.nj',
@@ -4341,25 +4282,7 @@ def_table_schema(
 
 # 12120: __all_virtual_sequence_object_history # removed (single-tenant: iterate VT mechanism deleted)
 
-def_table_schema(
-    owner = 'yongle.xh',
-    table_name    = '__all_virtual_raid_stat',
-    table_id      = '12121',
-    table_type = 'VIRTUAL_TABLE',
-    gm_columns = [],
-    rowkey_columns = [
-    ],
-    normal_columns = [
-      ('disk_idx', 'int'),
-      ('install_seq', 'int'),
-      ('data_num', 'int'),
-      ('parity_num', 'int'),
-      ('create_ts', 'int'),
-      ('finish_ts', 'int'),
-      ('alias_name', 'varchar:MAX_PATH_SIZE'),
-      ('status', 'varchar:OB_STATUS_LENGTH'),
-      ('percent', 'int')
-  ],  )
+# 12121: __all_virtual_raid_stat # removed (always-empty virtual table; ID reserved)
 
 # 12122: __all_virtual_server_log_meta # abandoned in 4.0
 
@@ -4681,54 +4604,7 @@ def_table_schema(
 # 12195: __all_virtual_constraint_column_history # removed (single-tenant: iterate VT mechanism deleted)
 
 
-def_table_schema(
-  owner = 'xiaochu.yh',
-  table_name     = '__all_virtual_files',
-  table_id       = '12196',
-  table_type = 'VIRTUAL_TABLE',
-  gm_columns = [],
-  rowkey_columns = [],
-  normal_columns = [
-    ('FILE_ID','bigint:4','false','0'),
-    ('FILE_NAME','varchar:64','true','NULL'),
-    ('FILE_TYPE','varchar:20','false',''),
-    ('TABLESPACE_NAME','varchar:64','true','NULL'),
-    ('TABLE_CATALOG','varchar:64','false',''),
-    ('TABLE_SCHEMA','varchar:64','true','NULL'),
-    ('TABLE_NAME','varchar:64','true','NULL'),
-    ('LOGFILE_GROUP_NAME','varchar:64','true','NULL'),
-    ('LOGFILE_GROUP_NUMBER','bigint:4','true','NULL'),
-    ('ENGINE','varchar:64','false',''),
-    ('FULLTEXT_KEYS','varchar:64','true','NULL'),
-    ('DELETED_ROWS','bigint:4','true','NULL'),
-    ('UPDATE_COUNT','bigint:4','true','NULL'),
-    ('FREE_EXTENTS','bigint:4','true','NULL'),
-    ('TOTAL_EXTENTS','bigint:4','true','NULL'),
-    ('EXTENT_SIZE','bigint:4','false','0'),
-    ('INITIAL_SIZE','uint','true','NULL'),
-    ('MAXIMUM_SIZE','uint','true','NULL'),
-    ('AUTOEXTEND_SIZE','uint','true','NULL'),
-    ('CREATION_TIME','timestamp','true','NULL'),
-    ('LAST_UPDATE_TIME','timestamp','true','NULL'),
-    ('LAST_ACCESS_TIME','timestamp','true','NULL'),
-    ('RECOVER_TIME','bigint:4','true','NULL'),
-    ('TRANSACTION_COUNTER','bigint:4','true','NULL'),
-    ('VERSION','uint','true','NULL'),
-    ('ROW_FORMAT','varchar:10','true','NULL'),
-    ('TABLE_ROWS','uint','true','NULL'),
-    ('AVG_ROW_LENGTH','uint','true','NULL'),
-    ('DATA_LENGTH','uint','true','NULL'),
-    ('MAX_DATA_LENGTH','uint','true','NULL'),
-    ('INDEX_LENGTH','uint','true','NULL'),
-    ('DATA_FREE','uint','true','NULL'),
-    ('CREATE_TIME','timestamp','true','NULL'),
-    ('UPDATE_TIME','timestamp','true','NULL'),
-    ('CHECK_TIME','timestamp','true','NULL'),
-    ('CHECKSUM','uint','true','NULL'),
-    ('STATUS','varchar:20','false',''),
-    ('EXTRA','varchar:255','true','NULL')
-  ]
-  )
+# 12196: __all_virtual_files # removed (always-empty virtual table; ID reserved)
 
 # 12197: abandoned # INFORMATION_SCHEMA.FILES, which is moved to 21157
 
@@ -8068,45 +7944,45 @@ def_table_schema(
   table_type = 'SYSTEM_VIEW',
   gm_columns = [],
   rowkey_columns = [],
-  view_definition = """SELECT FILE_ID,
-                              FILE_NAME,
-                              FILE_TYPE,
-                              TABLESPACE_NAME,
-                              TABLE_CATALOG,
-                              TABLE_SCHEMA,
-                              TABLE_NAME,
-                              LOGFILE_GROUP_NAME,
-                              LOGFILE_GROUP_NUMBER,
-                              ENGINE,
-                              FULLTEXT_KEYS,
-                              DELETED_ROWS,
-                              UPDATE_COUNT,
-                              FREE_EXTENTS,
-                              TOTAL_EXTENTS,
-                              EXTENT_SIZE,
-                              INITIAL_SIZE,
-                              MAXIMUM_SIZE,
-                              AUTOEXTEND_SIZE,
-                              CREATION_TIME,
-                              LAST_UPDATE_TIME,
-                              LAST_ACCESS_TIME,
-                              RECOVER_TIME,
-                              TRANSACTION_COUNTER,
-                              VERSION,
-                              ROW_FORMAT,
-                              TABLE_ROWS,
-                              AVG_ROW_LENGTH,
-                              DATA_LENGTH,
-                              MAX_DATA_LENGTH,
-                              INDEX_LENGTH,
-                              DATA_FREE,
-                              CREATE_TIME,
-                              UPDATE_TIME,
-                              CHECK_TIME,
-                              CHECKSUM,
-                              STATUS,
-                              EXTRA
-                   FROM oceanbase.__all_virtual_files""".replace("\n", " "),
+  view_definition = """SELECT CAST(0 AS SIGNED) AS FILE_ID,
+                              CAST(NULL AS CHAR(64)) AS FILE_NAME,
+                              CAST('' AS CHAR(20)) AS FILE_TYPE,
+                              CAST(NULL AS CHAR(64)) AS TABLESPACE_NAME,
+                              CAST('' AS CHAR(64)) AS TABLE_CATALOG,
+                              CAST(NULL AS CHAR(64)) AS TABLE_SCHEMA,
+                              CAST(NULL AS CHAR(64)) AS TABLE_NAME,
+                              CAST(NULL AS CHAR(64)) AS LOGFILE_GROUP_NAME,
+                              CAST(NULL AS SIGNED) AS LOGFILE_GROUP_NUMBER,
+                              CAST('' AS CHAR(64)) AS ENGINE,
+                              CAST(NULL AS CHAR(64)) AS FULLTEXT_KEYS,
+                              CAST(NULL AS SIGNED) AS DELETED_ROWS,
+                              CAST(NULL AS SIGNED) AS UPDATE_COUNT,
+                              CAST(NULL AS SIGNED) AS FREE_EXTENTS,
+                              CAST(NULL AS SIGNED) AS TOTAL_EXTENTS,
+                              CAST(0 AS SIGNED) AS EXTENT_SIZE,
+                              CAST(NULL AS UNSIGNED) AS INITIAL_SIZE,
+                              CAST(NULL AS UNSIGNED) AS MAXIMUM_SIZE,
+                              CAST(NULL AS UNSIGNED) AS AUTOEXTEND_SIZE,
+                              CAST(NULL AS DATETIME(6)) AS CREATION_TIME,
+                              CAST(NULL AS DATETIME(6)) AS LAST_UPDATE_TIME,
+                              CAST(NULL AS DATETIME(6)) AS LAST_ACCESS_TIME,
+                              CAST(NULL AS SIGNED) AS RECOVER_TIME,
+                              CAST(NULL AS SIGNED) AS TRANSACTION_COUNTER,
+                              CAST(NULL AS UNSIGNED) AS VERSION,
+                              CAST(NULL AS CHAR(10)) AS ROW_FORMAT,
+                              CAST(NULL AS UNSIGNED) AS TABLE_ROWS,
+                              CAST(NULL AS UNSIGNED) AS AVG_ROW_LENGTH,
+                              CAST(NULL AS UNSIGNED) AS DATA_LENGTH,
+                              CAST(NULL AS UNSIGNED) AS MAX_DATA_LENGTH,
+                              CAST(NULL AS UNSIGNED) AS INDEX_LENGTH,
+                              CAST(NULL AS UNSIGNED) AS DATA_FREE,
+                              CAST(NULL AS DATETIME(6)) AS CREATE_TIME,
+                              CAST(NULL AS DATETIME(6)) AS UPDATE_TIME,
+                              CAST(NULL AS DATETIME(6)) AS CHECK_TIME,
+                              CAST(NULL AS UNSIGNED) AS CHECKSUM,
+                              CAST('' AS CHAR(20)) AS STATUS,
+                              CAST(NULL AS CHAR(255)) AS EXTRA
+                   FROM DUAL WHERE 0 = 1""".replace("\n", " "),
   normal_columns = [
   ]
   )

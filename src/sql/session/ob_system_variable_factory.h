@@ -135,7 +135,7 @@ public:
 class ObSysVarSqlMode : public ObSqlModeVar
 {
 public:
-  ObSysVarSqlMode() : ObSqlModeVar(ObSysVarOnCheckFuncs::check_and_convert_sql_mode, ObSysVarOnUpdateFuncs::update_sql_mode, ObSysVarToObjFuncs::to_obj_sql_mode, ObSysVarToStrFuncs::to_str_sql_mode, ObSysVarGetMetaTypeFuncs::get_meta_type_varchar) {}
+  ObSysVarSqlMode() : ObSqlModeVar(ObSysVarOnCheckFuncs::check_and_convert_sql_mode, NULL, ObSysVarToObjFuncs::to_obj_sql_mode, ObSysVarToStrFuncs::to_str_sql_mode, ObSysVarGetMetaTypeFuncs::get_meta_type_varchar) {}
   inline virtual share::ObSysVarClassType get_type() const { return share::SYS_VAR_SQL_MODE; }
   inline virtual const common::ObObj &get_global_default_value() const { return share::ObSysVariables::get_default_value(15); }
 };
