@@ -441,6 +441,8 @@ _EXECUTABLE_LINKOPTS = select({
     "@platforms//os:android": ["-pie", "-fopenmp", "-static-openmp", "-Wl,--gc-sections", "-Wl,--build-id=sha1"],
     "@platforms//os:macos": [
         "-Wl,-dead_strip",
+        # The static jemalloc zone constructor is otherwise not pulled in.
+        "-Wl,-u,_je_zone_register",
         "-Wl,-framework,Security",
         "-Wl,-framework,CoreFoundation",
         "-Wl,-framework,SystemConfiguration",
@@ -462,6 +464,7 @@ _EXECUTABLE_LINKOPTS = select({
 
 _SHARED_LINKOPTS = select({
     "@platforms//os:macos": [
+        "-Wl,-u,_je_zone_register",
         "-Wl,-framework,Security",
         "-Wl,-framework,CoreFoundation",
         "-Wl,-framework,SystemConfiguration",
