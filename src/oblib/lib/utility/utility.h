@@ -46,6 +46,10 @@ inline int usleep(useconds_t usec) {
 #include "lib/container/ob_iarray.h"
 #include "lib/allocator/ob_malloc.h"
 #include "lib/time/ob_clock_generator.h"
+#ifdef __APPLE__
+// macOS does not provide sched_getcpu; use the existing thread-local fallback.
+#include "lib/thread_local/ob_tsi_utils.h"
+#endif
 
 #define FALSE_IT(stmt) ({ (stmt); false; })
 #define OB_FALSE_IT(stmt) ({ (stmt); false; })
