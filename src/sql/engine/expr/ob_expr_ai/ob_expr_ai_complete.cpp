@@ -136,7 +136,7 @@ int ObExprAIComplete::eval_ai_complete(const ObExpr &expr,
         ObIJsonBase *j_base = nullptr;
         bool is_null = false;
         if (OB_FAIL(ObJsonExprHelper::get_json_doc(expr, ctx, temp_allocator, CONFIG_IDX, j_base, is_null))) {
-        } else if (!is_null && OB_NOTNULL(j_base)) {
+        } else if (!is_null && OB_NOT_NULL(j_base)) {
           if (j_base->json_type() == ObJsonNodeType::J_NULL) {
             // a json null config means that the model is called with the
             // default config

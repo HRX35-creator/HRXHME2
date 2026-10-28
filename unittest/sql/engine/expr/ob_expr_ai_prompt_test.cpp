@@ -44,8 +44,10 @@ protected:
 
   ObJsonString *build_string(const char *str)
   {
+    int ret = OB_SUCCESS;
     ObJsonString *node = nullptr;
-    if (OB_FAIL(ObAIFuncJsonUtils::get_json_string(allocator_, ObString(str), node))) {
+    ObString str_obj(str);
+    if (OB_FAIL(ObAIFuncJsonUtils::get_json_string(allocator_, str_obj, node))) {
       return nullptr;
     }
     return node;
@@ -53,6 +55,7 @@ protected:
 
   ObJsonInt *build_int(int64_t value)
   {
+    int ret = OB_SUCCESS;
     ObJsonInt *node = nullptr;
     if (OB_FAIL(ObAIFuncJsonUtils::get_json_int(allocator_, value, node))) {
       return nullptr;
@@ -63,6 +66,7 @@ protected:
   // build the args array of a prompt object, every argument is a string
   ObJsonArray *build_string_args(const char *const *args, int64_t count)
   {
+    int ret = OB_SUCCESS;
     ObJsonArray *args_array = nullptr;
     if (OB_FAIL(ObAIFuncJsonUtils::get_json_array(allocator_, args_array))) {
       return nullptr;
@@ -79,6 +83,7 @@ protected:
   // build the prompt object {"template": templ, "args": args}
   ObJsonObject *build_prompt(const char *templ, ObJsonArray *args)
   {
+    int ret = OB_SUCCESS;
     ObJsonObject *prompt = nullptr;
     ObJsonString *templ_node = build_string(templ);
     if (OB_ISNULL(templ_node)

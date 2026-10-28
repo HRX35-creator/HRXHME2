@@ -38,8 +38,10 @@ protected:
 
   ObJsonString *build_string(const char *str)
   {
+    int ret = OB_SUCCESS;
     ObJsonString *node = nullptr;
-    if (OB_FAIL(ObAIFuncJsonUtils::get_json_string(allocator_, ObString(str), node))) {
+    ObString str_obj(str);
+    if (OB_FAIL(ObAIFuncJsonUtils::get_json_string(allocator_, str_obj, node))) {
       return nullptr;
     }
     return node;
@@ -47,6 +49,7 @@ protected:
 
   ObJsonInt *build_int(int64_t value)
   {
+    int ret = OB_SUCCESS;
     ObJsonInt *node = nullptr;
     if (OB_FAIL(ObAIFuncJsonUtils::get_json_int(allocator_, value, node))) {
       return nullptr;
@@ -57,6 +60,7 @@ protected:
   // build a json array of the given numbers, it is used as an embedding
   ObJsonArray *build_number_array(const double *values, int64_t count)
   {
+    int ret = OB_SUCCESS;
     ObJsonArray *array = nullptr;
     if (OB_FAIL(ObAIFuncJsonUtils::get_json_array(allocator_, array))) {
       return nullptr;
@@ -73,6 +77,7 @@ protected:
   // build one element of the data array of an openai embedding answer
   ObJsonObject *build_embedding_item(ObJsonArray *embedding, int64_t index, bool with_index)
   {
+    int ret = OB_SUCCESS;
     ObJsonObject *item = nullptr;
     if (OB_FAIL(ObAIFuncJsonUtils::get_json_object(allocator_, item))
         || OB_FAIL(item->add("embedding", embedding))) {
@@ -87,9 +92,9 @@ protected:
   static double get_number(ObJsonNode *node, int64_t index)
   {
     double value = 0.0;
-    if (OB_NOTNULL(node) && node->json_type() == ObJsonNodeType::J_ARRAY) {
+    if (OB_NOT_NULL(node) && node->json_type() == ObJsonNodeType::J_ARRAY) {
       ObJsonNode *element = static_cast<ObJsonArray *>(node)->get_value(index);
-      if (OB_NOTNULL(element) && element->json_type() == ObJsonNodeType::J_DOUBLE) {
+      if (OB_NOT_NULL(element) && element->json_type() == ObJsonNodeType::J_DOUBLE) {
         value = static_cast<ObJsonDouble *>(element)->value();
       }
     }

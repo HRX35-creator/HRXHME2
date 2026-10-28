@@ -282,7 +282,7 @@ int ObOpenAIUtils::extract_embeddings(common::ObIAllocator &allocator,
         } else {
           int64_t index = i;
           ObJsonNode *index_node = data_obj->get_value("index");
-          if (OB_NOTNULL(index_node)) {
+          if (OB_NOT_NULL(index_node)) {
             if (index_node->json_type() != ObJsonNodeType::J_INT) {
               ret = OB_INVALID_DATA;
               LOG_USER_ERROR(OB_INVALID_DATA, "ai_embed, the index of the embedding is not an integer");
@@ -1719,7 +1719,7 @@ int ObAIFuncPromptObjectUtils::construct_prompt_object(ObIAllocator &allocator, 
 bool ObAIFuncPromptObjectUtils::is_valid_prompt_arg(const ObIJsonBase *arg_node)
 {
   bool is_valid = false;
-  if (OB_NOTNULL(arg_node)) {
+  if (OB_NOT_NULL(arg_node)) {
     // the json null carries no value, it cannot be used as an argument
     is_valid = ObJsonNodeType::J_NULL != arg_node->json_type();
   }
