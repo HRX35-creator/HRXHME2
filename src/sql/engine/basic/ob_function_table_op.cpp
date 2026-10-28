@@ -57,6 +57,8 @@ int ObFunctionTableOp::inner_open()
       } else if (static_cast<int64_t>(ObFileSqlFormat::JSONL) == MY_SPEC.file_format_ ||
                  static_cast<int64_t>(ObFileSqlFormat::NDJSON) == MY_SPEC.file_format_) {
         ret = jsonl_reader_.open(path_datum->get_string());
+      } else if (static_cast<int64_t>(ObFileSqlFormat::PARQUET) == MY_SPEC.file_format_) {
+        ret = parquet_reader_.open(path_datum->get_string(), options);
       } else if (static_cast<int64_t>(ObFileSqlFormat::GLOB) == MY_SPEC.file_format_) {
         glob_files_.clear();
         glob_idx_ = 0;
@@ -98,6 +100,10 @@ int ObFunctionTableOp::inner_rescan()
       col_count_ = 0;
       value_table_ = NULL;
       already_calc_ = false;
+    }
+    if (OB_SUCC(ret) && MY_SPEC.is_file_scan_ &&
+        static_cast<int64_t>(ObFileSqlFormat::PARQUET) == MY_SPEC.file_format_) {
+      ret = parquet_reader_.reset();
     }
   }
   return ret;
@@ -184,6 +190,15 @@ int ObFunctionTableOp::inner_get_next_row_file_scan()
         if (OB_ITER_END != ret) {
         }
       }
+    } else if (static_cast<int64_t>(ObFileSqlFormat::PARQUET) == MY_SPEC.file_format_) {
+      parquet_record_.clear();
+      parquet_nulls_.clear();
+      record = &parquet_record_;
+      nulls = &parquet_nulls_;
+      if (OB_FAIL(parquet_reader_.next(parquet_record_, parquet_nulls_))) {
+        if (OB_ITER_END != ret) {
+        }
+      }
     } else {
       ret = OB_NOT_SUPPORTED;
     }
@@ -206,6 +221,8 @@ int ObFunctionTableOp::inner_get_next_row_file_scan()
           datum.set_int(atoll(field.c_str()));
         } else if (ObDoubleType == type) {
           datum.set_double(atof(field.c_str()));
+        } else if (ObFloatType == type) {
+          datum.set_float(static_cast<float>(atof(field.c_str())));
         } else if (ObTinyIntType == type) {
           datum.set_bool(field == "true" || field == "TRUE");
         } else if (ObDateType == type) {
