@@ -293,14 +293,23 @@ int ObExprAIRerank::sort_document_array_by_model_result(ObIAllocator &allocator,
           ret = OB_ERR_UNEXPECTED;
         } else {
           int64_t index = index_value->value();
+          if (index < 0 || index >= document_array->element_count()) {
+            // the model returned an out-of-range index: reject instead of
+            // dereferencing an unrelated slot
+            ret = OB_INVALID_DATA;
+          } else {
           ObJsonObject *origin_obj = static_cast<ObJsonObject *>(document_array->get_value(index));
           ObJsonObject *new_obj = nullptr;
+          ObJsonDouble *score_copy = nullptr;
           if (OB_ISNULL(origin_obj)) {
             ret = OB_ERR_UNEXPECTED;
+          } else if (OB_ISNULL(score_copy = OB_NEWx(ObJsonDouble, &allocator, score_value->value()))) {
+            ret = OB_ALLOCATE_MEMORY_FAILED;
           } else if (OB_ISNULL(new_obj = static_cast<ObJsonObject *>(origin_obj->clone(&allocator, true)))) {
             ret = OB_ERR_UNEXPECTED;
-          } else if (OB_FAIL(new_obj->add(MODEL_SCORE_KEY, score_value))) {
+          } else if (OB_FAIL(new_obj->add(MODEL_SCORE_KEY, score_copy))) {
           } else if (OB_FAIL(sorted_document_array_obj->append(new_obj))) {
+          }
           }
         }
       }
