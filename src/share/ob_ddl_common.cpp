@@ -49,7 +49,7 @@ namespace
 // kept local to the share module: share is a terminal module and must not
 // depend on the upper sql module (see issue #1469).
 int escape_ddl_identifier(
-    common::ObIAllocator &allocator,
+    oceanbase::common::ObIAllocator &allocator,
     const ObString &src,
     ObString &dst)
 {
