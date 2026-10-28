@@ -51,6 +51,80 @@ int has_scalar_in_predicate(ObRawExpr *expr, bool &has_in)
   return ret;
 }
 
+// Hash used by do_remove_duplicate_exprs() to bucket expressions before the
+// exact same_as() check. The hash is only a filter: expressions that share a
+// hash value are still compared by same_as(), so a coarse hash value (i.e.
+// different expressions happen to have the same hash) never changes the result.
+uint64_t get_expr_dedup_hash(const ObRawExpr &expr);
+
+uint64_t get_op_expr_dedup_hash(const ObOpRawExpr &expr)
+{
+  uint64_t hash_value = 0;
+  const ObItemType expr_type = expr.get_expr_type();
+  const int64_t param_count = expr.get_param_count();
+  hash_value = oceanbase::common::do_hash(expr_type, hash_value);
+  if (T_OP_EQ == expr_type || T_OP_NSEQ == expr_type || T_OP_NE == expr_type) {
+    // the two parameters of these comparisons are interchangeable
+    uint64_t param_hash_sum = 0;
+    for (int64_t i = 0; i < param_count; ++i) {
+      if (NULL != expr.get_param_expr(i)) {
+        param_hash_sum += get_expr_dedup_hash(*expr.get_param_expr(i));
+      }
+    }
+    hash_value = oceanbase::common::do_hash(param_hash_sum, hash_value);
+  } else if (T_OP_GE == expr_type || T_OP_GT == expr_type) {
+    // a >= b is the same expression as b <= a
+    hash_value = oceanbase::common::do_hash(T_OP_GE == expr_type ? T_OP_LE : T_OP_LT, hash_value);
+    for (int64_t i = param_count - 1; i >= 0; --i) {
+      if (NULL != expr.get_param_expr(i)) {
+        hash_value = oceanbase::common::do_hash(get_expr_dedup_hash(*expr.get_param_expr(i)), hash_value);
+      }
+    }
+  } else {
+    if (IS_SUBQUERY_COMPARISON_OP(expr_type)) {
+      hash_value = oceanbase::common::do_hash(expr.get_subquery_comparison_flag(), hash_value);
+    }
+    for (int64_t i = 0; i < param_count; ++i) {
+      if (NULL != expr.get_param_expr(i)) {
+        hash_value = oceanbase::common::do_hash(get_expr_dedup_hash(*expr.get_param_expr(i)), hash_value);
+      }
+    }
+  }
+  return hash_value;
+}
+
+uint64_t get_expr_dedup_hash(const ObRawExpr &expr)
+{
+  uint64_t hash_value = 0;
+  const ObItemType expr_type = expr.get_expr_type();
+  if (T_QUESTIONMARK == expr_type) {
+    // the parameter index of a question mark is different for every occurrence,
+    // same_as() compares the parameterized value instead
+    const ObConstRawExpr &const_expr = static_cast<const ObConstRawExpr &>(expr);
+    hash_value = oceanbase::common::do_hash(expr_type, hash_value);
+    hash_value = expr.get_result_type().hash(hash_value);
+    hash_value = oceanbase::common::do_hash(const_expr.get_param(), hash_value);
+  } else if (0 == expr.get_param_count()) {
+    // leaf expressions already have a structural hash
+    hash_value = expr.get_expr_hash();
+    if (0 == hash_value) {
+      hash_value = expr.hash(0);
+    }
+  } else if (expr.is_op_expr()) {
+    hash_value = get_op_expr_dedup_hash(static_cast<const ObOpRawExpr &>(expr));
+  } else {
+    hash_value = oceanbase::common::do_hash(expr_type, hash_value);
+    hash_value = oceanbase::common::do_hash(expr.get_expr_class(), hash_value);
+    hash_value = expr.get_result_type().hash(hash_value);
+    for (int64_t i = 0; i < expr.get_param_count(); ++i) {
+      if (NULL != expr.get_param_expr(i)) {
+        hash_value = oceanbase::common::do_hash(get_expr_dedup_hash(*expr.get_param_expr(i)), hash_value);
+      }
+    }
+  }
+  return hash_value;
+}
+
 }
 
 int ObTransformSimplifyExpr::transform_one_stmt(common::ObIArray<ObParentDMLStmt> &parent_stmts,
@@ -2618,8 +2692,8 @@ int ObTransformSimplifyExpr::remove_duplicate_exprs(ObQueryCtx* query_ctx,
     //select * from t1 where c1 > 1 and c1 > 1
     //like above stmt, and expr in level 0 is process here
     ObSEArray<ObRawExpr *, 4> param_conds;
-    if (param_count <= 1 || param_count > 100) {
-      /* use too much resource and need add lots of constraints */
+    if (param_count <= 1) {
+      //do nothing
     } else if (OB_FAIL(param_conds.assign(conditions))) {
     } else if (OB_FAIL(do_remove_duplicate_exprs(*query_ctx, param_conds))) {
     } else if (param_conds.count() == conditions.count()) {
@@ -2662,9 +2736,7 @@ int ObTransformSimplifyExpr::recursive_remove_duplicate_exprs(ObQueryCtx &query_
     } else if (expr->get_expr_type() == T_OP_OR || expr->get_expr_type() == T_OP_AND) {
       ObOpRawExpr *op_expr = static_cast<ObOpRawExpr *>(expr);
       ObSEArray<ObRawExpr *, 4> param_conds;
-      if (op_expr->get_param_count() > 100) {
-        /* use too much resource and need add lots of constraints */
-      } else if (OB_FAIL(param_conds.assign(op_expr->get_param_exprs()))) {
+      if (OB_FAIL(param_conds.assign(op_expr->get_param_exprs()))) {
       } else if (OB_FAIL(do_remove_duplicate_exprs(query_ctx, param_conds))) {
       } else if (param_conds.count() == op_expr->get_param_count()) {
         //do nothing
@@ -2691,30 +2763,73 @@ int ObTransformSimplifyExpr::do_remove_duplicate_exprs(ObQueryCtx &query_ctx,
                                                        ObIArray<ObRawExpr*> &exprs)
 {
   int ret = OB_SUCCESS;
+  UNUSED(query_ctx);
   const int64_t param_count = exprs.count();
   if (OB_ISNULL(ctx_) || OB_ISNULL(ctx_->expr_factory_)) {
     ret = OB_ERR_UNEXPECTED;
+  } else if (param_count <= 1) {
+    //do nothing
   } else {
     ObQuestionmarkEqualCtx cmp_ctx(false);
-    for (int64_t i = param_count - 1; OB_SUCC(ret) && i >= 1; i--) {
-      if (OB_ISNULL(exprs.at(i))) {
+    // hash value -> index of the latest kept expression with this hash value
+    hash::ObHashMap<uint64_t, int64_t, hash::NoPthreadDefendMode> hash_to_expr;
+    // index of the previous kept expression with the same hash value, -1 for the first one
+    ObSEArray<int64_t, 16> prev_expr;
+    ObSEArray<ObRawExpr *, 16> kept_exprs;
+    if (OB_FAIL(hash_to_expr.create(param_count, ObModIds::OB_HASH_BUCKET,
+                                    ObModIds::OB_HASH_NODE))) {
+      LOG_WARN("failed to create hash map", K(ret), K(param_count));
+    } else if (OB_FAIL(prev_expr.reserve(param_count))) {
+      LOG_WARN("failed to reserve array", K(ret), K(param_count));
+    } else if (OB_FAIL(kept_exprs.reserve(param_count))) {
+      LOG_WARN("failed to reserve array", K(ret), K(param_count));
+    }
+    for (int64_t i = 0; OB_SUCC(ret) && i < param_count; ++i) {
+      ObRawExpr *expr = exprs.at(i);
+      int64_t head = -1;
+      int64_t duplicate_idx = -1;
+      uint64_t hash_value = 0;
+      if (OB_ISNULL(expr)) {
         ret = OB_ERR_UNEXPECTED;
-      }
-      for (int64_t j = 0; OB_SUCC(ret) && j < i; j++) {
-        if (OB_ISNULL(exprs.at(j))) {
-          ret = OB_ERR_UNEXPECTED;
-        } else if (exprs.at(i)->same_as(*exprs.at(j), &cmp_ctx)) {
-          if (OB_FAIL(exprs.remove(i))) {
-          } else if (!cmp_ctx.equal_pairs_.empty()) {
-            if (OB_FAIL(append(ctx_->equal_param_constraints_, cmp_ctx.equal_pairs_))) {
-            } else {
-              cmp_ctx.equal_pairs_.reset();
-            }
-          }
-          break;
-        } else if (!cmp_ctx.equal_pairs_.empty()) {
-          cmp_ctx.equal_pairs_.reset();
+        LOG_WARN("get unexpected null expr", K(ret), K(i));
+      } else if (FALSE_IT(hash_value = get_expr_dedup_hash(*expr))) {
+      } else if (OB_FAIL(hash_to_expr.get_refactored(hash_value, head))) {
+        if (OB_HASH_NOT_EXIST == ret) {
+          ret = OB_SUCCESS;
+          head = -1;
+        } else {
+          LOG_WARN("failed to get expr by hash value", K(ret), K(hash_value));
         }
+      }
+      for (int64_t idx = head; OB_SUCC(ret) && -1 != idx && -1 == duplicate_idx;
+           idx = prev_expr.at(idx)) {
+        if (expr->same_as(*kept_exprs.at(idx), &cmp_ctx)) {
+          duplicate_idx = idx;
+        } else {
+          cmp_ctx.equal_pairs_.reuse();
+        }
+      }
+      if (OB_FAIL(ret)) {
+        //do nothing
+      } else if (-1 != duplicate_idx) {
+        if (!cmp_ctx.equal_pairs_.empty()) {
+          if (OB_FAIL(append(ctx_->equal_param_constraints_, cmp_ctx.equal_pairs_))) {
+            LOG_WARN("failed to append equal param constraints", K(ret));
+          } else {
+            cmp_ctx.equal_pairs_.reuse();
+          }
+        }
+      } else if (OB_FAIL(kept_exprs.push_back(expr))) {
+        LOG_WARN("failed to push back expr", K(ret));
+      } else if (OB_FAIL(prev_expr.push_back(head))) {
+        LOG_WARN("failed to push back index", K(ret));
+      } else if (OB_FAIL(hash_to_expr.set_refactored(hash_value, kept_exprs.count() - 1, 1))) {
+        LOG_WARN("failed to set expr hash value", K(ret), K(hash_value));
+      }
+    }
+    if (OB_SUCC(ret) && kept_exprs.count() != param_count) {
+      if (OB_FAIL(exprs.assign(kept_exprs))) {
+        LOG_WARN("failed to assign exprs", K(ret));
       }
     }
   }
