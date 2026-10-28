@@ -25,6 +25,8 @@
 #include "data_plane/fts/ob_fts_parser_helper.h"
 #include "share/schema/ob_multi_version_schema_service.h"
 #include "share/schema/ob_schema_utils.h"
+#include "share/config/ob_server_config.h"
+#include <sched.h>
 
 namespace oceanbase
 {
@@ -1029,6 +1031,19 @@ int ObFtsIndexBuilderUtil::generate_doc_id_column(
     }
   }
   return ret;
+}
+
+int64_t ObFtsIndexBuilderUtil::default_word_aux_build_parallelism()
+{
+  static const int64_t MAX_DEFAULT_PARALLELISM = 4;
+  int64_t usable_cpu = get_cpu_count();
+  cpu_set_t cpu_set;
+  CPU_ZERO(&cpu_set);
+  if (0 == sched_getaffinity(0, sizeof(cpu_set), &cpu_set)) {
+    usable_cpu = MIN(usable_cpu, static_cast<int64_t>(CPU_COUNT(&cpu_set)));
+  }
+  const int64_t server_cpu = static_cast<int64_t>(get_server_default_min_cpu());
+  return MAX(1L, MIN(MAX_DEFAULT_PARALLELISM, MIN(server_cpu, usable_cpu / 2)));
 }
 
 int ObFtsIndexBuilderUtil::decide_parallelism(

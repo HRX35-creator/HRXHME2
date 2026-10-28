@@ -176,6 +176,9 @@ private:
   ObArray<ObTabletID> rowkey_domain_tablet_ids_;
   lib::MemoryContext merge_memctx_;
   bool is_need_multi_get_;
+  // The data table is sampled: the sampled rows are not aligned with a sampled rowkey-domain scan,
+  // so look up the domain id of every sampled row by its rowkey instead.
+  bool sample_lookup_;
 };
 
 } // end namespace sql

@@ -697,6 +697,8 @@ int ObFtsIndexBuildTask::construct_domain_index_aux_arg(obcall::ObCreateIndexArg
   if (OB_FAIL(deep_copy_index_arg(allocator_, create_index_arg_, arg))) {
   } else if (is_fts_task()) {
     if (OB_FAIL(ObFtsIndexBuilderUtil::generate_fts_aux_index_name(arg, &allocator_))) {
+    } else if (1 == arg.parallelism_) {
+      arg.parallelism_ = ObFtsIndexBuilderUtil::default_word_aux_build_parallelism();
     }
   }
   return ret;
@@ -709,6 +711,8 @@ int ObFtsIndexBuildTask::construct_fts_doc_word_arg(obcall::ObCreateIndexArg &ar
   } else if (FALSE_IT(arg.index_type_ = INDEX_TYPE_FTS_DOC_WORD_LOCAL)) {
   } else if (OB_FAIL(ObFtsIndexBuilderUtil::generate_fts_aux_index_name(arg,
                                                                         &allocator_))) {
+  } else if (1 == arg.parallelism_) {
+    arg.parallelism_ = ObFtsIndexBuilderUtil::default_word_aux_build_parallelism();
   }
   return ret;
 }
