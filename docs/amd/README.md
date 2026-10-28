@@ -1,38 +1,37 @@
-# seekdb × AMD hipVS HNSW build
+# seekdb × AMD hipVS HNSW construction
 
-This delivery adds an optional ordinary dense-L2 HNSW build path: raw vectors
-are buffered by seekdb, GPU CAGRA constructs the graph, a full HNSW hierarchy is
-produced, and a self-contained snapshot is ready for seekdb queries. Existing
-CPU VSAG indexes retain their behavior. The bridge performs CPU HNSW search;
-build performance and query performance are reported separately.
+Three fresh CPU/GPU rounds at each scale produced **1.45× build acceleration
+on the official10k corpus** and **13.13× on a separate100k corpus**. Every one
+of the12 formal rounds achieved complete Recall@10=1.0000 (100queries/1000targets).
+The measured backend uses GPU CAGRA → full HNSW construction and CPU HNSW search.
 
-Public implementation base: 76f871eb5a84b664d487b03b3412ce50194135b5.
-provenance/public-base-audit108.json verifies that its three existing product
-files match the original validation baseline. Source snapshot
-111c02a7b510199e1d1a69c46a9c2c6ef9b0312c preserves all four tested revision 108
-product hashes. The following compatibility change adopts the upstream Rust
-header and bitmap snprintf fix; provenance/master-compatibility108.json records
-its separate source hash and clean merge check. The measured runtime remains
-revision 108. The original build provenance and source patch remain in
-provenance/. This branch is prepared for a separate
-public seekdb pull request; the formal comparison is pending.
+Read REPORT.md for the full timing boundary, resources, both result tables and
+the retained failed/low-recall diagnostics. results.json preserves exact values.
+evidence/formal/formal-review108.json records the independent prediction/GT,
+strict-proof and original-file SHA review. Selected originals and the full hash
+manifest are retained under evidence/formal/; the remaining compact raw import
+is external to Git. Existing100k CPU/GPU indexes also each retain1000/1000
+after same-path observer recovery (PID14001→33736); separate actual recovery,
+read-only replay originals and independent review are in evidence/persistence/.
+The saved settings are reused over the current shell environment; full original
+environment reuse and historical inode continuity are not claimed. The complete
+formal archive and all 21,665 original file sizes/SHA256 are locally verified;
+this byte audit does not claim a new raw-vector semantic recalculation.
 
-The measured CPU/GPU end-to-end comparison is pending. REPORT.md and results.json
-contain no invented values. Bridge ABI/quality smoke and local contract tests
-are recorded independently under evidence/. A bridge smoke is not a completed
-competition performance result.
+Implementation base: `76f871eb5a84b664d487b03b3412ce50194135b5`. Measured source108 is preserved at
+111c02a7b510199e1d1a69c46a9c2c6ef9b0312c; the separate public master-compatibility
+commit is8a4507da2b784fe3e39b5b615fd3d716daf01bfd. Product/source and dependency
+identities are recorded in provenance/. GPU parameter use is an explicitly
+synchronized process profile, documented in PARAMETER_CONTRACT108.md.
 
-Read these files in order:
+1. SUBMISSION.md — official requirements and current delivery status.
+2. tools/hipvs_bridge/README.md — ABI, bridge build and routing scope.
+3. tools/benchmark/amd_hnsw/README.md and OPERATIONS.md — complete reproduction.
+4. REPORT.md and results.json — measured results and evidence scope.
+5. PARAMETER_CONTRACT108.md — SQL/environment alignment and dynamic-ef limits.
+6. THIRD_PARTY_NOTICES.md — source references and licenses.
 
-1. SUBMISSION.md — official material requirements and current delivery status.
-2. tools/hipvs_bridge/README.md — bridge build and ABI acceptance.
-3. tools/benchmark/amd_hnsw/README.md — data, GT, SQL and three-round measurement.
-4. REPORT.md — hardware, complete build interval, per-round results and recall.
-   DIAGNOSTICS.md retains the earlier quality-failing M16 smoke separately.
-5. PARAMETER_CONTRACT108.md — the process profile, SQL alignment and query-ef limits.
-6. THIRD_PARTY_NOTICES.md — source references and license copies.
-
-Run the portable local controls from the repository root:
+Portable local controls, from the repository root:
 
 ```bash
 python3 unittest/amd_hipvs/test_prepare_ground_truth.py
@@ -41,17 +40,7 @@ python3 unittest/amd_hipvs/test_dispatch.py
 python3 unittest/amd_hipvs/snapshot_io_contract.py
 ```
 
-The first two use existing NumPy; the last two require a local C++/C compiler.
-They do not start a database, operate cloud resources or claim GPU execution.
-The packaged portable verification passed 7 GT tests, 4 completion-contract
-tests, both production-dispatch cases and 32 snapshot I/O checks. All 13
-verification commands passed; their original transcripts and receipt are in
-evidence/local/portable108/. Set CXX or CC to select a non-default compiler.
-
-provenance/delivery108-files.json inventories the delivery files and their
-SHA256 values. manifest108.json identifies the canonical LF bytes of the four
-integrated sources; those match the revision 108 build inputs exactly.
-
-The private transfer scripts, signed artifact links, account material and
-platform screenshots are excluded from this tree. Deployment consumes only
-local paths and public source references.
+The packaged run passed7 GT tests,4 completion-contract tests, both extracted
+production-dispatch cases and32 snapshot I/O checks. These local controls do
+not start services or claim GPU execution. Original outputs are under
+evidence/local/portable108/. The runtime GPU evidence is separate under formal/.

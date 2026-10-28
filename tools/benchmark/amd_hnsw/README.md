@@ -82,3 +82,7 @@ denominator. Data generation/import/startup and search durations are separate.
 Save the complete output directory and immutable configuration, run the local
 controls listed in docs/amd/README.md, then populate REPORT.md/results.json from
 those actual receipts. No formal result is filled by this README.
+
+OPERATIONS.md documents the final contract-generation, original guarded restart, separate stopped-process recovery,
+read-only persisted-index replay, and full/compact evidence export scripts.
+Their source bytes are retained separately from their run receipts.
