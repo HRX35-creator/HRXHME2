@@ -1,5 +1,8 @@
 # Experimental AMD GPU snapshot builder
 
+Submission reproduction commands, raw measurements and limitations:
+[VALIDATION.md](VALIDATION.md).
+
 `lib=hipvs` collects the complete dense L2 HNSW snapshot, builds its base graph
 with hipVS CAGRA, validates/converts the export, and loads it into VSAG without
 CPU Build/Add construction. Existing VSAG serialization, CPU queries, filtering

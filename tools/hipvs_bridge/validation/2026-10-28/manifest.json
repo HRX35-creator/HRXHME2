@@ -1,0 +1,56 @@
+{
+  "source_archive_sha256": "765457718f28fa9cfd8fcf258010a8ac6938b59d6d70813a97e98c9620f8ee75",
+  "note": "Byte-identical report and trace files from the downloaded archive; file names shortened for readability. Failed attempts are included.",
+  "files": [
+    {
+      "file": "small-2k.json",
+      "source": "gpu-20261028_114117/result.json",
+      "sha256": "ea2c17fb4ee4610bbbcd3de7bb8fa0aca39179278ffb06a1c71090cf72668f9f"
+    },
+    {
+      "file": "template-10k.json",
+      "source": "gpu-20261028_114444/result.json",
+      "sha256": "01f0233d4dc63c0d21be4ae39a1388766724b0432c1c95733a306dd213b3eef6"
+    },
+    {
+      "file": "gaussian-100k.json",
+      "source": "gpu-20261028_115320/result.json",
+      "sha256": "31fa01b7911b85761bf9f464a20e0e32453eefbfe41e3118750642a60de0027e"
+    },
+    {
+      "file": "real-gpu-mutations.json",
+      "source": "real-gpu-mutations.json",
+      "sha256": "774cd2eb142bfc49d0df106f22faf9993daa825caa9bc3832015863cfe2b1427"
+    },
+    {
+      "file": "c-api-link-fix.json",
+      "source": "c-api-link-fix.json",
+      "sha256": "d8f935b8c94b9c38440c4f3ba2cac8a54d25f360ee4b9c520c19c83ac2a8e504"
+    },
+    {
+      "file": "kernel-profile-summary.json",
+      "source": "kernel-profile-summary.json",
+      "sha256": "54e831d4ecc6403bba7f85529ab15306daa0dac037a42643abcb1edc2f72ceeb"
+    },
+    {
+      "file": "bridge-kernel-trace.csv",
+      "source": "bridge-kernel-profile/j-7okzdq2dqhbmiiezc2cskimlvy/9974_kernel_trace.csv",
+      "sha256": "204db7ea1b0a8d40ad3d48ae106576a7da4a0135b7159b05c0f5b05371ae2ec2"
+    },
+    {
+      "file": "bridge-agent-info.csv",
+      "source": "bridge-kernel-profile/j-7okzdq2dqhbmiiezc2cskimlvy/9974_agent_info.csv",
+      "sha256": "47dead7ffc29c12cf3f0aebb84b618095123e17dbf51f75df84fe6a67f0bd278"
+    },
+    {
+      "file": "failed-c-api-load.json",
+      "source": "gpu-20261028_113723/result.json",
+      "sha256": "62ccbd3632df95262f6c494d8daa7249b03598a5105d745626fa1fcc644079fe"
+    },
+    {
+      "file": "failed-full-process-profile.json",
+      "source": "gpu-20261028_114915/result.json",
+      "sha256": "ec3004c2d74da63f8ea0e2a9837fea207e7afb6e89a2956a5fab0c406f83bdea"
+    }
+  ]
+}

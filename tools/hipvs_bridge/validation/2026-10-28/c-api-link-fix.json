@@ -1,0 +1,7 @@
+{
+  "base_commit": "f63c1f8c66a761ec2e5940e1e662c60292b62639",
+  "change": "link public C API library cuvs_c and reject undefined symbols",
+  "cmake": "cmake_minimum_required(VERSION 3.20)\nproject(seekdb_hipvs_build LANGUAGES C)\nset(HIPVS_ROOT \"\" CACHE PATH \"Installed hipVS SDK prefix\")\nset(ROCM_ROOT \"/opt/rocm\" CACHE PATH \"Installed ROCm SDK prefix\")\nfind_path(HIPVS_INCLUDE cuvs/neighbors/cagra.h HINTS \"${HIPVS_ROOT}/include\" REQUIRED)\nfind_path(ROCM_INCLUDE hip/hip_runtime.h HINTS \"${ROCM_ROOT}/include\" REQUIRED)\nfind_path(DLPACK_INCLUDE dlpack/dlpack.h HINTS \"${HIPVS_ROOT}/include\" \"$ENV{CONDA_PREFIX}/include\" REQUIRED)\nfind_library(HIPVS_C_LIBRARY NAMES cuvs_c hipvs_c HINTS \"${HIPVS_ROOT}/lib\" \"${HIPVS_ROOT}/lib64\" REQUIRED)\nadd_library(seekdb_hipvs_build SHARED seekdb_hipvs_build.c)\ntarget_compile_features(seekdb_hipvs_build PRIVATE c_std_11)\ntarget_compile_definitions(seekdb_hipvs_build PRIVATE __HIP_PLATFORM_AMD__)\ntarget_include_directories(seekdb_hipvs_build PRIVATE \"${HIPVS_INCLUDE}\" \"${ROCM_INCLUDE}\" \"${DLPACK_INCLUDE}\" \"${CMAKE_CURRENT_SOURCE_DIR}/../../src/oblib\")\ntarget_link_libraries(seekdb_hipvs_build PRIVATE \"${HIPVS_C_LIBRARY}\")\ntarget_link_options(seekdb_hipvs_build PRIVATE \"LINKER:--no-undefined\")\ninstall(TARGETS seekdb_hipvs_build LIBRARY DESTINATION lib)\n",
+  "cmake_sha256": "f91dd39b7a1ec1352fe899d740fb905cc47d1e6504aec95be500face585691e3",
+  "plugin_sha256": "bd2e7498aefa5f413e653ca9f2d30ad762a1bc7416ef79b804e112e2b8bb115a"
+}

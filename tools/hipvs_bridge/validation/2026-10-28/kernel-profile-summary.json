@@ -1,0 +1,9 @@
+{
+  "full_process_profile_exit": 1,
+  "full_process_dispatches": 199,
+  "full_process_db_sha256": "74ce91e2255479cbcba099d3f6e240acc669e4d2067a1355f4e69077323fedb1",
+  "bridge_only_exit": 0,
+  "bridge_only_dispatches": 199,
+  "trace_csv": "evidence/bridge-kernel-profile/j-7okzdq2dqhbmiiezc2cskimlvy/9974_kernel_trace.csv",
+  "note": "Full process profile lost SQL connection. Standalone bridge profile passed. Profile timings are not benchmark results."
+}
