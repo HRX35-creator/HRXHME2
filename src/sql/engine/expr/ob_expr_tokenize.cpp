@@ -210,6 +210,55 @@ int ObExprTokenize::eval_tokenize(const ObExpr &expr, ObEvalCtx &ctx, ObDatum &e
   // check param num, which is checked in ObExprOperator::calc_result_typeN.
   if (OB_UNLIKELY(expr.arg_cnt_ < 1 || expr.arg_cnt_ > 3)) {
     ret = OB_INVALID_ARGUMENT;
+  } else if (expr.arg_cnt_ <= 2) {
+    // Without parser properties the only inputs are the text and the parser name, and both are
+    // already decided by the arguments themselves. Read them straight out of the argument datums
+    // so a repeated call is recognised before any parser object is built, and the whole parse
+    // phase - parser construction, dictionary check, property reformatting - is skipped.
+    ObDatum *text_datum = nullptr;
+    ObDatum *name_datum = nullptr;
+    ObString text;
+    ObString name = ObString::make_string(OB_DEFAULT_FULLTEXT_PARSER_NAME);
+    if (OB_FAIL(expr.args_[0]->eval(ctx, text_datum))) {
+    } else if (1 < expr.arg_cnt_ && OB_FAIL(expr.args_[1]->eval(ctx, name_datum))) {
+    } else {
+      if (!text_datum->is_null()) {
+        text = text_datum->get_string();
+      }
+      if (1 < expr.arg_cnt_ && !name_datum->is_null()) {
+        name = name_datum->get_string().trim();
+      }
+      const ObString no_properties;
+      const int64_t mode = static_cast<int64_t>(TokenizeParam::DEFAULT);
+      const int64_t collation =
+          static_cast<int64_t>(expr.args_[0]->obj_meta_.get_collation_type());
+      const bool memo_eligible = tokenize_memo_fits(name, no_properties, text);
+      ObString cached_result;
+      if (memo_eligible
+          && tokenize_memo_lookup(name, no_properties, text, mode, collation, cached_result)) {
+        if (OB_FAIL(ObJsonExprHelper::pack_json_str_res(expr, ctx, expr_datum, cached_result))) {
+        }
+      } else if (OB_FAIL(parse_param(expr, ctx, temp_allocator, param))) {
+      } else if (OB_FAIL(tokenize_fulltext(param, param.output_mode_, temp_allocator, json_result))) {
+      } else {
+        ObString raw_result;
+        const bool has_raw_result =
+            (memo_eligible
+             && OB_SUCCESS == share::ObJsonWrapper::get_raw_binary(json_result,
+                                                                   raw_result,
+                                                                   &temp_allocator)
+             && 0 < raw_result.length()
+             && raw_result.length() <= ObTokenizeMemoEntry::MAX_RESULT_LEN);
+        if (OB_FAIL(ObJsonExprHelper::pack_json_res(expr,
+                                                    ctx,
+                                                    temp_allocator,
+                                                    json_result,
+                                                    expr_datum))) {
+        } else if (has_raw_result) {
+          tokenize_memo_store(name, no_properties, text, mode, collation, raw_result);
+        }
+      }
+    }
   } else if (OB_FAIL(parse_param(expr, ctx, temp_allocator, param))) {
   } else {
     ObString cached_result;
@@ -541,6 +590,9 @@ int ObExprTokenize::parse_parser_properties(const ObExpr &expr,
   } else {
     bool is_null = false;
     if (OB_FAIL(ObJsonExprHelper::get_json_doc(expr, ctx, mm_alloc, 2, base, is_null))) {
+    } else if (is_null) {
+      // A null property list carries no properties at all, exactly like leaving it out, and there
+      // is no document to walk below.
     } else {
       if (ObJsonNodeType::J_ARRAY != base->json_type()) {
         ret = OB_INVALID_ARGUMENT;
