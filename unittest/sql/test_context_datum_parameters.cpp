@@ -177,34 +177,40 @@ TEST(ContextDatumParameters,
 }
 TEST(ContextDatumParameters,
      numeric_and_declared_null_metadata_match_existing_typing_rules) {
-  for (int type = ObNullType; type < ObMaxType; ++type) {
-    for (int precision : {int(PRECISION_UNKNOWN_YET), 0, 19}) {
-      for (int scale : {-1, 0, 6}) {
-        SCOPED_TRACE(type);
-        ObObjMeta meta;
-        meta.set_type(static_cast<ObObjType>(type));
-        meta.set_scale(scale);
-        ObAccuracy accuracy;
-        accuracy.set_precision(precision);
-        accuracy.set_scale(scale);
-        ObObjParam old;
-        old.set_meta_type(meta);
-        old.set_accuracy(accuracy);
-        DatumParameter native;
-        native.set_type_meta(meta);
-        native.set_accuracy(accuracy);
-        ObObjMeta declared;
-        declared.set_varchar();
-        old.set_param_meta(declared);
-        native.set_param_meta(declared);
-        old.set_param_meta();
-        native.set_param_meta();
-        EXPECT_EQ(old.get_accuracy(), native.get_accuracy());
-        EXPECT_EQ(old.get_meta(), native.get_type_meta());
-        EXPECT_EQ(old.get_param_meta(), native.get_param_meta());
+  // Expected values are the pre-migration protocol typing rules, not a second
+  // invocation of the same native implementation used as an alleged oracle.
+  struct Case { SqlValueType type; int precision; bool integer; };
+  const Case cases[] = {{ObTinyIntType, 4, true}, {ObSmallIntType, 6, true},
+      {ObMediumIntType, 9, true}, {ObInt32Type, 11, true}, {ObIntType, 20, true},
+      {ObUTinyIntType, 3, true}, {ObUSmallIntType, 5, true},
+      {ObUMediumIntType, 8, true}, {ObUInt32Type, 10, true}, {ObUInt64Type, 20, true},
+      {ObNumberType, 10, false}, {ObUNumberType, 10, false}, {ObDecimalIntType, 10, false}};
+  for (const Case &c : cases) {
+    for (int meta_scale : {-1, 0, 6}) {
+      for (int accuracy_scale : {-1, 0, 3}) {
+        SCOPED_TRACE(c.type);
+        DatumParameter value;
+        SqlTypeMeta meta; meta.set_type(c.type); meta.set_scale(meta_scale);
+        value.set_type_meta(meta);
+        ObAccuracy accuracy; accuracy.set_precision(PRECISION_UNKNOWN_YET);
+        accuracy.set_scale(accuracy_scale); value.set_accuracy(accuracy);
+        value.set_param_meta();
+        EXPECT_EQ(c.precision, value.get_precision());
+        const int expected_scale = accuracy_scale >= 0 ? accuracy_scale
+            : meta_scale >= 0 ? meta_scale : c.integer ? 0 : -1;
+        EXPECT_EQ(expected_scale, value.get_scale());
+        // Declared metadata is captured before applying numeric defaults.
+        EXPECT_EQ(meta, value.get_param_meta());
+        value.set_precision(31); value.set_param_meta();
+        EXPECT_EQ(31, value.get_precision());
       }
     }
   }
+  DatumParameter null_value;
+  SqlTypeMeta declared; declared.set_varchar(); null_value.set_param_meta(declared);
+  SqlTypeMeta null_meta; null_meta.set_null(); null_value.set_param_meta(null_meta);
+  null_value.set_null(); null_value.set_param_meta();
+  EXPECT_EQ(declared, null_value.get_param_meta());
 }
 TEST(ContextDatumParameters,
      all_old_frame_truncated_prefixes_fail_without_exposing_parameters) {
@@ -292,13 +298,13 @@ TEST(ContextDatumParameters,
      null_compatibility_view_keeps_exact_wire_metadata) {
   for (bool explicit_null : {false, true}) {
     DatumParameter source;
-    ObObjMeta meta;
+    SqlTypeMeta meta;
     if (explicit_null) {
       meta.set_null();
     }
     source.set_type_meta(meta);
-    ObObjParam output;
-    ASSERT_EQ(OB_SUCCESS, materialize_legacy_parameter(source, output));
+    DatumParameter output;
+    ASSERT_EQ(OB_SUCCESS, assign_datum_parameter(source, output));
     EXPECT_TRUE(output.is_null());
     EXPECT_EQ(0, memcmp(&meta, &output.get_meta(), sizeof(meta)));
   }
@@ -376,13 +382,13 @@ TEST(ContextDatumParameters,
      raw_decimal_parameter_scale_survives_compatibility_view) {
   int32_t value = -1234;
   DatumParameter parameter;
-  ObObjMeta meta;
+  SqlTypeMeta meta;
   meta.set_decimal_int(-9);
   parameter.set_type_meta(meta);
   parameter.datum_.set_string(reinterpret_cast<const char *>(&value),
                               sizeof(value));
-  ObObjParam output;
-  ASSERT_EQ(OB_SUCCESS, materialize_legacy_parameter(parameter, output));
+  DatumParameter output;
+  ASSERT_EQ(OB_SUCCESS, assign_datum_parameter(parameter, output));
   EXPECT_EQ(parameter.get_scale(), output.get_scale());
   EXPECT_EQ(-9, output.get_meta().get_scale());
   EXPECT_EQ(meta, output.get_meta());

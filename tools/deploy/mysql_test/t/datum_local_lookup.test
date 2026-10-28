@@ -1,4 +1,4 @@
-# Index-back keys must survive expression-frame reuse without ObObj ranges.
+# Index-back keys must survive expression-frame reuse without legacy value ranges.
 --disable_warnings
 DROP TABLE IF EXISTS dl_typed, dl_batch, dl_digits, dl_part;
 --enable_warnings

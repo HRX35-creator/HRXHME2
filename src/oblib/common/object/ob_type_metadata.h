@@ -70,23 +70,23 @@ struct ObLobScale
   TO_STRING_KV(K_(scale));
 };
 
-class ObObjMeta
+class SqlTypeMeta
 {
 public:
-  ObObjMeta()
+  SqlTypeMeta()
       :type_(ObNullType),
        cs_level_(CS_LEVEL_INVALID),
        cs_type_(CS_TYPE_INVALID),
        scale_(-1)
   {}
 
-  OB_INLINE bool operator ==(const ObObjMeta &other) const
+  OB_INLINE bool operator ==(const SqlTypeMeta &other) const
   {
     return (type_ == other.type_ && cs_level_ == other.cs_level_ && cs_type_ == other.cs_type_);
   }
-  OB_INLINE bool operator !=(const ObObjMeta &other) const { return !this->operator ==(other); }
+  OB_INLINE bool operator !=(const SqlTypeMeta &other) const { return !this->operator ==(other); }
   // this method is inefficient, you'd better use set_tinyint() etc. instead
-  OB_INLINE void set_type(const ObObjType &type)
+  OB_INLINE void set_type(const SqlValueType &type)
   {
     type_ = static_cast<uint8_t>(type);
     if (ObNullType == type_) {
@@ -103,14 +103,14 @@ public:
     } else if (ObUserDefinedSQLType == type_ ||
                ObCollectionSQLType == type_) {
       set_subschema_id(UINT_MAX16);
-    } else if (!ob_is_string_type(static_cast<ObObjType>(type_))
-               && !ob_is_enum_or_set_type(static_cast<ObObjType>(type_))
-               && !ob_is_geometry(static_cast<ObObjType>(type_))) {
+    } else if (!ob_is_string_type(static_cast<SqlValueType>(type_))
+               && !ob_is_enum_or_set_type(static_cast<SqlValueType>(type_))
+               && !ob_is_geometry(static_cast<SqlValueType>(type_))) {
       set_collation_level(CS_LEVEL_NUMERIC);
       set_collation_type(CS_TYPE_BINARY);
     }
   }
-  OB_INLINE void set_type_simple(const ObObjType &type)
+  OB_INLINE void set_type_simple(const SqlValueType &type)
   {
     type_ = static_cast<uint8_t>(type);
   }
@@ -120,7 +120,7 @@ public:
     set_collation_level(CS_LEVEL_NUMERIC);
     set_collation_type(CS_TYPE_BINARY);
   }
-  OB_INLINE void set_meta(const ObObjMeta &meta)
+  OB_INLINE void set_meta(const SqlTypeMeta &meta)
   {
     type_ = meta.type_;
     cs_level_ = meta.cs_level_;
@@ -135,11 +135,11 @@ public:
     scale_ = -1;
   }
 
-  OB_INLINE ObObjType get_type() const { return static_cast<ObObjType>(type_); }
-  OB_INLINE ObObjOType get_extended_type() const { return ob_obj_type_to_extended_type(static_cast<ObObjType>(type_)); }
-  OB_INLINE const ObObjMeta &get_obj_meta() const { return *this; }
-  OB_INLINE ObObjTypeClass get_type_class() const { return ob_obj_type_class(get_type()); }
-  OB_INLINE ObObjTypeClass get_type_class_for_extended() const { return ob_extended_type_class(get_type()); }
+  OB_INLINE SqlValueType get_type() const { return static_cast<SqlValueType>(type_); }
+  OB_INLINE ExtendedSqlValueType get_extended_type() const { return sql_value_type_to_extended_type(static_cast<SqlValueType>(type_)); }
+  OB_INLINE const SqlTypeMeta &get_sql_type_meta() const { return *this; }
+  OB_INLINE SqlTypeClass get_type_class() const { return sql_type_class(get_type()); }
+  OB_INLINE SqlTypeClass get_type_class_for_extended() const { return extended_sql_type_class(get_type()); }
 
   OB_INLINE void set_null() { type_ = static_cast<uint8_t>(ObNullType); set_collation_level(CS_LEVEL_IGNORABLE); set_collation_type(CS_TYPE_BINARY); }
   OB_INLINE void set_tinyint() { type_ = static_cast<uint8_t>(ObTinyIntType); set_collation_level(CS_LEVEL_NUMERIC);set_collation_type(CS_TYPE_BINARY); }
@@ -199,7 +199,7 @@ public:
     set_collation_type(CS_TYPE_BINARY);
   }
 
-  OB_INLINE void set_otimestamp_type(const ObObjType type) { type_ = static_cast<uint8_t>(type); set_collation_level(CS_LEVEL_NUMERIC);set_collation_type(CS_TYPE_BINARY); }
+  OB_INLINE void set_otimestamp_type(const SqlValueType type) { type_ = static_cast<uint8_t>(type); set_collation_level(CS_LEVEL_NUMERIC);set_collation_type(CS_TYPE_BINARY); }
   OB_INLINE void set_decimal_int() { type_ = static_cast<uint8_t>(ObDecimalIntType); set_collation_level(CS_LEVEL_NUMERIC);set_collation_type(CS_TYPE_BINARY); }
   OB_INLINE void set_decimal_int(ObScale scale)
   {
@@ -207,8 +207,8 @@ public:
     scale_ = scale;
   }
 
-  OB_INLINE bool is_valid() const { return ob_is_valid_obj_type(static_cast<ObObjType>(type_)); }
-  OB_INLINE bool is_invalid() const { return !ob_is_valid_obj_type(static_cast<ObObjType>(type_)); }
+  OB_INLINE bool is_valid() const { return is_valid_sql_value_type(static_cast<SqlValueType>(type_)); }
+  OB_INLINE bool is_invalid() const { return !is_valid_sql_value_type(static_cast<SqlValueType>(type_)); }
 
   OB_INLINE bool is_null() const { return type_ == static_cast<uint8_t>(ObNullType); }
   OB_INLINE bool is_tinyint() const { return type_ == static_cast<uint8_t>(ObTinyIntType); }
@@ -247,13 +247,13 @@ public:
   {
     return (type_ == static_cast<uint8_t>(ObVarcharType) && CS_TYPE_BINARY == get_collation_type());
   }
-  static bool is_binary(const ObObjType type, const ObCollationType cs_type)
+  static bool is_binary(const SqlValueType type, const ObCollationType cs_type)
   {
     return (ObCharType == type && CS_TYPE_BINARY == cs_type);
   }
   OB_INLINE bool is_binary() const
   {
-    return is_binary(static_cast<ObObjType>(type_), get_collation_type());
+    return is_binary(static_cast<SqlValueType>(type_), get_collation_type());
   }
   OB_INLINE bool is_cs_collation_free() const
   {
@@ -379,7 +379,7 @@ public:
   {
     return CS_LEVEL_INVALID == cs_level_ && CS_TYPE_INVALID == cs_type_;
   }
-  OB_INLINE void set_collation(const ObObjMeta &other)
+  OB_INLINE void set_collation(const SqlTypeMeta &other)
   {
     cs_level_ = other.cs_level_;
     cs_type_ = other.cs_type_;
@@ -396,7 +396,7 @@ public:
 
 // to_string function is used to calc the result of ObExprCmpMeta, can not be modified
 #ifdef NDEBUG
-  TO_STRING_KV(N_TYPE, inner_obj_type_str(static_cast<ObObjType>(type_)),
+  TO_STRING_KV(N_TYPE, inner_sql_value_type_to_string(static_cast<SqlValueType>(type_)),
                N_COLLATION, ObCharset::collation_name(get_collation_type()),
                N_COERCIBILITY, ObCharset::collation_level(get_collation_level()));
 #else
@@ -404,7 +404,7 @@ public:
   {
     int64_t pos = 0;
     J_OBJ_START();
-    J_KV(N_TYPE, inner_obj_type_str(static_cast<ObObjType>(type_)),
+    J_KV(N_TYPE, inner_sql_value_type_to_string(static_cast<SqlValueType>(type_)),
          N_COLLATION, ObCharset::collation_name(get_collation_type()),
          N_COERCIBILITY, ObCharset::collation_level(get_collation_level()));
     if (is_enum_or_set() || is_collection_sql_type()) {
@@ -417,10 +417,10 @@ public:
 #endif
   NEED_SERIALIZE_AND_DESERIALIZE;
 
-  static uint32_t type_offset_bits() { return offsetof(ObObjMeta, type_) * 8; }
-  static uint32_t cs_level_offset_bits() { return offsetof(ObObjMeta, cs_level_) * 8; }
-  static uint32_t cs_type_offset_bits() { return offsetof(ObObjMeta, cs_type_) * 8; }
-  static uint32_t scale_offset_bits() { return offsetof(ObObjMeta, scale_) * 8; }
+  static uint32_t type_offset_bits() { return offsetof(SqlTypeMeta, type_) * 8; }
+  static uint32_t cs_level_offset_bits() { return offsetof(SqlTypeMeta, cs_level_) * 8; }
+  static uint32_t cs_type_offset_bits() { return offsetof(SqlTypeMeta, cs_type_) * 8; }
+  static uint32_t scale_offset_bits() { return offsetof(SqlTypeMeta, scale_) * 8; }
 
   OB_INLINE uint16_t get_subschema_id() const { return ((static_cast<uint16_t>(cs_type_)) << 8) | cs_level_; }
   OB_INLINE void set_subschema_id(const uint16_t subschema_id) {
@@ -514,8 +514,8 @@ public:
         && is_binary_collation_ == other.is_binary_collation_
         && is_zero_fill_ == other.is_zero_fill_;
   }
-  inline ObObjType get_obj_type() const { return meta_.get_type(); }
-  inline ObObjTypeClass get_type_class() const { return meta_.get_type_class(); }
+  inline SqlValueType get_obj_type() const { return meta_.get_type(); }
+  inline SqlTypeClass get_type_class() const { return meta_.get_type_class(); }
   inline ObLength get_length() const { return accuracy_.get_length(); }
   inline ObPrecision get_precision() const { return accuracy_.get_precision(); }
   inline ObLengthSemantics get_length_semantics() const { return accuracy_.get_length_semantics(); }
@@ -526,7 +526,7 @@ public:
   inline uint16_t get_subschema_id() { return meta_.get_subschema_id(); }
   inline bool is_binary_collation() const { return is_binary_collation_; }
   inline bool is_zero_fill() const { return is_zero_fill_; }
-  inline void set_obj_type(const ObObjType &type) { return meta_.set_type(type); }
+  inline void set_obj_type(const SqlValueType &type) { return meta_.set_type(type); }
   inline void set_length(const ObLength length) { accuracy_.set_length(length); }
   inline void set_precision(const ObPrecision precision) { accuracy_.set_precision(precision); }
   inline void set_length_semantics(const ObLengthSemantics length_semantics) { accuracy_.set_length_semantics(length_semantics); }
@@ -536,8 +536,8 @@ public:
   inline void set_collation_level(const ObCollationLevel coll_level) { meta_.set_collation_level(coll_level); }
   inline void set_binary_collation(const bool is_binary_collation) { is_binary_collation_ = is_binary_collation; }
   inline void set_zero_fill(const bool is_zero_fill) { is_zero_fill_ = is_zero_fill; }
-  inline const ObObjMeta &get_meta_type() const { return meta_; }
-  inline void set_meta_type(const ObObjMeta &meta_type) { meta_ = meta_type; }
+  inline const SqlTypeMeta &get_meta_type() const { return meta_; }
+  inline void set_meta_type(const SqlTypeMeta &meta_type) { meta_ = meta_type; }
   inline const ObAccuracy &get_accuracy() const { return accuracy_; }
   inline void set_accuracy(const ObAccuracy &accuracy) { accuracy_ = accuracy; }
   inline int64_t get_accuracy_value() const { return accuracy_.accuracy_; }
@@ -546,7 +546,7 @@ public:
   inline uint64_t get_udt_id() const { return accuracy_.get_accuracy(); }
   inline void set_udt_id(uint64_t udt_id) { accuracy_.set_accuracy(udt_id); }
   inline void set_subschema_id(const uint16_t subschema_id) { meta_.set_subschema_id(subschema_id); }
-  ObObjMeta meta_;
+  SqlTypeMeta meta_;
   ObAccuracy accuracy_;
   ObCharsetType charset_;
   bool is_binary_collation_;

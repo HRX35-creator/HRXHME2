@@ -27,8 +27,8 @@ bool DatumMysqlRow::can_encode(const oceanbase::sql::ObExpr &expr, const ObField
                                ObCharsetType result_charset, bool need_ps_cast, bool &convert_charset)
 {
   convert_charset = false;
-  const ObObjMeta &meta = expr.obj_meta_;
-  bool direct = !need_ps_cast || meta.get_type() == field.type_.get_type();
+  const SqlTypeMeta &meta = expr.obj_meta_;
+  bool direct = !need_ps_cast || meta.get_type() == field.type_meta_.get_type();
   if (direct && meta.is_integer_type()) {
     direct = expr.obj_datum_map_ == OBJ_DATUM_8BYTE_DATA;
   } else if (direct && meta.get_type_class() == ObNumberTC) {
@@ -115,7 +115,7 @@ int ObSMRow::build_cell_value(int64_t idx, ObIAllocator &scratch_allocator,
   } else {
     const int64_t cell_idx =
         NULL == obrow_.projector_ ? idx : obrow_.projector_[idx];
-    const ObObj &cell = obrow_.cells_[cell_idx];
+    const DatumValue &cell = obrow_.cells_[cell_idx];
     const ObField *field = NULL == fields_ ? NULL : &fields_->at(idx);
     ret = ObSMUtils::build_cell_value(cell, type_, scratch_allocator, out,
                                       dtc_params_, field, session_,
@@ -137,7 +137,7 @@ int ObSMRow::get_packed_row_blob(const char *&data, int64_t &len) const {
   } else {
     const int64_t cell_idx =
         NULL == obrow_.projector_ ? 0 : obrow_.projector_[0];
-    const ObObj &cell = obrow_.cells_[cell_idx];
+    const DatumValue &cell = obrow_.cells_[cell_idx];
     len = cell.get_string_len();
     data = cell.get_string_ptr();
     if (OB_UNLIKELY(len < 0 || (len > 0 && NULL == data))) {

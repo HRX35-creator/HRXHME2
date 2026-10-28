@@ -36,7 +36,7 @@ TEST(DatumParameter, keeps_null_type_accuracy_flags_and_source_position_independ
 {
   DatumParameter parameter;
   EXPECT_TRUE(parameter.is_null());
-  ObObjMeta actual, declared;
+  SqlTypeMeta actual, declared;
   actual.set_null(); declared.set_varchar();
   declared.set_collation_type(CS_TYPE_UTF8MB4_BIN);
   declared.set_collation_level(CS_LEVEL_COERCIBLE);
@@ -62,7 +62,7 @@ TEST(DatumParameter, keeps_null_type_accuracy_flags_and_source_position_independ
 TEST(DatumParameter, complete_lob_metadata_survives_copy)
 {
   DatumParameter parameter;
-  ObObjMeta meta; meta.set_blob(); meta.set_has_lob_header();
+  SqlTypeMeta meta; meta.set_blob(); meta.set_has_lob_header();
   parameter.set_type_meta(meta);
   DatumParameter copy(parameter);
   EXPECT_EQ(meta, copy.get_type_meta());
@@ -79,7 +79,7 @@ TEST(DatumParameter, deep_copy_outlives_payload_arena)
   {
     ObArenaAllocator source_arena;
     DatumParameter source;
-    ObObjMeta meta; meta.set_varbinary(); source.set_type_meta(meta);
+    SqlTypeMeta meta; meta.set_varbinary(); source.set_type_meta(meta);
     char *payload = static_cast<char *>(source_arena.alloc(expected.size()));
     ASSERT_NE(nullptr, payload); memcpy(payload, expected.data(), expected.size());
     source.datum_.set_string(payload, expected.size());
@@ -98,7 +98,7 @@ TEST(DatumParameter, container_reallocation_never_points_into_moved_parameter)
   ObArenaAllocator arena;
   std::vector<DatumParameter> parameters;
   for (int64_t i = 0; i < 513; ++i) {
-    DatumParameter parameter; ObObjMeta meta; meta.set_int();
+    DatumParameter parameter; SqlTypeMeta meta; meta.set_int();
     parameter.set_type_meta(meta);
     ASSERT_EQ(OB_SUCCESS, parameter.alloc_datum_reserved_buff(meta, -1, arena));
     parameter.datum_.set_int(i); parameters.push_back(parameter);
@@ -114,7 +114,7 @@ TEST(DatumParameter, failed_clone_is_atomic_and_self_clone_owns_new_bytes)
   ObArenaAllocator arena;
   RejectAllocator reject;
   DatumParameter source, destination;
-  ObObjMeta meta; meta.set_int();
+  SqlTypeMeta meta; meta.set_int();
   source.set_type_meta(meta); destination.set_type_meta(meta);
   ASSERT_EQ(OB_SUCCESS, source.alloc_datum_reserved_buff(meta, -1, arena));
   ASSERT_EQ(OB_SUCCESS, destination.alloc_datum_reserved_buff(meta, -1, arena));
@@ -131,7 +131,7 @@ TEST(DatumParameter, array_payload_copy_keeps_pointee_ownership_explicit)
 {
   struct Array { int count; } array{7};
   char address[8]; DatumParameter source, copy;
-  ObObjMeta meta; meta.set_ext(); meta.set_extend_type(T_EXT_SQL_ARRAY);
+  SqlTypeMeta meta; meta.set_ext(); meta.set_extend_type(T_EXT_SQL_ARRAY);
   source.set_type_meta(meta); source.datum_.ptr_ = address;
   source.set_array_address(&array);
   ObArenaAllocator arena;

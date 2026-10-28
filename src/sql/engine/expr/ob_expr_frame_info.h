@@ -21,6 +21,7 @@
 #include "lib/container/ob_fixed_array.h"
 #include "sql/engine/expr/ob_expr.h"
 #include "common/row/ob_row.h"
+#include "common/datum/datum_value.h"
 
 namespace oceanbase
 {
@@ -220,16 +221,20 @@ public:
       idx_col_arr_(allocator)
   {
   }
-  int eval(ObExecContext &exec_ctx, const common::ObNewRow &row, ObObj &result) const;
   // Input-free range/DDL expressions return an allocator-owned Datum. Copy
   // before releasing the temporary context, also when its cache is disabled.
   int eval_datum(ObExecContext &exec_ctx, common::ObIAllocator &result_allocator,
                   common::ObDatum &result) const;
+  // Borrow input values for this evaluation; copy the result into the caller
+  // owner before releasing a noncached temporary expression context.
+  int eval_datum(ObExecContext &exec_ctx, const common::ObIArray<common::DatumValue> &row,
+                  common::ObIAllocator &result_allocator, common::ObDatum &result) const;
   int deep_copy(ObIAllocator &allocator, ObTempExpr *&dst) const;
   INHERIT_TO_STRING_KV("temp expr", ObExprFrameInfo, K_(expr_idx), K(idx_col_arr_));
 
 private:
-  int row_to_frame(const ObNewRow &row, ObTempExprCtx &temp_expr_ctx) const;
+  int row_to_frame(const common::ObIArrayWrap<common::DatumValue> &row,
+                    ObTempExprCtx &temp_expr_ctx) const;
 
 public:
   int64_t expr_idx_; // temp_expr idx in rt_exprs_

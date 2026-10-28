@@ -42,17 +42,33 @@ public:
   static int encode_array(const DatumParameterArray &array, char *buf, int64_t length, int64_t &pos);
   static int decode_array(const char *buf, int64_t length, int64_t &pos,
                          ObIAllocator &allocator, DatumParameterArray *&array);
+  // Forward boundary for the old value decoder's deferred SQL-array body.
+  // This entry consumes the entire declared body, owns the array recursively
+  // in allocator, and preserves its original value length. Failure frees every
+  // allocation made here and leaves value unchanged.
+  static int decode_deferred_array(const char *buf, int64_t length,
+                         ObIAllocator &allocator, ObDatum &value);
 
   static int store_size(const DatumParamStore &store, int64_t &size);
   static int encode_store(const DatumParamStore &store, char *buf, int64_t length, int64_t &pos);
   static int decode_store(const char *buf, int64_t length, int64_t &pos,
                           ObIAllocator &allocator, DatumParamStore &store);
 
-  static int value_size(const ObDatum &value, const ObObjMeta &meta, int64_t &size);
-  static int encode_value(const ObDatum &value, const ObObjMeta &meta,
+  static int value_size(const ObDatum &value, const SqlTypeMeta &meta, int64_t &size);
+  static int encode_value(const ObDatum &value, const SqlTypeMeta &meta,
                           char *buf, int64_t length, int64_t &pos);
   static int decode_value(const char *buf, int64_t length, int64_t &pos,
-                          ObIAllocator &allocator, ObDatum &value, ObObjMeta &meta);
+                          ObIAllocator &allocator, ObDatum &value, SqlTypeMeta &meta);
+  // Persisted version-1 schema fields historically permit omitted trailing
+  // metadata/scalar fields at the end of a body. Protocol/parameter decoding
+  // continues to require complete fields through decode_value().
+  static int decode_schema_value(const char *buf, int64_t length, int64_t &pos,
+                          ObIAllocator &allocator, ObDatum &value, SqlTypeMeta &meta);
+  // Old UNIS member records also accepted a final string without its unused
+  // terminator. Payload bytes remain bounded; only the record cursor may end
+  // one byte past the body, as the enclosing UNIS reader historically allowed.
+  static int decode_unis_value(const char *buf, int64_t length, int64_t &pos,
+                          ObIAllocator &allocator, ObDatum &value, SqlTypeMeta &meta);
   static int parameter_size(const DatumParameter &value, int64_t &size);
   static int encode_parameter(const DatumParameter &value, char *buf,
                               int64_t length, int64_t &pos);

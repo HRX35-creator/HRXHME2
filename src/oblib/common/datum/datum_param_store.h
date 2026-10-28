@@ -31,6 +31,9 @@ using DatumParamStore = Ob2DArray<DatumParameter,
     OB_MALLOC_BIG_BLOCK_SIZE, ObWrapperAllocator, false,
     ObSEArray<DatumParameter *, 1, ObWrapperAllocator, false>>;
 
+// Canonical parameter storage throughout SQL/PL and protocol inputs.
+using ParamStore = DatumParamStore;
+
 // These specializations are visible before the generic container serializer is
 // instantiated, regardless of header include order. Native payloads are decoded
 // with the store's allocator, not through an intermediate legacy value.

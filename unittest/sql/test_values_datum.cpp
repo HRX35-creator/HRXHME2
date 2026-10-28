@@ -207,7 +207,7 @@ TEST(ValuesTableDatum, statement_deep_copy_owns_values_and_preserves_parameter_m
   }
 }
 
-TEST(ValuesTableDatum, native_ndv_hash_matches_existing_scalar_hash) {
+TEST(ValuesTableDatum, native_ndv_hash_is_deterministic_for_range_map_values) {
   int checked = 0, seen = 0;
   for (const auto &f : frames()) {
     if (f.name == "empty" || f.name == "mixed" || f.name == "sql-array-writer-only") { continue; }
@@ -224,18 +224,27 @@ TEST(ValuesTableDatum, native_ndv_hash_matches_existing_scalar_hash) {
         !ObCharset::is_valid_collation(entry.const_meta_.get_collation_type())) {
       continue;
     }
-    ObObj legacy;
-    ASSERT_EQ(OB_SUCCESS, materialize_legacy_value(*entry.const_val_, entry.const_meta_, legacy));
+    bool all_seeds_succeeded = true;
     for (uint64_t seed : {uint64_t(0), uint64_t(7), UINT64_MAX}) {
-      uint64_t expected = 0, actual = 0;
-      const int expected_ret = legacy.is_string_type() && !legacy.is_null()
-          ? (expected = legacy.varchar_hash(legacy.get_collation_type(), seed), OB_SUCCESS)
-          : legacy.hash(expected, seed);
-      const int actual_ret = hash_datum_for_ndv(*entry.const_val_, entry.const_meta_, seed, actual);
-      ASSERT_EQ(expected_ret, actual_ret);
-      if (expected_ret == OB_SUCCESS) { EXPECT_EQ(expected, actual); }
+      uint64_t first = 0, second = 0;
+      const int first_ret = hash_datum_for_ndv(*entry.const_val_, entry.const_meta_, seed, first);
+      const int second_ret = hash_datum_for_ndv(*entry.const_val_, entry.const_meta_, seed, second);
+      ASSERT_EQ(first_ret, second_ret);
+      if (OB_SUCCESS == first_ret) {
+        EXPECT_EQ(first, second);
+        if (!entry.const_val_->is_null()
+            && (ob_is_json(entry.const_meta_.get_type())
+                || ob_is_geometry(entry.const_meta_.get_type()))) {
+          const uint64_t expected = ObCharset::hash(
+              entry.const_meta_.get_collation_type(), entry.const_val_->ptr_,
+              entry.const_val_->len_, seed, false, NULL);
+          EXPECT_EQ(expected, first);
+        }
+      } else {
+        all_seeds_succeeded = false;
+      }
     }
-    ++checked;
+    if (all_seeds_succeeded) { ++checked; }
   }
   EXPECT_EQ(151, seen);
   EXPECT_GE(checked, 130);

@@ -22,6 +22,9 @@
 #include "data_plane/blocksstable/ob_storage_datum.h"
 #include "src/sql/engine/ob_exec_context.h"
 
+#include "common/datum/datum_value_projection.h"
+#include "share/datum/typed_datum_compare.h"
+
 namespace oceanbase
 {
 using namespace common;
@@ -169,23 +172,23 @@ int ObDASScanIter::set_scan_rowkey(ObEvalCtx *eval_ctx,
   if (OB_ISNULL(eval_ctx) || OB_UNLIKELY(rowkey_exprs.empty()) || OB_ISNULL(lookup_ctdef) || OB_ISNULL(alloc)) {
     ret = OB_INVALID_ARGUMENT;
   } else {
-    ObObj *obj_ptr = nullptr;
+    DatumValue *obj_ptr = nullptr;
     void *buf = nullptr;
     int64_t rowkey_cnt = rowkey_exprs.count();
-    if (OB_ISNULL(buf = alloc->alloc(sizeof(ObObj) * rowkey_cnt))) {
+    if (OB_ISNULL(buf = alloc->alloc(sizeof(DatumValue) * rowkey_cnt))) {
       ret = OB_ALLOCATE_MEMORY_FAILED;
     } else {
-      obj_ptr = new (buf) ObObj(rowkey_cnt);
+      obj_ptr = new (buf) DatumValue[rowkey_cnt];
     }
 
     for (int64_t i = 0; OB_SUCC(ret) && i < rowkey_cnt; i++) {
-      ObObj tmp_obj;
+      DatumValue tmp_obj;
       const ObExpr *expr = rowkey_exprs.at(i);
       ObDatum &col_datum = expr->locate_expr_datum(*eval_ctx);
       if (OB_UNLIKELY(T_PSEUDO_GROUP_ID == expr->type_ || T_PSEUDO_ROW_TRANS_INFO_COLUMN == expr->type_)) {
         // skip.
-      } else if (OB_FAIL(col_datum.to_obj(tmp_obj, expr->obj_meta_, expr->obj_datum_map_))) {
-      } else if (OB_FAIL(ob_write_obj(*alloc, tmp_obj, obj_ptr[i]))) {
+      } else if (OB_FAIL(project_datum_value_view(col_datum, expr->obj_meta_, expr->obj_datum_map_, tmp_obj.meta_, tmp_obj))) {
+      } else if (OB_FAIL(clone_typed_value(tmp_obj, obj_ptr[i], *alloc))) {
       }
     }
 

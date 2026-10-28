@@ -17,16 +17,153 @@
 #define USING_LOG_PREFIX SHARE
 
 #include "datum_core.h"
+#include "common/datum/datum_value.h"
+#include "common/wide_integer/ob_wide_integer_helper.h"
+#include "common/timezone/ob_time_convert.h"
 
 namespace oceanbase
 {
 namespace common
 {
 
-ObObjDatumMapType ObDatum::get_obj_datum_map_type(const ObObjType type)
+int DatumValue::build_not_strict_default_value(int16_t precision,
+    ObCollationType string_collation, ObIAllocator &owner)
+{
+  int ret = OB_SUCCESS;
+  DatumValue result = *this;
+  const SqlValueType type = get_type();
+  switch (type) {
+    case ObTinyIntType:
+      ret = result.assign_scalar(static_cast<int64_t>(0), &SqlTypeMeta::set_tinyint, owner);
+      break;
+    case ObSmallIntType:
+      ret = result.assign_scalar(static_cast<int64_t>(0), &SqlTypeMeta::set_smallint, owner);
+      break;
+    case ObMediumIntType:
+      ret = result.assign_scalar(static_cast<int64_t>(0), &SqlTypeMeta::set_mediumint, owner);
+      break;
+    case ObInt32Type:
+      ret = result.assign_scalar(static_cast<int64_t>(0), &SqlTypeMeta::set_int32, owner);
+      break;
+    case ObIntType:
+      ret = result.assign_scalar(static_cast<int64_t>(0), &SqlTypeMeta::set_int, owner);
+      break;
+    case ObUTinyIntType:
+      ret = result.assign_scalar(static_cast<uint64_t>(0), &SqlTypeMeta::set_utinyint, owner);
+      break;
+    case ObUSmallIntType:
+      ret = result.assign_scalar(static_cast<uint64_t>(0), &SqlTypeMeta::set_usmallint, owner);
+      break;
+    case ObUMediumIntType:
+      ret = result.assign_scalar(static_cast<uint64_t>(0), &SqlTypeMeta::set_umediumint, owner);
+      break;
+    case ObUInt32Type:
+      ret = result.assign_scalar(static_cast<uint64_t>(0), &SqlTypeMeta::set_uint32, owner);
+      break;
+    case ObUInt64Type:
+      ret = result.assign_scalar(static_cast<uint64_t>(0), &SqlTypeMeta::set_uint64, owner);
+      break;
+    case ObFloatType:
+      ret = result.assign_scalar(static_cast<float>(0), &SqlTypeMeta::set_float, owner);
+      break;
+    case ObUFloatType:
+      ret = result.assign_scalar(static_cast<float>(0), &SqlTypeMeta::set_ufloat, owner);
+      break;
+    case ObDoubleType:
+      ret = result.assign_scalar(static_cast<double>(0), &SqlTypeMeta::set_double, owner);
+      break;
+    case ObUDoubleType:
+      ret = result.assign_scalar(static_cast<double>(0), &SqlTypeMeta::set_udouble, owner);
+      break;
+    case ObDateTimeType:
+      ret = result.assign_scalar(static_cast<int64_t>(ObTimeConverter::ZERO_DATETIME), &SqlTypeMeta::set_datetime, owner);
+      break;
+    case ObTimestampType:
+      ret = result.assign_scalar(static_cast<int64_t>(ObTimeConverter::ZERO_DATETIME), &SqlTypeMeta::set_timestamp, owner);
+      break;
+    case ObDateType:
+      ret = result.assign_scalar(static_cast<int32_t>(ObTimeConverter::ZERO_DATE), &SqlTypeMeta::set_date, owner);
+      break;
+    case ObTimeType:
+      ret = result.assign_scalar(static_cast<int64_t>(0), &SqlTypeMeta::set_time, owner);
+      break;
+    case ObYearType:
+      ret = result.assign_scalar(static_cast<uint8_t>(0), &SqlTypeMeta::set_year, owner);
+      break;
+    case ObMySQLDateType:
+      ret = result.assign_scalar(static_cast<ObMySQLDate>(ObTimeConverter::MYSQL_ZERO_DATE), &SqlTypeMeta::set_mysql_date, owner);
+      break;
+    case ObMySQLDateTimeType:
+      ret = result.assign_scalar(static_cast<ObMySQLDateTime>(ObTimeConverter::MYSQL_ZERO_DATETIME), &SqlTypeMeta::set_mysql_datetime, owner);
+      break;
+    case ObBitType:
+      ret = result.assign_scalar(static_cast<uint64_t>(0), &SqlTypeMeta::set_bit, owner);
+      break;
+    case ObEnumType:
+      ret = result.assign_scalar(static_cast<uint64_t>(1), &SqlTypeMeta::set_enum, owner);
+      break;
+    case ObSetType:
+      ret = result.assign_scalar(static_cast<uint64_t>(0), &SqlTypeMeta::set_set, owner);
+      break;
+    case ObNumberType:
+    case ObUNumberType: {
+      number::ObNumber zero;
+      zero.set_zero();
+      ret = result.set_number(type, zero, owner);
+      if (ret == OB_SUCCESS) {
+        if (type == ObNumberType) { result.meta_.set_number(); }
+        else { result.meta_.set_unumber(); }
+      }
+      break;
+    }
+    case ObVarcharType:
+    case ObCharType:
+      ret = result.set_string(type, ObString(), owner);
+      break;
+    case ObTinyTextType:
+    case ObTextType:
+    case ObMediumTextType:
+    case ObLongTextType:
+    case ObGeometryType:
+    case ObCollectionSQLType:
+      ret = result.set_string(type, ObString(), owner);
+      if (ret == OB_SUCCESS) { result.meta_.set_inrow(); }
+      break;
+    case ObJsonType: {
+      static const char json_null[2] = {0, 0};
+      ret = result.set_string(type, ObString(sizeof(json_null), json_null), owner);
+      if (ret == OB_SUCCESS) {
+        result.meta_.set_inrow();
+        result.meta_.set_collation_type(CS_TYPE_UTF8MB4_BIN);
+      }
+      break;
+    }
+    case ObDecimalIntType: {
+      const ObDecimalInt *zero = nullptr;
+      int32_t bytes = 0;
+      if (OB_FAIL(wide::ObDecimalIntConstValue::get_zero_value_byte_precision(precision, zero, bytes))) {
+      } else {
+        ret = result.set_decimal_int(bytes, 0, zero, owner);
+      }
+      break;
+    }
+    default:
+      ret = OB_INVALID_ARGUMENT;
+  }
+  if (ret == OB_SUCCESS) {
+    if (result.is_string_type()) {
+      result.set_collation_level(CS_LEVEL_IMPLICIT);
+      result.set_collation_type(string_collation);
+    }
+    *this = result;
+  }
+  return ret;
+}
+
+SqlValueDatumMapType ObDatum::get_sql_value_datum_map_type(const SqlValueType type)
 {
 
-  const static ObObjDatumMapType maps[] = {
+  const static SqlValueDatumMapType maps[] = {
     OBJ_DATUM_NULL,           // ObNullType
     OBJ_DATUM_8BYTE_DATA,     // ObTinyIntType
     OBJ_DATUM_8BYTE_DATA,     // ObSmallIntType
@@ -73,7 +210,7 @@ ObObjDatumMapType ObDatum::get_obj_datum_map_type(const ObObjType type)
   };
   static_assert(sizeof(maps) / sizeof(maps[0]) == ObMaxType,
       "new added type should extend this map");
-  ObObjDatumMapType t = OBJ_DATUM_MAPPING_MAX;
+  SqlValueDatumMapType t = OBJ_DATUM_MAPPING_MAX;
   if (type < 0 || type >= ObMaxType) {
     LOG_ERROR_RET(common::OB_INVALID_ARGUMENT, "invalid obj type", K(type));
   } else {
@@ -83,7 +220,7 @@ ObObjDatumMapType ObDatum::get_obj_datum_map_type(const ObObjType type)
   return t;
 }
 
-uint32_t ObDatum::get_reserved_size(const ObObjDatumMapType type,
+uint32_t ObDatum::get_reserved_size(const SqlValueDatumMapType type,
                                     const int16_t prec /*PRECISION_UNKNOWN_YET*/)
 {
   static const uint32_t OBOBJ_DATUM_MAP_TYPE_TO_RES_SIZE_MAP[] =
@@ -101,7 +238,7 @@ uint32_t ObDatum::get_reserved_size(const ObObjDatumMapType type,
   };
   static_assert(sizeof(OBOBJ_DATUM_MAP_TYPE_TO_RES_SIZE_MAP)
                 / sizeof(OBOBJ_DATUM_MAP_TYPE_TO_RES_SIZE_MAP[0]) == OBJ_DATUM_MAPPING_MAX,
-      "new added ObObjDatumMapType should extend this map");
+      "new added SqlValueDatumMapType should extend this map");
   static const uint32_t OBOBJ_DECIMAL_INT_TO_RES_SIZE_MAP[] =
   {
     sizeof(int32_t),   // DECIMAL_INT_32

@@ -33,7 +33,7 @@ OB_SERIALIZE_MEMBER(ObDynamicParamSetter, param_idx_, src_, dst_);
 OB_SERIALIZE_MEMBER(ObOpSchemaObj, obj_type_, is_not_null_, order_type_);
 
 int assign_parameter_to_expr(ObEvalCtx &ctx, const ObExpr &expr,
-                             const ObDatum &source, const ObObjMeta &meta)
+                             const ObDatum &source, const SqlTypeMeta &meta)
 {
   int ret = OB_SUCCESS;
   // source may alias the destination; save its pointer before resetting the
@@ -153,7 +153,7 @@ int ObDynamicParamSetter::update_dynamic_param(ObEvalCtx &eval_ctx, ObDatum &dat
                  dst_->obj_datum_map_ == OBJ_DATUM_MAPPING_MAX) {
         ret = OB_ERR_UNEXPECTED;
       } else if (dst_->obj_datum_map_ == OBJ_DATUM_EXTEND) {
-        ObObjMeta meta;
+        SqlTypeMeta meta;
         if (frame.is_native_extend()) {
           meta.set_ext();
           meta.set_extend_type(frame.get_extend_type());

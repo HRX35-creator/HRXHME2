@@ -23,6 +23,7 @@
 #include "common/ob_field.h"
 #include "common/json_type/ob_json_bin.h"
 #include "common/timezone/ob_time_convert.h"
+#include "common/datum/datum_value.h"
 #include "lib/allocator/ob_allocator.h"
 #include "lib/allocator/page_arena.h"
 #include "lib/geometry/ob_geo_wkb_define.h"
@@ -33,7 +34,7 @@ using namespace oceanbase::share::schema;
 
 struct ObMySQLTypeMap
 {
-  /* oceanbase::common::ObObjType ob_type; */
+  /* oceanbase::common::SqlValueType ob_type; */
   EMySQLFieldType mysql_type;
   uint16_t flags;         /* flags if Field */
   uint64_t length;        /* other than varchar type */
@@ -174,7 +175,7 @@ int set_zerofill_bytes(ObIAllocator &allocator, const char *data,
   return ret;
 }
 
-int build_integer_cell_value(const ObObjType obj_type, const int64_t value,
+int build_integer_cell_value(const SqlValueType obj_type, const int64_t value,
                              MYSQL_PROTOCOL_TYPE type, ObIAllocator &scratch_allocator,
                              bool zerofill, int32_t zflength, ObMySQLCellValue &out)
 {
@@ -545,7 +546,7 @@ int build_mysql_date_cell_value(ObMySQLDate value, MYSQL_PROTOCOL_TYPE type, ObM
 
 } // namespace
 
-int ObSMUtils::build_datum_cell_value(const ObDatum &datum, const ObObjMeta &meta,
+int ObSMUtils::build_datum_cell_value(const ObDatum &datum, const SqlTypeMeta &meta,
                                       MYSQL_PROTOCOL_TYPE type,
                                       ObIAllocator &scratch_allocator,
                                       ObMySQLCellValue &out, const ObField *field,
@@ -627,7 +628,7 @@ int ObSMUtils::build_datum_cell_value(const ObDatum &datum, const ObObjMeta &met
   return ret;
 }
 
-int ObSMUtils::build_converted_string_cell_value(const ObDatum &datum, const ObObjMeta &meta,
+int ObSMUtils::build_converted_string_cell_value(const ObDatum &datum, const SqlTypeMeta &meta,
                                                  ObCharsetType result_charset,
                                                  ObIAllocator &scratch_allocator,
                                                  ObMySQLCellValue &out)
@@ -648,12 +649,12 @@ int ObSMUtils::build_converted_string_cell_value(const ObDatum &datum, const ObO
   return ret;
 }
 
-int ObSMUtils::build_cell_value(const ObObj &obj, MYSQL_PROTOCOL_TYPE type,
+static int build_typed_cell_value(const DatumValue &obj, MYSQL_PROTOCOL_TYPE type,
                                 ObIAllocator &scratch_allocator,
                                 ObMySQLCellValue &out,
                                 const ObDataTypeCastParams &dtc_params,
                                 const ObField *field,
-                                const sql::ObSQLSessionInfo &session,
+                                const oceanbase::sql::ObSQLSessionInfo &session,
                                 ObSchemaGetterGuard *schema_guard) {
   int ret = OB_SUCCESS;
   ObScale scale = 0;
@@ -723,7 +724,7 @@ int ObSMUtils::build_cell_value(const ObObj &obj, MYSQL_PROTOCOL_TYPE type,
       break;
     }
     case ObOTimestampTC: {
-      const ObOTimestampData &value = obj.get_otimestamp_value();
+      const ObOTimestampData value = obj.get_otimestamp_value();
       int64_t pos = 0;
       if (!value.is_null_value()) {
         ret = ObTimeConverter::encode_otimestamp(
@@ -742,13 +743,13 @@ int ObSMUtils::build_cell_value(const ObObj &obj, MYSQL_PROTOCOL_TYPE type,
       break;
     }
     case ObJsonTC: {
-      const ObString &value = obj.get_string();
+      const ObString value = obj.get_string();
       if (0 == value.length()) {
         out.kind_ = ObMySQLCellValueKind::LEGACY_LENENC_NULL;
       } else if (OB_UNLIKELY(value.length() < 0 || NULL == value.ptr())) {
         ret = OB_ERR_UNEXPECTED;
       } else {
-        lib::ObMemAttr mem_attr("JsonAlloc");
+        oceanbase::lib::ObMemAttr mem_attr("JsonAlloc");
         ObArenaAllocator allocator(mem_attr);
         ObJsonBin json_bin(value.ptr(), value.length(), &allocator);
         ObIJsonBase *json_base = &json_bin;
@@ -765,7 +766,7 @@ int ObSMUtils::build_cell_value(const ObObj &obj, MYSQL_PROTOCOL_TYPE type,
       break;
     }
     case ObGeometryTC: {
-      const ObString &value = obj.get_string();
+      const ObString value = obj.get_string();
       const int64_t length = value.length();
       if (OB_UNLIKELY(length < 0 || (length > 0 && NULL == value.ptr()))) {
         ret = OB_ERR_UNEXPECTED;
@@ -807,8 +808,8 @@ int ObSMUtils::build_cell_value(const ObObj &obj, MYSQL_PROTOCOL_TYPE type,
       break;
     }
     case ObUserDefinedSQLTC: {
-      const ObString &value = obj.get_string();
-      if (0 == obj.get_udt_subschema_id()) {
+      const ObString value = obj.get_string();
+      if (0 == obj.get_meta().get_subschema_id()) {
         if (0 == value.length()) {
           out.kind_ = ObMySQLCellValueKind::LEGACY_LENENC_NULL;
         } else {
@@ -850,15 +851,16 @@ int ObSMUtils::build_cell_value(const ObObj &obj, MYSQL_PROTOCOL_TYPE type,
   return ret;
 }
 
-// called by handle COM_STMT_EXECUTE offset is 0
-bool ObSMUtils::update_from_bitmap(ObObj &param, const char *bitmap,
-                                   int64_t field_index) {
-  bool ret = false;
-  if (update_from_bitmap(bitmap, field_index)) {
-    param.set_null();
-    ret = true;
+int ObSMUtils::build_cell_value(const DatumValue &value, MYSQL_PROTOCOL_TYPE type,
+    ObIAllocator &scratch_allocator, ObMySQLCellValue &out,
+    const ObDataTypeCastParams &dtc_params, const ObField *field,
+    const sql::ObSQLSessionInfo &session, ObSchemaGetterGuard *schema_guard)
+{
+  if (!value.is_invalid_type() && value.is_null()) {
+    out.reset(); out.kind_ = ObMySQLCellValueKind::NULL_VALUE; return OB_SUCCESS;
   }
-  return ret;
+  return build_typed_cell_value(value, type, scratch_allocator, out,
+                                dtc_params, field, session, schema_guard);
 }
 
 bool ObSMUtils::update_from_bitmap(const char *bitmap, int64_t field_index) {
@@ -874,7 +876,7 @@ bool ObSMUtils::update_from_bitmap(const char *bitmap, int64_t field_index) {
   return ret;
 }
 
-int get_map(ObObjType ob_type, const ObMySQLTypeMap *&map)
+int get_map(SqlValueType ob_type, const ObMySQLTypeMap *&map)
 {
   int ret = OB_SUCCESS;
   if (ob_type >= ObMaxType) {
@@ -888,7 +890,7 @@ int get_map(ObObjType ob_type, const ObMySQLTypeMap *&map)
   return ret;
 }
 
-int ObSMUtils::get_type_length(ObObjType ob_type, int64_t &length)
+int ObSMUtils::get_type_length(SqlValueType ob_type, int64_t &length)
 {
   const ObMySQLTypeMap *map = NULL;
   int ret = OB_SUCCESS;
@@ -899,7 +901,7 @@ int ObSMUtils::get_type_length(ObObjType ob_type, int64_t &length)
   return ret;
 }
 
-int ObSMUtils::get_mysql_type(ObObjType ob_type, EMySQLFieldType &mysql_type,
+int ObSMUtils::get_mysql_type(SqlValueType ob_type, EMySQLFieldType &mysql_type,
                               uint16_t &flags, ObScale &num_decimals)
 {
   const ObMySQLTypeMap *map = NULL;
@@ -961,7 +963,7 @@ int ObSMUtils::get_mysql_type(ObObjType ob_type, EMySQLFieldType &mysql_type,
   return ret;
 }
 
-int ObSMUtils::get_ob_type(ObObjType &ob_type, EMySQLFieldType mysql_type, const bool is_unsigned)
+int ObSMUtils::get_ob_type(SqlValueType &ob_type, EMySQLFieldType mysql_type, const bool is_unsigned)
 {
   int ret = OB_SUCCESS;
   switch (mysql_type) {

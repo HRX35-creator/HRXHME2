@@ -25,7 +25,7 @@ namespace common
 // Hash a typed scalar for VALUES NDV estimation. Preserve payload width,
 // unrounded numeric values and collation-aware string hashing; this is not
 // the fixed-scale or LOB-dereferencing SQL equality hash.
-int hash_datum_for_ndv(const ObDatum &datum, const ObObjMeta &meta,
+int hash_datum_for_ndv(const ObDatum &datum, const SqlTypeMeta &meta,
                        const uint64_t seed, uint64_t &result);
 } // namespace common
 } // namespace oceanbase

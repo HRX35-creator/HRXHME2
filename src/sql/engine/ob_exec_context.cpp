@@ -20,6 +20,7 @@
 #include "query/session/ob_session_access.h"
 #include "ob_exec_context.h"
 #include "sql/engine/native_param_utils.h"
+#include "sql/engine/expr/ob_datum_cast.h"
 #include "share/datum/ob_datum_funcs.h"
 #include "share/ob_lob_access_utils.h"
 #include "share/ob_server_struct.h"
@@ -246,6 +247,7 @@ ObExecContext::ObExecContext(ObIAllocator &allocator,
     admission_acquired_(false),
     use_temp_expr_ctx_cache_(false),
     temp_expr_ctx_map_(),
+    native_datum_caster_(nullptr),
     dml_event_(ObDmlEventType::DE_INVALID),
     update_columns_(nullptr),
     expect_range_count_(0),
@@ -317,6 +319,11 @@ void ObExecContext::set_runtime_services(const RuntimeServices &services)
 
 ObExecContext::~ObExecContext()
 {
+  if (native_datum_caster_ != nullptr) {
+    native_datum_caster_->~ObDatumCaster();
+    allocator_.free(native_datum_caster_);
+    native_datum_caster_ = nullptr;
+  }
   row_id_list_array_.reset();
   destroy_eval_allocator();
   reset_op_ctx();
@@ -521,6 +528,23 @@ void ObExecContext::destroy_eval_allocator()
   eval_res_allocator_.reset();
   eval_tmp_allocator_.reset();
   tmp_alloc_used_ = false;
+}
+
+int ObExecContext::get_native_datum_caster(ObDatumCaster *&caster)
+{
+  int ret = OB_SUCCESS;
+  if (native_datum_caster_ == nullptr) {
+    void *memory = allocator_.alloc(sizeof(ObDatumCaster));
+    if (memory == nullptr) { ret = OB_ALLOCATE_MEMORY_FAILED; }
+    else {
+      ObDatumCaster *created = new (memory) ObDatumCaster();
+      if (OB_FAIL(created->init(*this, false))) {
+        created->~ObDatumCaster(); allocator_.free(memory);
+      } else { native_datum_caster_ = created; }
+    }
+  }
+  if (OB_SUCC(ret)) { caster = native_datum_caster_; }
+  return ret;
 }
 
 int ObExecContext::get_temp_expr_eval_ctx(const ObTempExpr &temp_expr,
@@ -1280,7 +1304,7 @@ int ObExecContext::get_subschema_id_by_collection_elem_type(ObNestedType coll_ty
   return ret;
 }
 
-int ObExecContext::get_subschema_id_by_type_info(const ObObjMeta &obj_meta,
+int ObExecContext::get_subschema_id_by_type_info(const SqlTypeMeta &obj_meta,
                                                  const ObIArray<common::ObString> &type_info,
                                                  uint16_t &subschema_id)
 {
@@ -1294,7 +1318,7 @@ int ObExecContext::get_subschema_id_by_type_info(const ObObjMeta &obj_meta,
   return ret;
 }
 
-int ObExecContext::get_subschema_id_by_type_info(const ObObjMeta &obj_meta,
+int ObExecContext::get_subschema_id_by_type_info(const SqlTypeMeta &obj_meta,
                                                  const ObIArray<common::ObString> &type_info,
                                                  uint16_t &subschema_id) const
 {
@@ -1438,7 +1462,7 @@ sql::ObSQLSessionInfo *ObExecContextAccess::get_session(sql::ObExecContext &ctx)
 
 void ObExecContextAccess::configure_obj_cast(
     sql::ObExecContext &ctx,
-    common::ObObjCastParams &params)
+    common::DatumCastParams &params)
 {
   if (OB_NOT_NULL(ctx.get_my_session())) {
     ctx.get_my_session()->configure_obj_cast(

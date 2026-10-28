@@ -29,6 +29,6 @@ class ObEvalCtx;
 // untyped expression may require a full native Extend payload. No Obj value
 // is used to map between those two native datum forms.
 int assign_parameter_to_expr(ObEvalCtx &ctx, const ObExpr &expr,
-                             const common::ObDatum &value, const common::ObObjMeta &meta);
+                             const common::ObDatum &value, const common::SqlTypeMeta &meta);
 } // namespace sql
 } // namespace oceanbase

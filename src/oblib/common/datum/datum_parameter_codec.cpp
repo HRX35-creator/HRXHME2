@@ -16,6 +16,7 @@
 
 #include "common/datum/datum_parameter_codec.h"
 #include <type_traits>
+#include "lib/container/ob_se_array.h"
 
 #ifdef OCEANBASE_COMMON_OB_OBJECT_H_
 #error "The native wire codec must not depend on the legacy value definition"
@@ -28,6 +29,46 @@ namespace common
 namespace
 {
 constexpr int MAX_ARRAY_DEPTH = 64;
+// A deferred array can fail after allocating several nested values. Track
+// payload pointers separately so rollback reaches even unpublished leaves;
+// successful payloads remain in the caller's allocator, never in this object.
+class DeferredArrayDecodeAllocator : public ObIAllocator
+{
+public:
+  explicit DeferredArrayDecodeAllocator(ObIAllocator &owner) : owner_(owner), committed_(false) {}
+  ~DeferredArrayDecodeAllocator()
+  {
+    if (!committed_) {
+      for (int64_t i = 0; i < allocations_.count(); ++i) { owner_.free(allocations_.at(i)); }
+    }
+  }
+  void *alloc(int64_t size) override
+  {
+    void *memory = owner_.alloc(size);
+    if (memory != nullptr && allocations_.push_back(memory) != OB_SUCCESS) {
+      owner_.free(memory);
+      memory = nullptr;
+    }
+    return memory;
+  }
+  void *alloc(int64_t size, const ObMemAttr &) override { return alloc(size); }
+  void free(void *memory) override
+  {
+    for (int64_t i = 0; memory != nullptr && i < allocations_.count(); ++i) {
+      if (allocations_.at(i) == memory) {
+        allocations_.remove(i);
+        owner_.free(memory);
+        break;
+      }
+    }
+  }
+  void commit() { committed_ = true; }
+private:
+  ObIAllocator &owner_;
+  bool committed_;
+  ObSEArray<void *, 16> allocations_;
+};
+
 uint32_t datum_length_limit()
 {
   ObDatumDesc descriptor;
@@ -101,8 +142,13 @@ struct ReadArchive
   int64_t pos_;
   ObIAllocator &allocator_;
   int ret_ = OB_SUCCESS;
-  ReadArchive(const char *buf, int64_t length, int64_t pos, ObIAllocator &allocator)
-      : buf_(buf), length_(length), pos_(pos), allocator_(allocator) {}
+  bool allow_omitted_fields_;
+  bool allow_missing_string_terminator_;
+  ReadArchive(const char *buf, int64_t length, int64_t pos, ObIAllocator &allocator,
+              bool allow_omitted_fields = false, bool allow_missing_string_terminator = false)
+      : buf_(buf), length_(length), pos_(pos), allocator_(allocator),
+        allow_omitted_fields_(allow_omitted_fields),
+        allow_missing_string_terminator_(allow_missing_string_terminator) {}
   void require(int64_t length)
   {
     if (ret_ == OB_SUCCESS && (length < 0 || length > length_ - pos_)) {
@@ -111,6 +157,18 @@ struct ReadArchive
   }
   void field(ObString &value)
   {
+    if (allow_omitted_fields_ && pos_ >= length_) { return; }
+    if (allow_omitted_fields_ && ret_ == OB_SUCCESS) {
+      // Reuse the existing bounded string parser's error/omission contract.
+      // Its historical decoder may advance past a missing terminator; schema
+      // decoding rejected that later, so reject it here before copying bytes.
+      ret_ = serialization::decode(buf_, length_, pos_, value);
+      if (ret_ == OB_SUCCESS && pos_ > length_ && !allow_missing_string_terminator_) { ret_ = OB_INVALID_ARGUMENT; }
+      if (ret_ == OB_SUCCESS && (value.length() < 0 || value.length() > datum_length_limit())) {
+        ret_ = OB_DESERIALIZE_ERROR;
+      }
+      return;
+    }
     if (ret_ == OB_SUCCESS) {
       int64_t length = 0;
       ret_ = serialization::decode_vi64(buf_, length_, pos_, &length);
@@ -125,6 +183,7 @@ struct ReadArchive
   }
   template <typename T> void field(T &value)
   {
+    if (allow_omitted_fields_ && pos_ >= length_) { return; }
     require(1);
     if (ret_ == OB_SUCCESS) {
       const int64_t before = pos_;
@@ -213,7 +272,7 @@ void scalar(ObDatum &datum, Archive &archive)
 }
 
 template <typename Archive>
-void value(ObDatum &datum, ObObjMeta &meta, Archive &archive, int depth)
+void value(ObDatum &datum, SqlTypeMeta &meta, Archive &archive, int depth)
 {
   if (archive.ret_ != OB_SUCCESS) { return; }
   if (depth > MAX_ARRAY_DEPTH) { archive.ret_ = OB_SIZE_OVERFLOW; return; }
@@ -221,7 +280,13 @@ void value(ObDatum &datum, ObObjMeta &meta, Archive &archive, int depth)
     if (meta.is_invalid()) { archive.ret_ = OB_ERR_UNEXPECTED; return; }
     if (datum.is_null() && !meta.is_null()) { meta.set_null(); }
   }
-  archive.require(4); // Fixed four metadata bytes; legacy macros alone allow truncated headers.
+  // Protocol readers stay strict. The schema reader explicitly retains the
+  // old OB_UNIS_DECODE omission rule for shorter version-1 bodies.
+  if constexpr (Archive::reading) {
+    if (!archive.allow_omitted_fields_) { archive.require(4); }
+  } else {
+    archive.require(4);
+  }
   archive.field(meta);
   if (archive.ret_ != OB_SUCCESS) { return; }
   if (meta.is_invalid()) { archive.ret_ = OB_ERR_UNEXPECTED; return; }
@@ -347,7 +412,10 @@ void value(ObDatum &datum, ObObjMeta &meta, Archive &archive, int depth)
             if (archive.ret_ == OB_SUCCESS && archive.pos_ != end) { archive.ret_ = OB_DESERIALIZE_ERROR; }
             archive.length_ = parent_end;
             archive.allocate(datum, sizeof(int64_t));
-            if (archive.ret_ == OB_SUCCESS) { datum.set_int(reinterpret_cast<int64_t>(array)); }
+            if (archive.ret_ == OB_SUCCESS) {
+              array->source_value_size_ = static_cast<int32_t>(length);
+              datum.set_int(reinterpret_cast<int64_t>(array));
+            }
           }
         } else {
           if (datum.ptr_ == nullptr || datum.len_ != sizeof(int64_t)) { archive.ret_ = OB_INVALID_ARGUMENT; break; }
@@ -395,7 +463,7 @@ template <typename Archive>
 void parameter(ParameterView<Archive> &parameter_value, Archive &archive, int depth)
 {
   ObDatum datum(parameter_value.datum_);
-  ObObjMeta meta(parameter_value.get_type_meta());
+  SqlTypeMeta meta(parameter_value.get_type_meta());
   value(datum, meta, archive, depth);
   ObAccuracy accuracy(parameter_value.get_accuracy());
   uint32_t flags = parameter_value.get_result_flag();
@@ -480,6 +548,26 @@ int DatumParameterCodec::decode_array(const char *buf, int64_t length, int64_t &
   return archive.ret_;
 }
 
+int DatumParameterCodec::decode_deferred_array(const char *buf, int64_t length,
+                                               ObIAllocator &allocator, ObDatum &output)
+{
+  if (buf == nullptr || length <= 0 || length > INT32_MAX) { return OB_INVALID_ARGUMENT; }
+  DeferredArrayDecodeAllocator transaction(allocator);
+  ReadArchive archive(buf, length, 0, transaction);
+  DatumParameterArray *array = nullptr;
+  read_array_body(archive, array, 0);
+  if (archive.ret_ == OB_SUCCESS && archive.pos_ != length) { archive.ret_ = OB_DESERIALIZE_ERROR; }
+  ObDatum owned;
+  archive.allocate(owned, sizeof(int64_t));
+  if (archive.ret_ == OB_SUCCESS) {
+    array->source_value_size_ = static_cast<int32_t>(length);
+    owned.set_int(reinterpret_cast<int64_t>(array));
+    output = owned;
+    transaction.commit();
+  }
+  return archive.ret_;
+}
+
 int DatumParameterCodec::store_size(const DatumParamStore &store, int64_t &size)
 {
   SizeArchive archive;
@@ -524,22 +612,22 @@ int DatumParameterCodec::decode_store(const char *buf, int64_t length, int64_t &
   return archive.ret_;
 }
 
-int DatumParameterCodec::value_size(const ObDatum &datum, const ObObjMeta &meta, int64_t &size)
+int DatumParameterCodec::value_size(const ObDatum &datum, const SqlTypeMeta &meta, int64_t &size)
 {
   ObDatum view(datum);
-  ObObjMeta type(meta);
+  SqlTypeMeta type(meta);
   SizeArchive archive;
   value(view, type, archive, 0);
   if (archive.ret_ == OB_SUCCESS) { size = archive.pos_; }
   return archive.ret_;
 }
 
-int DatumParameterCodec::encode_value(const ObDatum &datum, const ObObjMeta &meta,
+int DatumParameterCodec::encode_value(const ObDatum &datum, const SqlTypeMeta &meta,
                                       char *buf, int64_t length, int64_t &pos)
 {
   if (!valid_buffer(buf, length, pos)) { return OB_INVALID_ARGUMENT; }
   ObDatum view(datum);
-  ObObjMeta type(meta);
+  SqlTypeMeta type(meta);
   WriteArchive archive(buf, length, pos);
   value(view, type, archive, 0);
   if (archive.ret_ == OB_SUCCESS) { pos = archive.pos_; }
@@ -547,17 +635,42 @@ int DatumParameterCodec::encode_value(const ObDatum &datum, const ObObjMeta &met
 }
 
 int DatumParameterCodec::decode_value(const char *buf, int64_t length, int64_t &pos,
-                                      ObIAllocator &allocator, ObDatum &datum, ObObjMeta &meta)
+                                      ObIAllocator &allocator, ObDatum &datum, SqlTypeMeta &meta)
 {
   if (!valid_buffer(buf, length, pos)) { return OB_INVALID_ARGUMENT; }
   ObDatum output;
   output.set_null();
-  ObObjMeta type;
+  SqlTypeMeta type;
   ReadArchive archive(buf, length, pos, allocator);
   value(output, type, archive, 0);
   if (archive.ret_ == OB_SUCCESS) { datum = output; meta = type; pos = archive.pos_; }
   return archive.ret_;
 }
+
+static int decode_metadata_value(const char *buf, int64_t length, int64_t &pos,
+                                      ObIAllocator &allocator, ObDatum &datum, SqlTypeMeta &meta,
+                                      bool allow_missing_string_terminator, bool reuse_metadata)
+{
+  if (!valid_buffer(buf, length, pos)) { return OB_INVALID_ARGUMENT; }
+  ObDatum output;
+  output.set_null();
+  // UNIS members deserialize into an existing value: metadata fields absent
+  // from a short body keep their previous values. Payload decoding still
+  // starts from a fresh owned Datum, matching the old zeroed value union.
+  // Schema decoding keeps its existing fresh-metadata behavior.
+  SqlTypeMeta type = reuse_metadata ? meta : SqlTypeMeta();
+  ReadArchive archive(buf, length, pos, allocator, true, allow_missing_string_terminator);
+  value(output, type, archive, 0);
+  if (archive.ret_ == OB_SUCCESS) { datum = output; meta = type; pos = archive.pos_; }
+  return archive.ret_;
+}
+
+int DatumParameterCodec::decode_schema_value(const char *buf, int64_t length, int64_t &pos,
+    ObIAllocator &allocator, ObDatum &datum, SqlTypeMeta &meta)
+{ return decode_metadata_value(buf, length, pos, allocator, datum, meta, false, false); }
+int DatumParameterCodec::decode_unis_value(const char *buf, int64_t length, int64_t &pos,
+    ObIAllocator &allocator, ObDatum &datum, SqlTypeMeta &meta)
+{ return decode_metadata_value(buf, length, pos, allocator, datum, meta, true, true); }
 
 int DatumParameterCodec::parameter_size(const DatumParameter &source, int64_t &size)
 {
@@ -586,6 +699,70 @@ int DatumParameterCodec::decode_parameter(const char *buf, int64_t length, int64
   parameter(candidate, archive, 0);
   if (archive.ret_ == OB_SUCCESS) { output = candidate; pos = archive.pos_; }
   return archive.ret_;
+}
+
+int32_t datum_array_source_value_size(const ObDatum &address)
+{
+  int32_t size = 0;
+  if (!address.is_null() && address.ptr_ != nullptr && address.len_ == sizeof(int64_t)) {
+    const auto *array = reinterpret_cast<const DatumParameterArray *>(address.get_int());
+    if (array != nullptr) { size = array->source_value_size_; }
+  }
+  return size;
+}
+
+int DatumParameter::get_string(ObString &out) const
+{
+  int ret = OB_OBJ_TYPE_ERROR;
+  if (!is_null() && (type_meta_.is_string_or_lob_locator_type() || is_lob_storage())) {
+    if (!is_lob_storage() || datum_.len_ == 0) {
+      out = datum_.get_string();
+    } else {
+      ObLobLocatorV2 locator(datum_.get_string(), has_lob_header());
+      if (locator.is_valid()) {
+        // Retain the existing checked string getter's return contract: callers
+        // handle out-row locators through the request LOB service separately.
+        locator.get_inrow_data(out);
+      }
+    }
+    ret = OB_SUCCESS;
+  }
+  return ret;
+}
+
+int DatumParameter::serialize(char *buf, int64_t length, int64_t &pos) const
+{
+  return DatumParameterCodec::encode_parameter(*this, buf, length, pos);
+}
+int DatumParameter::deserialize(const char *buf, int64_t length, int64_t &pos, ObIAllocator &allocator)
+{
+  return DatumParameterCodec::decode_parameter(buf, length, pos, allocator, *this);
+}
+int64_t DatumParameter::get_serialize_size() const
+{
+  int64_t size = 0;
+  return OB_SUCCESS == DatumParameterCodec::parameter_size(*this, size) ? size : 0;
+}
+
+int DatumParameter::get_real_param_count(int64_t &count) const
+{
+  int ret = OB_SUCCESS;
+  count = 1;
+  if (is_ext()) {
+    const auto *array = reinterpret_cast<const DatumParameterArray *>(get_ext());
+    if (array == nullptr || array->count_ < 0) { ret = OB_ERR_UNEXPECTED; }
+    else { count = array->count_; }
+  }
+  return ret;
+}
+bool DatumParameter::is_outrow_lob() const
+{
+  bool result = false;
+  if (type_meta_.is_lob_storage() && datum_.len_ > 0 && has_lob_header()) {
+    ObLobLocatorV2 locator(datum_.get_string(), true);
+    if (locator.is_valid()) { result = !locator.has_inrow_data(); }
+  }
+  return result;
 }
 
 } // namespace common

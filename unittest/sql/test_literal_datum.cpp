@@ -19,6 +19,9 @@
 #include "sql/resolver/ob_resolver_utils.h"
 #include <gtest/gtest.h>
 #include <string>
+#include <fstream>
+#include <map>
+#include <sstream>
 #include <vector>
 using namespace oceanbase::common;
 using namespace oceanbase::sql;
@@ -84,7 +87,7 @@ public:
 DatumParameter sentinel() {
   static const int64_t number = 31415;
   DatumParameter p;
-  ObObjMeta meta; meta.set_int();
+  SqlTypeMeta meta; meta.set_int();
   p.set_type_meta(meta);
   p.datum_.set_string(reinterpret_cast<const char *>(&number), sizeof(number));
   p.set_accuracy(ObAccuracy(37, 7));
@@ -116,6 +119,37 @@ TEST(LiteralDatum, all_literal_branches_preserve_values_metadata_and_flags) {
     {T_DATETIME, "2024-02-29"}, {T_TIMESTAMP, "2024-02-29 12:34:56.123456"},
     {T_TIMESTAMP_TZ, "2024-02-29 12:34:56.123456789 +08:00"}
   };
+  auto unhex = [](const std::string &data) {
+    std::string result;
+    for (size_t i = 0; i < data.size(); i += 2) {
+      result += static_cast<char>(std::stoul(data.substr(i, 2), nullptr, 16));
+    }
+    return result;
+  };
+  auto bytes = [](const auto &value) {
+    return std::string(reinterpret_cast<const char *>(&value), sizeof(value));
+  };
+  std::ifstream fixture("unittest/sql/data/literal_values.golden");
+  ASSERT_TRUE(fixture.good());
+  std::map<int, std::string> frames;
+  std::vector<std::vector<std::string>> records;
+  std::string line;
+  while (std::getline(fixture, line)) {
+    if (line.empty() || line[0] == '#') { continue; }
+    std::vector<std::string> fields;
+    std::istringstream row(line);
+    std::string field;
+    while (std::getline(row, field, '\t')) { fields.push_back(field); }
+    ASSERT_GE(fields.size(), 3);
+    if (fields[0] == "V") {
+      ASSERT_TRUE(frames.emplace(std::stoi(fields[1]), unhex(fields[2])).second);
+    } else {
+      ASSERT_EQ("R", fields[0]);
+      records.push_back(fields);
+    }
+  }
+  ASSERT_EQ(48, frames.size());
+  ASSERT_EQ(1376, records.size());
   int compared = 0, successes = 0, errors = 0;
   for (int mode = 0; mode < 16; ++mode) {
     Context ctx;
@@ -126,15 +160,18 @@ TEST(LiteralDatum, all_literal_branches_preserve_values_metadata_and_flags) {
       ctx.statement = statement;
       for (auto &input : cases) {
         SCOPED_TRACE(::testing::Message() << mode << "/" << statement << "/" << input.type << "/" << input.text);
-        ObArenaAllocator legacy_arena, native_arena;
-        ObObjParam legacy;
+        const auto &expected = records.at(compared);
+        const std::string key = std::to_string(mode) + '/' + std::to_string(statement)
+            + '/' + std::to_string(&input - cases.data());
+        ASSERT_EQ(key, expected[1]);
+        const int old_ret = std::stoi(expected[2]);
+        ObArenaAllocator native_arena;
         DatumParameter native = sentinel();
         const std::string unchanged = wire(native);
-        ObString old_prefix, new_prefix;
-        const int old_ret = resolve(input, legacy_arena, legacy, old_prefix, ctx);
-        const int new_ret = resolve(input, native_arena, native, new_prefix, ctx);
+        ObString prefix;
+        const int new_ret = resolve(input, native_arena, native, prefix, ctx);
         ASSERT_EQ(old_ret, new_ret);
-        EXPECT_EQ(old_prefix, new_prefix);
+        EXPECT_EQ(unhex(expected[3]), std::string(prefix.ptr() ? prefix.ptr() : "", prefix.length()));
         ++compared;
         if (OB_SUCCESS != old_ret) {
           ++errors;
@@ -143,14 +180,14 @@ TEST(LiteralDatum, all_literal_branches_preserve_values_metadata_and_flags) {
           continue;
         }
         ++successes;
-        DatumParameter expected;
-        ASSERT_EQ(OB_SUCCESS, copy_legacy_parameter(legacy, expected, legacy_arena));
-        EXPECT_EQ(0, MEMCMP(&legacy.get_meta(), &native.get_type_meta(), sizeof(ObObjMeta)));
-        EXPECT_EQ(0, MEMCMP(&legacy.get_param_meta(), &native.get_param_meta(), sizeof(ObObjMeta)));
-        EXPECT_EQ(0, MEMCMP(&legacy.get_param_flag(), &native.get_param_flag(), sizeof(ParamFlag)));
-        EXPECT_EQ(legacy.get_raw_text_pos(), native.get_raw_text_pos());
-        EXPECT_EQ(legacy.get_raw_text_len(), native.get_raw_text_len());
-        EXPECT_EQ(wire(expected), wire(native));
+        ASSERT_EQ(8, expected.size());
+        EXPECT_EQ(frames.at(std::stoi(expected[4])), wire(native));
+        EXPECT_EQ(unhex(expected[5]), bytes(native.get_type_meta()));
+        EXPECT_EQ(unhex(expected[6]), bytes(native.get_param_meta()));
+        EXPECT_EQ(expected[7], std::to_string(native.get_param_flag().flag_) + '/'
+            + std::to_string(native.get_param_flag().extend_flag_));
+        EXPECT_EQ(-1, native.get_raw_text_pos());
+        EXPECT_EQ(-1, native.get_raw_text_len());
       }
     }
   }

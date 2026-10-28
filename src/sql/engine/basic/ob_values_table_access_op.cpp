@@ -26,7 +26,7 @@ using namespace common;
 namespace sql
 {
 // Keep the existing count + bare-value wire; parameter-only accuracy and
-// flags were never serialized by the former constant ObObj array.
+// flags were never serialized by the former constant-value array.
 OB_DEF_SERIALIZE_SIMPLE(ObValuesTableAccessSpec)
 {
   int ret = OB_SUCCESS;
@@ -66,7 +66,7 @@ OB_DEF_DESERIALIZE_SIMPLE(ObValuesTableAccessSpec)
   }
   for (int64_t i = 0; OB_SUCC(ret) && i < count; ++i) {
     DatumValue &value = datum_values_.at(i);
-    ObObjMeta meta;
+    SqlTypeMeta meta;
     if (OB_FAIL(DatumParameterCodec::decode_value(buf, data_len, pos,
                                                 *datum_values_.get_allocator(), value.datum_, meta))) {
     } else {
@@ -189,7 +189,7 @@ int ObValuesTableAccessOp::inner_get_next_row()
   return ret;
 }
 
-void ObValuesTableAccessOp::update_src_meta(const ObObjMeta &src_obj_meta,
+void ObValuesTableAccessOp::update_src_meta(const SqlTypeMeta &src_obj_meta,
                                             const ObAccuracy &src_obj_acc,
                                             ObDatumMeta &src_meta)
 {
@@ -202,7 +202,7 @@ void ObValuesTableAccessOp::update_src_meta(const ObObjMeta &src_obj_meta,
 int ObValuesTableAccessOp::get_real_src_obj_type(const int64_t row_idx,
                                                  ObExpr &src_expr,
                                                  ObDatumMeta &src_meta,
-                                                 ObObjMeta &src_obj_meta)
+                                                 SqlTypeMeta &src_obj_meta)
 {
   int ret = OB_SUCCESS;
   if (T_QUESTIONMARK == src_expr.type_) {
@@ -239,7 +239,7 @@ int ObValuesTableAccessOp::calc_datum_from_expr(const int64_t col_idx,
 {
   int ret = OB_SUCCESS;
   ObDatumMeta src_meta = src_expr->datum_meta_;
-  ObObjMeta src_obj_meta = src_expr->obj_meta_;
+  SqlTypeMeta src_obj_meta = src_expr->obj_meta_;
   ObDatum *datum = NULL;
   bool need_adjust_decimal_int = false;
   if (src_expr == dst_expr) {
@@ -272,11 +272,11 @@ int ObValuesTableAccessOp::calc_datum_from_expr(const int64_t col_idx,
       ObExpr real_src_expr = *src_expr;
       real_src_expr.datum_meta_ = src_meta;
       real_src_expr.obj_meta_ = src_obj_meta;
-      real_src_expr.obj_datum_map_ = ObDatum::get_obj_datum_map_type(src_meta.type_);
+      real_src_expr.obj_datum_map_ = ObDatum::get_sql_value_datum_map_type(src_meta.type_);
       if (OB_FAIL(datum_caster_.to_type(dst_expr->datum_meta_, real_src_expr, cm_, datum))) {
       } else {
         ObDatum &dst_datum = dst_expr->locate_datum_for_write(eval_ctx_);
-        if (ObObjDatumMapType::OBJ_DATUM_STRING == dst_expr->obj_datum_map_) {
+        if (SqlValueDatumMapType::OBJ_DATUM_STRING == dst_expr->obj_datum_map_) {
           ObExprStrResAlloc res_alloc(*dst_expr, eval_ctx_);
           if (OB_FAIL(dst_datum.deep_copy(*datum, res_alloc))) {
           }
@@ -296,7 +296,7 @@ namespace {
 // Keep the expression adapter used by DECIMAL -> NUMBER off the ordinary
 // borrowed-value path. DECIMAL width/scale changes use the numeric kernel
 // directly below and never construct an input expression.
-OB_NOINLINE int cast_values_decimal_to_number(const ObDatum &source, const ObObjMeta &meta,
+OB_NOINLINE int cast_values_decimal_to_number(const ObDatum &source, const SqlTypeMeta &meta,
                                                ObExpr &output, ObEvalCtx &ctx,
                                                ObDatumCaster &caster, ObCastMode mode)
 {
@@ -312,7 +312,7 @@ OB_NOINLINE int cast_values_decimal_to_number(const ObDatum &source, const ObObj
   input.datum_meta_.scale_ = meta.get_scale();
   input.datum_meta_.precision_ = wide::ObDecimalIntConstValue::get_max_precision_by_int_bytes(
       source.get_int_bytes());
-  input.obj_datum_map_ = ObDatum::get_obj_datum_map_type(meta.get_type());
+  input.obj_datum_map_ = ObDatum::get_sql_value_datum_map_type(meta.get_type());
   ObDatum *converted = nullptr;
   int ret = caster.to_type(output.datum_meta_, input, mode, converted);
   if (OB_SUCC(ret)) {
@@ -323,7 +323,7 @@ OB_NOINLINE int cast_values_decimal_to_number(const ObDatum &source, const ObObj
   return ret;
 }
 
-OB_NOINLINE int scale_values_decimal(const ObDatum &source, const ObObjMeta &meta,
+OB_NOINLINE int scale_values_decimal(const ObDatum &source, const SqlTypeMeta &meta,
                                       ObExpr &output, ObEvalCtx &ctx, ObCastMode mode)
 {
   int ret = OB_SUCCESS;
@@ -342,10 +342,10 @@ OB_NOINLINE int scale_values_decimal(const ObDatum &source, const ObObjMeta &met
 }
 } // namespace
 
-int ObValuesTableAccessOp::calc_datum_from_param(const ObDatum &source, const ObObjMeta &meta, ObExpr *dst_expr)
+int ObValuesTableAccessOp::calc_datum_from_param(const ObDatum &source, const SqlTypeMeta &meta, ObExpr *dst_expr)
 {
   int ret = OB_SUCCESS;
-  const ObObjType dst_type = dst_expr->datum_meta_.type_;
+  const SqlValueType dst_type = dst_expr->datum_meta_.type_;
   const bool decimal = !source.is_null() && meta.is_decimal_int();
   if (decimal && dst_type == ObDecimalIntType &&
       ObDatumCast::need_scale_decimalint(meta.get_scale(), source.get_int_bytes(),

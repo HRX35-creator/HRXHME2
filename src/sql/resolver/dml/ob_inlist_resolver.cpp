@@ -380,7 +380,7 @@ int ObInListResolver::resolve_access_param_values_table(const ParseNode &in_list
     }
     for (int64_t j = 0; OB_SUCC(ret) && j < column_cnt; j++) {
       const ParseNode *element = column_cnt == 1 ? row_node : row_node->children_[j];
-      const ObObjParam &obj_param = param_store->at(element->value_);
+      const DatumParameter &obj_param = param_store->at(element->value_);
       ObRawExprResType res_type;
       res_type.set_meta(obj_param.get_param_meta());
       res_type.set_accuracy(obj_param.get_accuracy());

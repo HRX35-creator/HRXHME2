@@ -76,18 +76,18 @@ private:
   DISALLOW_COPY_AND_ASSIGN(ObSMRow);
 }; // end of class OBMP
 
-// Protocol adapter for borrowed execution values. Only compatibility columns
-// have ObObj cells; ordinary values remain in the execution frame.
+// Protocol adapter for borrowed native execution values. Converted columns
+// contain DatumValue views; other values remain in their expression frame.
 class DatumMysqlRow final : public obmysql::ObMySQLRow
 {
 public:
   DatumMysqlRow(obmysql::MYSQL_PROTOCOL_TYPE type, const sql::ResultRowView &row,
-                const ObIArray<int64_t> &obj_indexes, const ObIArray<ObObj> &objects,
+                const ObIArray<int64_t> &obj_indexes, const ObIArray<DatumValue> &objects,
                 const ObDataTypeCastParams &dtc_params,
                 const sql::ObSQLSessionInfo &session, const ColumnsFieldIArray &fields,
                 ObCharsetType result_charset,
                 share::schema::ObSchemaGetterGuard *schema_guard)
-      : ObMySQLRow(type), row_(row), obj_indexes_(&obj_indexes.at(0)),
+      : ObMySQLRow(type), row_(row), obj_indexes_(obj_indexes.empty() ? nullptr : &obj_indexes.at(0)),
         objects_(objects.empty() ? nullptr : &objects.at(0)),
         dtc_params_(dtc_params), session_(session), fields_(fields),
         result_charset_(result_charset), schema_guard_(schema_guard) {}
@@ -103,7 +103,7 @@ protected:
 private:
   const sql::ResultRowView &row_;
   const int64_t *obj_indexes_;
-  const ObObj *objects_;
+  const DatumValue *objects_;
   const ObDataTypeCastParams &dtc_params_;
   const sql::ObSQLSessionInfo &session_;
   const ColumnsFieldIArray &fields_;

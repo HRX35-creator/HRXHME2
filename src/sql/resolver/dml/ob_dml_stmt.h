@@ -327,7 +327,10 @@ struct ColumnItem
   bool is_invalid() const { return NULL == expr_; }
   const ObColumnRefRawExpr *get_expr() const { return expr_; }
   ObColumnRefRawExpr *get_expr() { return expr_; }
-  void set_default_value(const common::ObObj &val);
+  // Clone non-NULL defaults into the explicit owner, or expr_'s plan arena.
+  // An explicit owner also supports temporary column items before expr_ is set.
+  int set_default_value(const common::DatumValue &val,
+                        common::ObIAllocator *owner = nullptr);
   void set_default_value_expr(ObRawExpr *expr)
   {
     default_value_expr_ = expr;
@@ -381,7 +384,7 @@ struct ColumnItem
   common::ObString column_name_;
   ObColumnRefRawExpr *expr_;
   // the following two are used by DML operations, such as insert or update
-  common::ObObj default_value_;
+  common::DatumValue default_value_;
   bool auto_filled_timestamp_;
   // json table reuse default_value_expr_ for on error default
   ObRawExpr *default_value_expr_;

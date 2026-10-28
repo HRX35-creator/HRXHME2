@@ -1,4 +1,4 @@
-# Captured from ObObj-backed spec at 303a0a873032, using the unchanged base spec and 151 scalar value kinds plus empty.
+# Captured from the previous value implementation at 303a0a873032, using the unchanged base spec and 151 scalar value kinds plus empty.
 empty	019c80808000ffffffffffffffffff01000000000000000181808080000000000001030000ffffffffffffffffff01ffffffffffffffffff0100
 value-type-0	019c80808000ffffffffffffffffff01000000000000000181808080000000000001030000ffffffffffffffffff01ffffffffffffffffff0101000700ff
 value-type-1	019c80808000ffffffffffffffffff01000000000000000181808080000000000001030000ffffffffffffffffff01ffffffffffffffffff010101053ffff9

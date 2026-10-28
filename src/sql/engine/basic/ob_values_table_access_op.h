@@ -62,15 +62,15 @@ private:
                            const int64_t row_idx,
                            ObExpr *src_expr,
                            ObExpr *dst_expr);
-  int calc_datum_from_param(const common::ObDatum &source, const common::ObObjMeta &meta,
+  int calc_datum_from_param(const common::ObDatum &source, const common::SqlTypeMeta &meta,
                              ObExpr *dst_expr);
-  void update_src_meta(const ObObjMeta &src_obj_meta,
+  void update_src_meta(const SqlTypeMeta &src_obj_meta,
                        const ObAccuracy &src_obj_acc,
                        ObDatumMeta &src_meta);
   int get_real_src_obj_type(const int64_t row_idx,
                             ObExpr &src_expr,
                             ObDatumMeta &src_meta,
-                            ObObjMeta &src_obj_meta);
+                            SqlTypeMeta &src_obj_meta);
 private:
   DISALLOW_COPY_AND_ASSIGN(ObValuesTableAccessOp);
 

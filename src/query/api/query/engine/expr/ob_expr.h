@@ -33,7 +33,7 @@ namespace oceanbase
 {
 namespace common
 {
- class ObObjParam;
+ class DatumParameter;
 }
 
 namespace storage
@@ -48,7 +48,7 @@ using ObExprHashFuncType = common::ObDatumHashFuncType;
 using ObExprCmpFuncType = common::ObDatumCmpFuncType;
 using ObBatchDatumHashFunc = common::ObBatchDatumHashFunc;
 using NullSafeRowCmpFunc = common::NullSafeRowCmpFunc;
-typedef int (*RowCmpFunc) (const common::ObObjMeta &l_meta, const common::ObObjMeta &r_meta,
+typedef int (*RowCmpFunc) (const common::SqlTypeMeta &l_meta, const common::SqlTypeMeta &r_meta,
                            const void *l_data, const int32_t l_len,
                            const void *r_data, const int32_t r_len,
                            int &cmp_ret,
@@ -71,13 +71,13 @@ public:
                   , scale_(-1), precision_(-1)
   {
   }
-  ObDatumMeta(const common::ObObjType type,
+  ObDatumMeta(const common::SqlValueType type,
               const common::ObCollationType cs_type,
               const int8_t scale)
     : type_(type), cs_type_(cs_type), scale_(scale), precision_(-1)
   {
   }
-  ObDatumMeta(const common::ObObjType type,
+  ObDatumMeta(const common::SqlValueType type,
               const common::ObCollationType cs_type,
               const int8_t scale,
               const common::ObPrecision prec)
@@ -88,7 +88,7 @@ public:
   void reset() { new (this) ObDatumMeta(); }
   TO_STRING_KV(K_(type), K_(cs_type), K_(scale), K_(precision));
 
-  common::ObObjType type_;
+  common::SqlValueType type_;
   common::ObCollationType cs_type_;
   int8_t scale_;
   union {
@@ -116,12 +116,12 @@ public:
   }
   OB_INLINE bool is_ext_sql_array() const
   {
-    //in ObObj, scale_ and meta extend flag union in the same structure,
+    // In the legacy value layout, scale and metadata extension flags share a union,
     //for extend type meta, scale_ means extend flag
     return ((static_cast<uint8_t>(common::ObExtendType) == type_)
             && (common::T_EXT_SQL_ARRAY == static_cast<uint8_t>(scale_)));
   }
-  OB_INLINE common::ObObjType get_type() const { return type_; }
+  OB_INLINE common::SqlValueType get_type() const { return type_; }
   OB_INLINE uint16_t get_subschema_id() const { return static_cast<uint16_t>(cs_type_); }
   // ObCollectionSQLType reused cs_type as part of sub schema id, always return CS_TYPE_BINARY.
   OB_INLINE ObCollationType get_cs_type() const { return type_ == ObCollectionSQLType ? CS_TYPE_BINARY : cs_type_; }
@@ -296,9 +296,9 @@ private:
 struct alignas(8) ObDynReserveBuf
 {
   static const uint32_t MAGIC_NUM = 0xD928e5bf;
-  static bool supported(const common::ObObjType &type)
+  static bool supported(const common::SqlValueType &type)
   {
-    const common::ObObjTypeClass tc = common::ob_obj_type_class(type);
+    const common::SqlTypeClass tc = common::sql_type_class(type);
     return common::ObStringTC == tc || common::ObTextTC == tc
            || common::ObRawTC == tc
            || common::ObRowIDTC == tc
@@ -634,13 +634,12 @@ public:
   ObExprOperatorType type_;
   // meta data of datum
   ObDatumMeta datum_meta_;
-  // meta data of ObObj, used for ObObj converting.
-  common::ObObjMeta obj_meta_;
+  // Value metadata used for legacy conversion boundaries.
+  common::SqlTypeMeta obj_meta_;
   // max length of datum value. can be less than 0
   int32_t max_length_;
-  // type of ObObj memory layout to ObDatum memory layout mapping,
-  // used to convert ObDatum to ObObj and vice versa.
-  common::ObObjDatumMapType obj_datum_map_;
+  // Mapping between legacy value memory layout and ObDatum memory layout.
+  common::SqlValueDatumMapType obj_datum_map_;
 
   union {
     struct {
@@ -754,24 +753,27 @@ using common::DatumParameter;
 typedef common::ObIArray<ObExpr *> ObExprPtrIArray;
 typedef common::ObFixedArray<ObExpr *, common::ObIAllocator> ExprFixedArray;
 
-// Temporary input bridge. Parameter consumers use DatumParameter directly;
-// this bridge disappears when protocol / plan-cache inputs migrate too.
-int import_legacy_parameter(const common::ObObjParam &source,
+// Capture the already evaluated expression frame as a borrowed parameter.
+// Preserve raw LOB/type metadata separately from declaration accuracy. The
+// caller must clone before the expression frame can be reset or overwritten.
+void capture_datum_parameter(const ObExpr &expr, ObEvalCtx &ctx, DatumParameter &value);
+
+// A borrowed native descriptor binding; the producer owns its payload.
+int bind_datum_parameter(const common::DatumParameter &source,
                             DatumParameter &destination,
                             common::ObIAllocator *allocator);
 
 // Explicit value boundaries for remaining resolver / range interfaces. Values
 // and complete type metadata stay separate in native caches.
-int clone_datum_value(const common::ObDatum &source, const common::ObObjMeta &meta,
+int clone_datum_value(const common::ObDatum &source, const common::SqlTypeMeta &meta,
                       common::ObDatum &destination, common::ObIAllocator &allocator);
-int copy_legacy_value(const common::ObObj &source, common::ObDatum &destination,
-                      common::ObObjMeta &meta, common::ObIAllocator &allocator);
-int materialize_legacy_value(const common::ObDatum &source, const common::ObObjMeta &meta,
-                             common::ObObj &destination);
 
-int copy_legacy_parameter(const common::ObObjParam &source, DatumParameter &destination,
+int clone_datum_value(const common::DatumParameter &source,
+                      common::DatumParameter &destination,
+                      common::ObIAllocator &allocator);
+int clone_datum_parameter(const common::DatumParameter &source, DatumParameter &destination,
                           common::ObIAllocator &allocator);
-int materialize_legacy_parameter(const DatumParameter &source, common::ObObjParam &destination);
+int assign_datum_parameter(const DatumParameter &source, common::DatumParameter &destination);
 
 using common::DatumParamStore;
 

@@ -26,7 +26,7 @@ namespace common
 OB_SERIALIZE_MEMBER(ObDataType, meta_, accuracy_, is_zero_fill_);
 OB_SERIALIZE_MEMBER(ObEnumSetInnerValue, numberic_value_, string_value_);
 
-DEFINE_SERIALIZE(ObObjMeta)
+DEFINE_SERIALIZE(SqlTypeMeta)
 {
   int ret = OB_SUCCESS;
   OB_UNIS_ENCODE(type_);
@@ -36,7 +36,7 @@ DEFINE_SERIALIZE(ObObjMeta)
   return ret;
 }
 
-DEFINE_DESERIALIZE(ObObjMeta)
+DEFINE_DESERIALIZE(SqlTypeMeta)
 {
   int ret = OB_SUCCESS;
   OB_UNIS_DECODE(type_);
@@ -46,7 +46,7 @@ DEFINE_DESERIALIZE(ObObjMeta)
   return ret;
 }
 
-DEFINE_GET_SERIALIZE_SIZE(ObObjMeta)
+DEFINE_GET_SERIALIZE_SIZE(SqlTypeMeta)
 {
   int64_t len = 0;
   OB_UNIS_ADD_LEN(type_);

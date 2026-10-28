@@ -235,7 +235,7 @@ public:
       };
     };
     // Uses the existing four-byte padding between flags and the value slot.
-    common::ObObjMeta const_meta_;
+    common::SqlTypeMeta const_meta_;
     union {
       int64_t param_idx_;
       common::ObDatum* const_val_;
@@ -534,7 +534,7 @@ public:
                      ObRawExpr *extra_value_expr = nullptr);
   int set_general_nlj_range_extraction(const ObIArray<ObFastFinalPos> &pos_arr);
   const ObIArray<ObFastFinalPos>& get_general_nlj_range_extraction() const { return fast_final_pos_arr_; }
-  static int is_precise_like_range(ObObjType type, const ObString &pattern, ObCollationType collation,
+  static int is_precise_like_range(SqlValueType type, const ObString &pattern, ObCollationType collation,
                                    char escape, bool &is_precise);
   static bool check_like_range_precise(const ObString &pattern_str,
                                        const char *max_str_buf,
@@ -542,11 +542,11 @@ public:
                                        const char escape);
   static bool can_be_extract_range(ObItemType cmp_type,
                                    const ObRawExprResType &col_type,
-                                   const ObObjMeta &calc_meta,
-                                   ObObjType data_type,
+                                   const SqlTypeMeta &calc_meta,
+                                   SqlValueType data_type,
                                    bool &always_true);
   static bool can_domain_be_extract_range(const ObDomainOpType &op_type, const ObRawExprResType &col_type,
-                                          const ObObjMeta &res_type, common::ObObjType data_type,
+                                          const SqlTypeMeta &res_type, common::SqlValueType data_type,
                                           bool &always_true);
   static common::ObDomainOpType get_geo_relation(ObItemType type);
   static common::ObDomainOpType get_domain_op_type(ObItemType type);

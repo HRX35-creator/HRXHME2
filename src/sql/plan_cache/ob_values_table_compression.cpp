@@ -382,8 +382,8 @@ int ObValuesTableCompression::resolve_params_for_values_clause(ObPlanCacheCtx &p
   int ret = OB_SUCCESS;
   ObSQLSessionInfo *session = pc_ctx.exec_ctx_.get_my_session();
   ObPhysicalPlanCtx *phy_ctx = pc_ctx.exec_ctx_.get_physical_plan_ctx();
-  ObObjParam obj_param;
-  ObObjParam array_param;
+  DatumParameter obj_param;
+  DatumParameter array_param;
   void *ptr = NULL;
   int64_t raw_param_cnt = pc_ctx.fp_result_.raw_params_.count();
   int64_t raw_idx = 0;  // idx in pc_ctx.fp_result_.raw_params_
@@ -435,15 +435,15 @@ int ObValuesTableCompression::resolve_params_for_values_clause(ObPlanCacheCtx &p
           ret = OB_ALLOCATE_MEMORY_FAILED;
         } else {
           for (int64_t k = 0; OB_SUCC(ret) && k < batch_num; k++) {
-            ObObjParam resolved;
+            DatumParameter resolved;
             if (OB_FAIL(ObResolverUtils::resolver_param(pc_ctx, *session, phy_param_store, stmt_type,
                         param_charset_type.at(raw_idx), neg_param_index, not_param_index,
                         must_be_positive_idx, formalize_prec_idx, raw_array_param->at(k), raw_idx,
                         enable_mysql_compatible_dates, resolved, is_param,
                         enable_decimal_int))) {
-            } else if (OB_FAIL(copy_legacy_parameter(resolved, array_param_ptr->data_[k], pc_ctx.allocator_))) {
+            } else if (OB_FAIL(clone_datum_parameter(resolved, array_param_ptr->data_[k], pc_ctx.allocator_))) {
             } else {
-              const ObObjParam &param = resolved;
+              const DatumParameter &param = resolved;
               ObExprResType res_type;
               res_type.set_meta(ObSQLUtils::is_empty_string_typed_null(param) ? param.get_param_meta() : param.get_meta());
               res_type.set_accuracy(param.get_accuracy());
@@ -485,12 +485,14 @@ int ObValuesTableCompression::resolve_params_for_values_clause(ObPlanCacheCtx &p
           }
           if (OB_SUCC(ret)) {
             array_param.reset();
-            array_param_ptr->element_.set_meta_type(new_res_type.get_obj_meta());
+            array_param_ptr->element_.set_meta_type(new_res_type.get_sql_type_meta());
             array_param_ptr->element_.set_accuracy(new_res_type.get_accuracy());
-            array_param.set_extend(reinterpret_cast<int64_t>(array_param_ptr), T_EXT_SQL_ARRAY);
+            if (OB_FAIL(array_param.set_extend(reinterpret_cast<int64_t>(array_param_ptr),
+                                                T_EXT_SQL_ARRAY, pc_ctx.allocator_))) {
+            }
             array_param.set_param_meta();
             array_param.get_param_flag().is_batch_parameter_ = true;
-            if (OB_FAIL(ab_params->push_back(array_param))) {
+            if (OB_SUCC(ret) && OB_FAIL(ab_params->push_back(array_param))) {
             }
           }
         }
@@ -517,8 +519,8 @@ int ObValuesTableCompression::resolve_params_for_values_clause(ObPlanCacheCtx &p
   const ObBitSet<> bit_set_dummy;
   ObSQLSessionInfo *session = pc_ctx.exec_ctx_.get_my_session();
   ObPhysicalPlanCtx *phy_ctx = pc_ctx.exec_ctx_.get_physical_plan_ctx();
-  ObObjParam obj_param;
-  ObObjParam array_param;
+  DatumParameter obj_param;
+  DatumParameter array_param;
   int64_t raw_param_cnt = pc_ctx.fp_result_.raw_params_.count();
   int64_t raw_idx = 0;  // idx in pc_ctx.fp_result_.raw_params_
   int64_t array_param_idx = 0;  // idx in pc_ctx.fp_result_.array_params_
@@ -574,14 +576,14 @@ int ObValuesTableCompression::resolve_params_for_values_clause(ObPlanCacheCtx &p
           ret = OB_ALLOCATE_MEMORY_FAILED;
         } else {
           for (int64_t k = 0; OB_SUCC(ret) && k < batch_num; k++) {
-            ObObjParam resolved;
+            DatumParameter resolved;
             if (OB_FAIL(ObResolverUtils::resolver_param(pc_ctx, *session, phy_param_store, stmt::T_SELECT,
                         param_charset_type.at(raw_idx), bit_set_dummy, bit_set_dummy,
                         bit_set_dummy, bit_set_dummy, raw_array_param->at(k), raw_idx, enable_mysql_compatible_dates,
                         resolved, is_param, enable_decimal_int))) {
-            } else if (OB_FAIL(copy_legacy_parameter(resolved, array_param_ptr->data_[k], pc_ctx.allocator_))) {
+            } else if (OB_FAIL(clone_datum_parameter(resolved, array_param_ptr->data_[k], pc_ctx.allocator_))) {
             } else {
-              const ObObjParam &param = resolved;
+              const DatumParameter &param = resolved;
               ObExprResType res_type;
               res_type.set_meta(ObSQLUtils::is_empty_string_typed_null(param) ? param.get_param_meta() : param.get_meta());
               res_type.set_accuracy(param.get_accuracy());
@@ -624,12 +626,14 @@ int ObValuesTableCompression::resolve_params_for_values_clause(ObPlanCacheCtx &p
           }
           if (OB_SUCC(ret)) {
             array_param.reset();
-            array_param_ptr->element_.set_meta_type(new_res_type.get_obj_meta());
+            array_param_ptr->element_.set_meta_type(new_res_type.get_sql_type_meta());
             array_param_ptr->element_.set_accuracy(new_res_type.get_accuracy());
-            array_param.set_extend(reinterpret_cast<int64_t>(array_param_ptr), T_EXT_SQL_ARRAY);
+            if (OB_FAIL(array_param.set_extend(reinterpret_cast<int64_t>(array_param_ptr),
+                                                T_EXT_SQL_ARRAY, pc_ctx.allocator_))) {
+            }
             array_param.set_param_meta();
             array_param.get_param_flag().is_batch_parameter_ = true;
-            phy_param_store.at(raw_idx) = array_param;
+            if (OB_SUCC(ret)) { phy_param_store.at(raw_idx) = array_param; }
           }
         }
       }

@@ -19,6 +19,7 @@
 #error "Native codec tests must not include the legacy value definition"
 #endif
 #include <cstring>
+#include <algorithm>
 #include <cstdlib>
 #include <fstream>
 #include <sstream>
@@ -29,9 +30,6 @@
 #include "lib/allocator/ob_allocator.h"
 using namespace oceanbase::common;
 namespace {
-template <typename T, typename = void> struct Complete : std::false_type {};
-template <typename T> struct Complete<T, std::void_t<decltype(sizeof(T))>> : std::true_type {};
-static_assert(!Complete<ObObj>::value, "No complete legacy value in native codec");
 class RejectAllocator : public ObIAllocator {
 public:
   int calls = 0;
@@ -40,7 +38,7 @@ public:
   void free(void *) override {}
 };
 DatumParameter integer(ObIAllocator &arena, int64_t n) {
-  DatumParameter p; ObObjMeta meta; meta.set_int(); p.set_type_meta(meta);
+  DatumParameter p; SqlTypeMeta meta; meta.set_int(); p.set_type_meta(meta);
   EXPECT_EQ(OB_SUCCESS, p.alloc_datum_reserved_buff(meta, -1, arena)); p.datum_.set_int(n); return p;
 }
 std::string encode(const DatumParameter &p) {
@@ -51,7 +49,7 @@ std::string encode(const DatumParameter &p) {
   EXPECT_EQ(size, pos); return wire;
 }
 DatumParameter make_array(ObIAllocator &arena, int64_t count) {
-  DatumParameter p; ObObjMeta meta; meta.set_ext(); meta.set_extend_type(T_EXT_SQL_ARRAY); p.set_type_meta(meta);
+  DatumParameter p; SqlTypeMeta meta; meta.set_ext(); meta.set_extend_type(T_EXT_SQL_ARRAY); p.set_type_meta(meta);
   EXPECT_EQ(OB_SUCCESS, p.alloc_datum_reserved_buff(meta, -1, arena));
   p.set_array_address(DatumParameterArray::alloc(arena, count)); return p;
 }
@@ -64,12 +62,12 @@ TEST(DatumCodec, integer_legacy_golden) {
   EXPECT_EQ(sizeof(expected), size);
   ASSERT_EQ(OB_SUCCESS, DatumParameterCodec::encode_value(p.datum_, p.get_type_meta(), wire, sizeof(wire), pos));
   ASSERT_EQ(sizeof(expected), pos); EXPECT_EQ(0, memcmp(expected, wire, pos));
-  ObDatum d; ObObjMeta meta; int64_t read = 0;
+  ObDatum d; SqlTypeMeta meta; int64_t read = 0;
   ASSERT_EQ(OB_SUCCESS, DatumParameterCodec::decode_value(wire, pos, read, arena, d, meta));
   EXPECT_EQ(pos, read); EXPECT_EQ(42, d.get_int()); EXPECT_EQ(ObIntType, meta.get_type());
 }
 TEST(DatumCodec, typed_null_keeps_accuracy_but_runtime_fields_are_not_on_wire) {
-  ObArenaAllocator arena; DatumParameter p; ObObjMeta meta; meta.set_varchar(); meta.set_scale(6);
+  ObArenaAllocator arena; DatumParameter p; SqlTypeMeta meta; meta.set_varchar(); meta.set_scale(6);
   p.set_type_meta(meta); p.set_param_meta(meta); p.set_raw_text_info(19, 31);
   p.get_param_flag().flag_ = 0xa5; p.get_param_flag().extend_flag_ = 0x5a;
   ObAccuracy accuracy; accuracy.set_accuracy(0x123456789abcdef0LL); p.set_accuracy(accuracy); p.set_result_flags(0xfedcba98U);
@@ -83,7 +81,7 @@ TEST(DatumCodec, typed_null_keeps_accuracy_but_runtime_fields_are_not_on_wire) {
 TEST(DatumCodec, decoded_string_outlives_wire_and_source_arena) {
   ObArenaAllocator destination; DatumParameter out; const std::string expected("a\0中文\xff", 9);
   {
-    ObArenaAllocator source_arena; DatumParameter p; ObObjMeta meta; meta.set_varbinary(); p.set_type_meta(meta);
+    ObArenaAllocator source_arena; DatumParameter p; SqlTypeMeta meta; meta.set_varbinary(); p.set_type_meta(meta);
     p.datum_.set_string(expected.data(), expected.size()); std::string wire = encode(p); int64_t pos = 0;
     ASSERT_EQ(OB_SUCCESS, DatumParameterCodec::decode_parameter(wire.data(), wire.size(), pos, destination, out));
     memset(&wire[0], 0xa5, wire.size());
@@ -95,7 +93,7 @@ TEST(DatumCodec, decoded_number_owns_contiguous_payload) {
   {
     ObArenaAllocator source_arena; number::ObNumber n;
     ASSERT_EQ(OB_SUCCESS, n.from("12345678901234567890.000000001", source_arena));
-    DatumParameter p; ObObjMeta meta; meta.set_number(); p.set_type_meta(meta);
+    DatumParameter p; SqlTypeMeta meta; meta.set_number(); p.set_type_meta(meta);
     ASSERT_EQ(OB_SUCCESS, p.alloc_datum_reserved_buff(meta, 65, source_arena)); p.datum_.set_number(n); p.set_precision(65); p.set_scale(30);
     expected.assign(n.get_digits(), n.get_digits() + n.get_length()); std::string wire = encode(p); int64_t pos = 0;
     ASSERT_EQ(OB_SUCCESS, DatumParameterCodec::decode_parameter(wire.data(), wire.size(), pos, destination, out)); memset(&wire[0], 0xa5, wire.size());
@@ -111,7 +109,7 @@ TEST(DatumCodec, nested_heterogeneous_arrays_own_values_and_metadata) {
     ObArenaAllocator source_arena; DatumParameter p = make_array(source_arena, 2); auto *outer = p.get_array<DatumParameterArray>(); ASSERT_NE(nullptr, outer);
     outer->data_[0] = integer(source_arena, 123); outer->data_[0].set_precision(19); outer->data_[1] = make_array(source_arena, 1);
     auto *inner = outer->data_[1].get_array<DatumParameterArray>(); ASSERT_NE(nullptr, inner);
-    ObObjMeta meta; meta.set_varchar(); inner->data_[0].set_type_meta(meta); inner->data_[0].set_length(80); inner->data_[0].datum_.set_string("中文", 6);
+    SqlTypeMeta meta; meta.set_varchar(); inner->data_[0].set_type_meta(meta); inner->data_[0].set_length(80); inner->data_[0].datum_.set_string("中文", 6);
     std::string wire = encode(p); int64_t pos = 0;
     ASSERT_EQ(OB_SUCCESS, DatumParameterCodec::decode_parameter(wire.data(), wire.size(), pos, destination, out)); memset(&wire[0], 0xa5, wire.size());
   }
@@ -122,7 +120,7 @@ TEST(DatumCodec, nested_heterogeneous_arrays_own_values_and_metadata) {
 }
 TEST(DatumCodec, truncation_never_changes_output_or_position) {
   ObArenaAllocator arena; DatumParameter p = make_array(arena, 2); auto *a = p.get_array<DatumParameterArray>();
-  a->data_[0] = integer(arena, INT64_MIN); ObObjMeta meta; meta.set_varchar(); a->data_[1].set_type_meta(meta); a->data_[1].datum_.set_string("abc", 3);
+  a->data_[0] = integer(arena, INT64_MIN); SqlTypeMeta meta; meta.set_varchar(); a->data_[1].set_type_meta(meta); a->data_[1].datum_.set_string("abc", 3);
   const std::string wire = encode(p);
   for (int64_t size = 0; size < wire.size(); ++size) {
     SCOPED_TRACE(size); DatumParameter out = integer(arena, 99); const char *ptr = out.datum_.ptr_; int64_t pos = 0;
@@ -147,8 +145,8 @@ TEST(DatumCodec, bounded_writer_preserves_guards_and_position) {
 TEST(DatumCodec, all_twelve_collation_bits_survive) {
   ObArenaAllocator arena; ObDatum d; d.set_string("x", 1);
   for (int id = 0; id < 4096; ++id) {
-    ObObjMeta meta; meta.set_varchar(); meta.set_cs_level(((id >> 8) << 4) | CS_LEVEL_COERCIBLE); meta.set_cs_type(id & 255);
-    char wire[32]; int64_t pos = 0, read = 0; ObDatum out; ObObjMeta decoded;
+    SqlTypeMeta meta; meta.set_varchar(); meta.set_cs_level(((id >> 8) << 4) | CS_LEVEL_COERCIBLE); meta.set_cs_type(id & 255);
+    char wire[32]; int64_t pos = 0, read = 0; ObDatum out; SqlTypeMeta decoded;
     ASSERT_EQ(OB_SUCCESS, DatumParameterCodec::encode_value(d, meta, wire, sizeof(wire), pos));
     ASSERT_EQ(OB_SUCCESS, DatumParameterCodec::decode_value(wire, pos, read, arena, out, decoded)); EXPECT_EQ(0, memcmp(&meta, &decoded, sizeof(meta))) << id;
   }
@@ -176,7 +174,7 @@ std::string summary(const DatumParameter &p, bool parameter) {
     EXPECT_EQ(p.get_type_meta().is_outrow(), p.datum_.is_outrow());
     EXPECT_EQ(p.get_type_meta().has_lob_header(), p.datum_.has_lob_header());
   }
-  std::string out = hex(&p.get_type_meta(), sizeof(ObObjMeta)) + ":";
+  std::string out = hex(&p.get_type_meta(), sizeof(SqlTypeMeta)) + ":";
   if (p.is_null()) { out += "NULL"; }
   else if (p.is_ext_sql_array()) {
     out += "["; const auto *a = p.get_array<DatumParameterArray>();
@@ -199,7 +197,7 @@ TEST(DatumCodec, captured_legacy_golden_all_types_and_boundaries) {
     for (int mode = 0; mode < 2; ++mode) {
       SCOPED_TRACE(mode); const std::string wire = unhex(fields[1 + mode]); DatumParameter output; int64_t pos = 0, size = -1;
       if (mode == 0) {
-        ObObjMeta meta;
+        SqlTypeMeta meta;
         ASSERT_EQ(OB_SUCCESS, DatumParameterCodec::decode_value(wire.data(), wire.size(), pos, arena, output.datum_, meta)); output.set_type_meta(meta);
         ASSERT_EQ(OB_SUCCESS, DatumParameterCodec::value_size(output.datum_, output.get_type_meta(), size));
       } else {
@@ -215,7 +213,7 @@ TEST(DatumCodec, captured_legacy_golden_all_types_and_boundaries) {
       for (int64_t prefix = 0; prefix < wire.size(); ++prefix) {
         int64_t read = 0; DatumParameter unchanged = integer(arena, 99); const char *before = unchanged.datum_.ptr_;
         if (mode == 0) {
-          ObObjMeta meta = unchanged.get_type_meta();
+          SqlTypeMeta meta = unchanged.get_type_meta();
           EXPECT_NE(OB_SUCCESS, DatumParameterCodec::decode_value(wire.data(), prefix, read, arena, unchanged.datum_, meta));
           EXPECT_EQ(ObIntType, meta.get_type());
         } else { EXPECT_NE(OB_SUCCESS, DatumParameterCodec::decode_parameter(wire.data(), prefix, read, arena, unchanged)); }
@@ -228,7 +226,7 @@ TEST(DatumCodec, captured_legacy_golden_all_types_and_boundaries) {
 TEST(DatumCodec, malformed_lengths_fail_before_allocating) {
   ObArenaAllocator arena; RejectAllocator reject;
   for (int64_t length : {int64_t(-1), INT64_MAX, int64_t(1) << 29}) {
-    char wire[128]; int64_t pos = 0; ObObjMeta meta; meta.set_varchar();
+    char wire[128]; int64_t pos = 0; SqlTypeMeta meta; meta.set_varchar();
     ASSERT_EQ(OB_SUCCESS, meta.serialize(wire, sizeof(wire), pos));
     ASSERT_EQ(OB_SUCCESS, serialization::encode(wire, sizeof(wire), pos, length));
     wire[pos++] = 0; int64_t read = 0; DatumParameter output = integer(arena, 99);
@@ -243,7 +241,7 @@ TEST(DatumCodec, impossible_array_count_and_body_length_are_rejected_before_allo
   ASSERT_EQ(OB_SUCCESS, element.serialize(body, sizeof(body), body_size));
   ASSERT_EQ(OB_SUCCESS, serialization::encode(body, sizeof(body), body_size, INT64_MAX));
   for (int64_t length : {int64_t(-1), INT64_MAX, body_size}) {
-    char wire[256]; int64_t pos = 0; ObObjMeta meta; meta.set_ext(); meta.set_extend_type(T_EXT_SQL_ARRAY);
+    char wire[256]; int64_t pos = 0; SqlTypeMeta meta; meta.set_ext(); meta.set_extend_type(T_EXT_SQL_ARRAY);
     ASSERT_EQ(OB_SUCCESS, meta.serialize(wire, sizeof(wire), pos));
     ASSERT_EQ(OB_SUCCESS, serialization::encode(wire, sizeof(wire), pos, int64_t(0)));
     ASSERT_EQ(OB_SUCCESS, serialization::encode(wire, sizeof(wire), pos, length));
@@ -255,7 +253,7 @@ TEST(DatumCodec, impossible_array_count_and_body_length_are_rejected_before_allo
   EXPECT_EQ(0, reject.calls);
 }
 TEST(DatumCodec, extended_metadata_and_preexisting_unsupported_pl_pointer_boundary) {
-  ObArenaAllocator arena; DatumParameter p; ObObjMeta meta; meta.set_ext(); meta.set_extend_type(7);
+  ObArenaAllocator arena; DatumParameter p; SqlTypeMeta meta; meta.set_ext(); meta.set_extend_type(7);
   meta.set_cs_level(0xf4); meta.set_cs_type(0xff); p.set_type_meta(meta);
   ASSERT_EQ(OB_SUCCESS, p.alloc_datum_reserved_buff(meta, -1, arena));
   p.datum_.set_extend(ObActionFlag::OP_NOP, 7, 0, meta.get_cs_level(), meta.get_cs_type());
@@ -386,7 +384,7 @@ TEST(DatumCodec, clone_nested_arrays_owns_payload_and_preserves_runtime_metadata
   source.set_raw_text_info(17, 19); source.get_param_flag().extend_flag_ = 0x5a;
   auto *inner = child.get_array<DatumParameterArray>();
   char bytes[] = "owned bytes"; DatumParameter &text = inner->data_[0];
-  ObObjMeta type; type.set_varchar(); type.set_collation_type(CS_TYPE_UTF8MB4_BIN);
+  SqlTypeMeta type; type.set_varchar(); type.set_collation_type(CS_TYPE_UTF8MB4_BIN);
   text.set_type_meta(type); text.set_param_meta(type); text.datum_.set_string(bytes, sizeof(bytes)-1);
   text.set_length(37); text.set_result_flags(0x1234); text.set_raw_text_info(23, 29); text.get_param_flag().flag_ = 0xa5;
   source.get_array<DatumParameterArray>()->data_[0] = child;
@@ -414,6 +412,247 @@ TEST(DatumCodec, array_clone_bounds_cycles_and_allocation_errors_preserve_output
   DatumParameterArray invalid; invalid.count_ = -1; int64_t size = 123, pos = 0; char bytes[64];
   EXPECT_EQ(OB_INVALID_ARGUMENT, DatumParameterCodec::array_size(invalid, size)); EXPECT_EQ(123, size);
   EXPECT_EQ(OB_INVALID_ARGUMENT, invalid.serialize(bytes, sizeof(bytes), pos)); EXPECT_EQ(0, pos);
+}
+
+
+namespace {
+class ArrayBoundaryAllocator : public ObIAllocator
+{
+public:
+  explicit ArrayBoundaryAllocator(int64_t fail_on_call = -1)
+      : fail_on_call_(fail_on_call), calls_(0) {}
+  ~ArrayBoundaryAllocator()
+  {
+    EXPECT_TRUE(owned_.empty());
+    for (void *memory : owned_) { std::free(memory); }
+  }
+  void *alloc(int64_t size) override
+  {
+    const int64_t call = calls_++;
+    void *memory = call == fail_on_call_ ? nullptr : std::malloc(std::max<int64_t>(size, 1));
+    if (memory != nullptr) { owned_.push_back(memory); }
+    return memory;
+  }
+  void *alloc(int64_t size, const ObMemAttr &) override { return alloc(size); }
+  void free(void *memory) override
+  {
+    if (memory != nullptr) {
+      auto found = std::find(owned_.begin(), owned_.end(), memory);
+      EXPECT_NE(owned_.end(), found);
+      if (found != owned_.end()) { owned_.erase(found); std::free(memory); }
+    }
+  }
+  bool empty() const { return owned_.empty(); }
+  int64_t calls() const { return calls_; }
+private:
+  int64_t fail_on_call_;
+  int64_t calls_;
+  std::vector<void *> owned_;
+};
+DatumParameter array_view(const ObDatum &address)
+{
+  DatumParameter value;
+  SqlTypeMeta meta; meta.set_ext(); meta.set_extend_type(T_EXT_SQL_ARRAY);
+  value.set_type_meta(meta); value.set_datum(address);
+  return value;
+}
+std::string encode_value(const DatumParameter &value)
+{
+  int64_t size = -1;
+  EXPECT_EQ(OB_SUCCESS, DatumParameterCodec::value_size(value.datum_, value.get_type_meta(), size));
+  if (size < 0) { return {}; }
+  std::string bytes(size, '\0'); int64_t pos = 0;
+  EXPECT_EQ(OB_SUCCESS, DatumParameterCodec::encode_value(value.datum_, value.get_type_meta(),
+                                                        &bytes[0], bytes.size(), pos));
+  EXPECT_EQ(size, pos);
+  return bytes;
+}
+}
+
+TEST(DatumCodec, deferred_old_array_body_becomes_owned_native_value_and_preserves_source_size)
+{
+  // These independent pre-migration fixtures are the old value decoder's
+  // exact deferred body slices, not wire generated by the new decoder.
+  std::ifstream input("unittest/oblib/data/datum_parameter_codec.golden"); ASSERT_TRUE(input.good());
+  std::string line; int cases = 0;
+  while (std::getline(input, line)) {
+    if (line.rfind("array-", 0) != 0) { continue; }
+    std::istringstream record(line); std::string label, encoded;
+    std::getline(record, label, '\t'); std::getline(record, encoded, '\t');
+    SCOPED_TRACE(label); std::string wire = unhex(encoded); const std::string expected_wire = wire;
+    int64_t cursor = 4, zero = -1, length = -1;
+    ASSERT_EQ(OB_SUCCESS, serialization::decode(wire.data(), wire.size(), cursor, zero));
+    ASSERT_EQ(0, zero);
+    ASSERT_EQ(OB_SUCCESS, serialization::decode(wire.data(), wire.size(), cursor, length));
+    ASSERT_EQ(wire.size() - cursor, length);
+    std::string body = wire.substr(cursor);
+    ArrayBoundaryAllocator decoded_owner, cloned_owner;
+    ObDatum decoded;
+    ASSERT_EQ(OB_SUCCESS, DatumParameterCodec::decode_deferred_array(
+        body.data(), body.size(), decoded_owner, decoded));
+    DatumParameter owned = array_view(decoded);
+    EXPECT_EQ(length, owned.get_val_len());
+    EXPECT_EQ(length, owned.value_view().get_val_len());
+    EXPECT_EQ(expected_wire, encode_value(owned));
+    DatumParameter clone;
+    ASSERT_EQ(OB_SUCCESS, DatumParameterArray::clone_parameter(owned, clone, cloned_owner));
+    EXPECT_EQ(length, clone.get_val_len());
+    EXPECT_NE(owned.get_array<DatumParameterArray>(), clone.get_array<DatumParameterArray>());
+    for (int64_t prefix = 0; prefix < body.size(); ++prefix) {
+      SCOPED_TRACE(prefix); ArrayBoundaryAllocator rejected; ObDatum output = owned.datum_;
+      EXPECT_NE(OB_SUCCESS, DatumParameterCodec::decode_deferred_array(body.data(), prefix, rejected, output));
+      EXPECT_EQ(owned.datum_.ptr_, output.ptr_); EXPECT_TRUE(rejected.empty());
+    }
+    for (int64_t fail = 0; fail < decoded_owner.calls(); ++fail) {
+      SCOPED_TRACE(fail); ArrayBoundaryAllocator rejected(fail); ObDatum output = owned.datum_;
+      EXPECT_EQ(OB_ALLOCATE_MEMORY_FAILED,
+                DatumParameterCodec::decode_deferred_array(body.data(), body.size(), rejected, output));
+      EXPECT_EQ(owned.datum_.ptr_, output.ptr_); EXPECT_TRUE(rejected.empty());
+    }
+    std::fill(body.begin(), body.end(), '\x5a');
+    std::fill(wire.begin(), wire.end(), '\x5a');
+    EXPECT_EQ(expected_wire, encode_value(owned));
+    DatumParameterArray::release_owned(owned, decoded_owner);
+    EXPECT_TRUE(decoded_owner.empty());
+    EXPECT_EQ(expected_wire, encode_value(clone));
+    EXPECT_EQ(length, clone.get_val_len());
+    DatumParameterArray::release_owned(clone, cloned_owner);
+    EXPECT_TRUE(cloned_owner.empty());
+    ++cases;
+  }
+  EXPECT_EQ(4, cases);
+}
+
+TEST(DatumCodec, deferred_array_decode_rolls_back_every_prefix_and_partial_allocation)
+{
+  ObArenaAllocator source;
+  DatumParameter original = make_array(source, 40);
+  auto *array = original.get_array<DatumParameterArray>(); ASSERT_NE(nullptr, array);
+  for (int64_t i = 0; i < array->count_; ++i) { array->data_[i] = integer(source, i * 12345); }
+  int64_t size = 0;
+  ASSERT_EQ(OB_SUCCESS, DatumParameterCodec::array_size(*array, size));
+  std::string body(size, '\0'); int64_t pos = 0;
+  ASSERT_EQ(OB_SUCCESS, DatumParameterCodec::encode_array(*array, &body[0], body.size(), pos));
+  DatumParameter sentinel = integer(source, 99);
+  for (int64_t prefix = 0; prefix < body.size(); ++prefix) {
+    SCOPED_TRACE(prefix);
+    ArrayBoundaryAllocator owner;
+    ObDatum output = sentinel.datum_;
+    EXPECT_NE(OB_SUCCESS, DatumParameterCodec::decode_deferred_array(body.data(), prefix, owner, output));
+    EXPECT_EQ(sentinel.datum_.ptr_, output.ptr_); EXPECT_EQ(99, output.get_int());
+    EXPECT_TRUE(owner.empty());
+  }
+  int64_t allocations = 0;
+  {
+    ArrayBoundaryAllocator owner; ObDatum output;
+    ASSERT_EQ(OB_SUCCESS, DatumParameterCodec::decode_deferred_array(body.data(), body.size(), owner, output));
+    allocations = owner.calls(); EXPECT_GT(allocations, 16);
+    DatumParameter owned = array_view(output);
+    DatumParameterArray::release_owned(owned, owner);
+    EXPECT_TRUE(owner.empty());
+  }
+  for (int64_t fail = 0; fail < allocations; ++fail) {
+    SCOPED_TRACE(fail);
+    ArrayBoundaryAllocator owner(fail); ObDatum output = sentinel.datum_;
+    EXPECT_EQ(OB_ALLOCATE_MEMORY_FAILED,
+              DatumParameterCodec::decode_deferred_array(body.data(), body.size(), owner, output));
+    EXPECT_EQ(sentinel.datum_.ptr_, output.ptr_); EXPECT_EQ(99, output.get_int());
+    EXPECT_TRUE(owner.empty());
+  }
+  {
+    ArrayBoundaryAllocator owner; ObDatum output = sentinel.datum_;
+    std::string trailing = body + "unused";
+    EXPECT_EQ(OB_DESERIALIZE_ERROR,
+              DatumParameterCodec::decode_deferred_array(trailing.data(), trailing.size(), owner, output));
+    EXPECT_EQ(sentinel.datum_.ptr_, output.ptr_); EXPECT_EQ(99, output.get_int());
+    EXPECT_TRUE(owner.empty());
+    EXPECT_EQ(OB_INVALID_ARGUMENT,
+              DatumParameterCodec::decode_deferred_array(nullptr, body.size(), owner, output));
+    EXPECT_EQ(OB_INVALID_ARGUMENT,
+              DatumParameterCodec::decode_deferred_array(body.data(), INT64_MAX, owner, output));
+    EXPECT_TRUE(owner.empty());
+  }
+}
+
+
+namespace {
+std::string encode_unis_regression_value(const ObDatum &value, const SqlTypeMeta &meta)
+{
+  int64_t size = 0, pos = 0;
+  EXPECT_EQ(OB_SUCCESS, DatumParameterCodec::value_size(value, meta, size));
+  if (size <= 0) { return {}; }
+  std::string encoded(size, '\0');
+  EXPECT_EQ(OB_SUCCESS, DatumParameterCodec::encode_value(value, meta, &encoded[0], size, pos));
+  EXPECT_EQ(size, pos);
+  return hex(encoded.data(), encoded.size());
+}
+}
+
+TEST(DatumCodec, unis_omitted_metadata_fields_reuse_existing_value_metadata)
+{
+  // Actual reused old ValueItemExpr/ParamValuePair/node captures preserve
+  // numeric coercibility and binary collation when these fields are omitted.
+  for (const char *encoded : {"05", "0505", "05053f", "05053fff"}) {
+    SCOPED_TRACE(encoded);
+    ObArenaAllocator owner;
+    DatumParameter initial = integer(owner, 999);
+    ObDatum value = initial.datum_;
+    SqlTypeMeta meta = initial.get_type_meta();
+    const std::string wire = unhex(encoded);
+    int64_t pos = 0;
+    ASSERT_EQ(OB_SUCCESS, DatumParameterCodec::decode_unis_value(
+        wire.data(), wire.size(), pos, owner, value, meta));
+    EXPECT_EQ(wire.size(), pos);
+    EXPECT_EQ(0, value.get_int());
+    EXPECT_EQ("05053fff00", encode_unis_regression_value(value, meta));
+  }
+}
+
+TEST(DatumCodec, unis_present_metadata_fields_override_reused_value_metadata)
+{
+  // Complete NULL and VARCHAR frames come from the actual old producer and
+  // reused-record decoder; each must replace the previous Int metadata.
+  for (const char *encoded : {"00063f02", "16022eff016200", "05053fff03"}) {
+    SCOPED_TRACE(encoded);
+    ObArenaAllocator owner;
+    DatumParameter initial = integer(owner, 999);
+    ObDatum value = initial.datum_;
+    SqlTypeMeta meta = initial.get_type_meta();
+    const std::string wire = unhex(encoded);
+    int64_t pos = 0;
+    ASSERT_EQ(OB_SUCCESS, DatumParameterCodec::decode_unis_value(
+        wire.data(), wire.size(), pos, owner, value, meta));
+    EXPECT_EQ(wire.size(), pos);
+    EXPECT_EQ(encoded, encode_unis_regression_value(value, meta));
+  }
+}
+
+TEST(DatumCodec, unis_metadata_reuse_does_not_change_strict_or_schema_decoding)
+{
+  ObArenaAllocator owner;
+  for (const char *encoded : {"05", "0505"}) {
+    const std::string wire = unhex(encoded);
+    DatumParameter initial = integer(owner, 999);
+    ObDatum value = initial.datum_;
+    SqlTypeMeta meta = initial.get_type_meta();
+    int64_t pos = 0;
+    EXPECT_NE(OB_SUCCESS, DatumParameterCodec::decode_value(
+        wire.data(), wire.size(), pos, owner, value, meta));
+    EXPECT_EQ(0, pos);
+    EXPECT_EQ(initial.datum_.ptr_, value.ptr_);
+    EXPECT_EQ(999, value.get_int());
+    EXPECT_EQ("05053fffe707", encode_unis_regression_value(value, meta));
+  }
+  // Preserve the existing schema decoder's independent default metadata seed.
+  const std::string wire = unhex("05");
+  DatumParameter initial = integer(owner, 999);
+  ObDatum value = initial.datum_;
+  SqlTypeMeta meta = initial.get_type_meta();
+  int64_t pos = 0;
+  ASSERT_EQ(OB_SUCCESS, DatumParameterCodec::decode_schema_value(
+      wire.data(), wire.size(), pos, owner, value, meta));
+  EXPECT_EQ(1, pos);
+  EXPECT_EQ("050700ff00", encode_unis_regression_value(value, meta));
 }
 
 int main(int argc, char **argv) { ::testing::InitGoogleTest(&argc, argv); return RUN_ALL_TESTS(); }

@@ -22,11 +22,12 @@ namespace oceanbase
 {
 namespace common
 {
-ObObj ObStoreRowkey::MIN_OBJECT = ObObj::make_min_obj();
-ObObj ObStoreRowkey::MAX_OBJECT = ObObj::make_max_obj();
+static DatumValue make_store_marker(bool minimum) { DatumValue v; if (minimum) v.set_min_value(); else v.set_max_value(); return v; }
+DatumValue ObStoreRowkey::MIN_VALUE = make_store_marker(true);
+DatumValue ObStoreRowkey::MAX_VALUE = make_store_marker(false);
 
-ObStoreRowkey ObStoreRowkey::MIN_STORE_ROWKEY(&ObStoreRowkey::MIN_OBJECT, 1);
-ObStoreRowkey ObStoreRowkey::MAX_STORE_ROWKEY(&ObStoreRowkey::MAX_OBJECT, 1);
+ObStoreRowkey ObStoreRowkey::MIN_STORE_ROWKEY(&ObStoreRowkey::MIN_VALUE, 1);
+ObStoreRowkey ObStoreRowkey::MAX_STORE_ROWKEY(&ObStoreRowkey::MAX_VALUE, 1);
 
 //FIXME-yangsuli: this method need to be removed later
 //we should NOT allow ObStoreRowkey to be converted to ObRowkey,
@@ -58,7 +59,7 @@ bool ObStoreRowkey::contains_min_or_max_obj() const
 {
   bool found = false;
   for(int64_t i = 0; !found && i < key_.get_obj_cnt(); i++) {
-    if (key_.get_obj_ptr()[i].is_min_value() || key_.get_obj_ptr()[i].is_max_value()) {
+    if (key_.get_values()[i].is_min_value() || key_.get_values()[i].is_max_value()) {
       found = true;
     }
   }
@@ -107,13 +108,13 @@ int ObExtStoreRowkey::get_possible_range_pos()
     COMMON_LOG(WARN, "ObExtStoreRowkey is not init", K(ret));
   } else {
     for (int64_t i = 0; range_cut_pos_ < 0 && i < store_rowkey_.get_obj_cnt(); i++) {
-      if (store_rowkey_.get_obj_ptr()[i].is_min_value()) {
+      if (store_rowkey_.get_values()[i].is_min_value()) {
         range_cut_pos_ = i;
         range_check_min_ = true;
-      } else if (store_rowkey_.get_obj_ptr()[i].is_max_value()) {
+      } else if (store_rowkey_.get_values()[i].is_max_value()) {
         range_cut_pos_ = i;
         range_check_min_ = false;
-      } else if (store_rowkey_.get_obj_ptr()[i].is_null()) {
+      } else if (store_rowkey_.get_values()[i].is_null()) {
         if (first_null_pos_ < 0) {
           first_null_pos_ = i;
         }

@@ -28,7 +28,7 @@ using namespace oceanbase::common;
 using namespace oceanbase::sql;
 namespace {
 DatumParameter integer(ObIAllocator &arena, int64_t value) {
-  DatumParameter p; ObObjMeta meta; meta.set_int(); p.set_type_meta(meta);
+  DatumParameter p; SqlTypeMeta meta; meta.set_int(); p.set_type_meta(meta);
   EXPECT_EQ(OB_SUCCESS, p.alloc_datum_reserved_buff(meta, -1, arena)); p.datum_.set_int(value); return p;
 }
 std::string bytes(const std::string &hex) {
@@ -70,9 +70,9 @@ TEST(BatchRescanParams, captured_old_batch_frames_roundtrip_with_owned_native_va
 TEST(BatchRescanParams, append_and_assign_own_strings_nested_arrays_and_runtime_metadata) {
   ObArenaAllocator source; ObBatchRescanParams batch, assigned; ObBatchRescanParams::Row row(4*sizeof(DatumParameter)); ObSEArray<int64_t,2> ids,exprs;
   ASSERT_EQ(OB_SUCCESS,ids.push_back(3)); ASSERT_EQ(OB_SUCCESS,exprs.push_back(1));
-  DatumParameter value; ObObjMeta meta; meta.set_ext(); meta.set_extend_type(T_EXT_SQL_ARRAY); value.set_type_meta(meta);
+  DatumParameter value; SqlTypeMeta meta; meta.set_ext(); meta.set_extend_type(T_EXT_SQL_ARRAY); value.set_type_meta(meta);
   ASSERT_EQ(OB_SUCCESS,value.alloc_datum_reserved_buff(meta,-1,source)); auto *array=DatumParameterArray::alloc(source,1); ASSERT_NE(nullptr,array); value.set_array_address(array);
-  char text[]="mutable"; ObObjMeta type; type.set_varchar(); type.set_collation_type(CS_TYPE_UTF8MB4_BIN);
+  char text[]="mutable"; SqlTypeMeta type; type.set_varchar(); type.set_collation_type(CS_TYPE_UTF8MB4_BIN);
   array->data_[0].set_type_meta(type); array->data_[0].set_param_meta(type); array->data_[0].set_length(99); array->data_[0].set_raw_text_info(5,7); array->data_[0].get_param_flag().flag_=0xa5; array->data_[0].datum_.set_string(text,sizeof(text)-1);
   ASSERT_EQ(OB_SUCCESS,row.push_back(value)); ASSERT_EQ(OB_SUCCESS,batch.append_batch_rescan_param(ids,row,exprs));
   memset(text,'x',sizeof(text)); source.reset(); ASSERT_EQ(OB_SUCCESS,assigned.assign(batch)); batch.reset();
@@ -116,4 +116,8 @@ TEST(BatchRescanParams, row_builder_captures_before_next_expression_reuses_paylo
   EXPECT_EQ(1,batch.get_one_batch_params(0).at(0).datum_.get_int());EXPECT_EQ(2,batch.get_one_batch_params(0).at(1).datum_.get_int());
   EXPECT_EQ(OB_STATE_NOT_MATCH,builder.append(value));EXPECT_EQ(OB_STATE_NOT_MATCH,builder.finish(ids,exprs));EXPECT_EQ(1,batch.get_count());
 }
-int main(int argc,char **argv) {::testing::InitGoogleTest(&argc,argv);return RUN_ALL_TESTS();}
+int main(int argc,char **argv) {
+  ::testing::InitGoogleTest(&argc,argv);
+  if (ObCharset::init_charset() != OB_SUCCESS) { return 2; }
+  return RUN_ALL_TESTS();
+}

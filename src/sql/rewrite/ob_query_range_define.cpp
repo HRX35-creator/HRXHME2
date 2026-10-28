@@ -711,7 +711,7 @@ int ObPreRangeGraph::get_fast_nlj_tablet_ranges(ObFastFinalNLJRangeCtx &fast_nlj
       }
     }
   } else if (general_nlj_range_) {
-    ObArray<ObObj> objs;
+    ObArray<DatumValue> objs;
     bool can_fast_extract = true;
     bool dummy_all_single_value_ranges = false;
     bool always_false = false;
@@ -789,8 +789,8 @@ int ObPreRangeGraph::get_fast_nlj_tablet_ranges(ObFastFinalNLJRangeCtx &fast_nlj
     if (OB_SUCC(ret) && always_false) {
       ranges.reuse();
       ObNewRange *range = static_cast<ObNewRange*>(range_buffer);
-      ObObj *starts = reinterpret_cast<ObObj*>(static_cast<char*>(range_buffer) + sizeof(ObNewRange));
-      ObObj *ends = starts + column_count_;
+      DatumValue *starts = reinterpret_cast<DatumValue*>(static_cast<char*>(range_buffer) + sizeof(ObNewRange));
+      DatumValue *ends = starts + column_count_;
       for (int i = 0; OB_SUCC(ret) && i < column_count_; ++i) {
         starts[i].set_max_value();
         ends[i].set_min_value();
@@ -1751,7 +1751,7 @@ int ObPreRangeGraph::set_general_nlj_range_extraction(const ObIArray<ObFastFinal
 // Notes:
 // LIKE escape treats NULL differently from 0x00: NULL is equivalent to '\\',
 // but 0x00 is just 0x00. Therefore, before use this interface, PLEASE MAKE SURE escape is not null.
-int ObPreRangeGraph::is_precise_like_range(ObObjType type, const ObString &pattern_str, ObCollationType cs_type,
+int ObPreRangeGraph::is_precise_like_range(SqlValueType type, const ObString &pattern_str, ObCollationType cs_type,
                                          char escape, bool &is_precise)
 {
   int ret = OB_SUCCESS;
@@ -1858,8 +1858,8 @@ bool ObPreRangeGraph::check_like_range_precise(const ObString &pattern_str,
 // Then come to judge whether this expression should be precisely extracted or expanded to (min, max)
 bool ObPreRangeGraph::can_be_extract_range(ObItemType cmp_type,
                                         const ObRawExprResType &col_type,
-                                        const ObObjMeta &calc_meta,
-                                        ObObjType data_type,
+                                        const SqlTypeMeta &calc_meta,
+                                        SqlValueType data_type,
                                         bool &always_true)
 {
   bool bret = true;
@@ -1897,7 +1897,7 @@ bool ObPreRangeGraph::can_be_extract_range(ObItemType cmp_type,
   // data_type: const->get_data_type()
   // Except for scenarios involving enum/set, using any parameter type of calc_type does not affect the judgment of is_cast_monotonic
   // For the col_enum op const_int scenario, calc_type is enum, need to change it to int for special handling
-  ObObjMeta calc_type = calc_meta;
+  SqlTypeMeta calc_type = calc_meta;
   if (calc_type.is_enum_or_set()) {
     calc_type.set_int();
   }
@@ -1922,13 +1922,13 @@ bool ObPreRangeGraph::can_be_extract_range(ObItemType cmp_type,
         && (calc_type.is_string_or_lob_locator_type() || calc_type.is_double()
             || calc_type.is_number() || calc_type.is_integer_type())) {
       // do nothing
-    } else if (OB_FAIL(ObObjCaster::is_cast_monotonic(col_type.get_type(),
+    } else if (OB_FAIL(ObTypeCastRules::is_cast_monotonic(col_type.get_type(),
                                                       calc_type.get_type(),
                                                       is_cast_monotonic))) {
     } else if (!is_cast_monotonic) {
       bret = false;
       always_true = true;
-    } else if (OB_FAIL(ObObjCaster::is_cast_monotonic(calc_type.get_type(),
+    } else if (OB_FAIL(ObTypeCastRules::is_cast_monotonic(calc_type.get_type(),
                                                         col_type.get_type(),
                                                         is_cast_monotonic))) {
     } else if (!is_cast_monotonic) {
@@ -1959,7 +1959,7 @@ bool ObPreRangeGraph::can_be_extract_range(ObItemType cmp_type,
 
 // op that be rewritten as normal key-part, need to check if can cast
 bool ObPreRangeGraph::can_domain_be_extract_range(const ObDomainOpType &op_type, const ObRawExprResType &col_type,
-                                              const ObObjMeta &res_type, common::ObObjType data_type,
+                                              const SqlTypeMeta &res_type, common::SqlValueType data_type,
                                               bool &always_true)
 {
   bool bret = true;

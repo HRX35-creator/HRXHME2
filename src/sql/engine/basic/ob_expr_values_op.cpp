@@ -275,7 +275,7 @@ int ObExprValuesOp::inner_get_next_row()
   return ret;
 }
 
-void ObExprValuesOp::update_src_meta(ObDatumMeta &src_meta, const ObObjMeta &src_obj_meta, const ObAccuracy &src_obj_acc)
+void ObExprValuesOp::update_src_meta(ObDatumMeta &src_meta, const SqlTypeMeta &src_obj_meta, const ObAccuracy &src_obj_acc)
 {
   src_meta.type_ = src_obj_meta.get_type();
   src_meta.cs_type_ = src_obj_meta.get_collation_type();
@@ -284,7 +284,7 @@ void ObExprValuesOp::update_src_meta(ObDatumMeta &src_meta, const ObObjMeta &src
 }
 
 int ObExprValuesOp::get_real_batch_obj_type(ObDatumMeta &src_meta,
-                                            ObObjMeta &src_obj_meta,
+                                            SqlTypeMeta &src_obj_meta,
                                             ObExpr *src_expr,
                                             int64_t group_idx)
 {
@@ -322,7 +322,7 @@ int ObExprValuesOp::get_real_batch_obj_type(ObDatumMeta &src_meta,
 }
 
 int ObExprValuesOp::eval_values_op_dynamic_cast_to_lob(ObExpr &real_src_expr,
-                                                       ObObjMeta &src_obj_meta,
+                                                       SqlTypeMeta &src_obj_meta,
                                                        ObExpr *dst_expr)
 {
   int ret = OB_SUCCESS;
@@ -404,7 +404,7 @@ OB_INLINE int ObExprValuesOp::calc_next_row()
       bool is_strict_json = my_spec.get_is_strict_json_desc_count() == 0 ? false :
                             my_spec.is_strict_json_desc_.at(node_idx_ % my_spec.get_is_strict_json_desc_count());
        
-      ObObjMeta src_obj_meta = src_expr->obj_meta_;
+      SqlTypeMeta src_obj_meta = src_expr->obj_meta_;
       if (my_spec.contain_ab_param_) {
         if (OB_FAIL(get_real_batch_obj_type(src_meta, src_obj_meta, src_expr, group_idx))) {
         }
@@ -486,7 +486,7 @@ OB_INLINE int ObExprValuesOp::calc_next_row()
         ObExpr real_src_expr = *src_expr;
         real_src_expr.datum_meta_ = src_meta;
         real_src_expr.obj_meta_ = src_obj_meta;
-        real_src_expr.obj_datum_map_ = ObDatum::get_obj_datum_map_type(src_meta.type_);
+        real_src_expr.obj_datum_map_ = ObDatum::get_sql_value_datum_map_type(src_meta.type_);
         if (dst_expr->obj_meta_.is_enum_or_set()) {
           if (OB_UNLIKELY(col_idx < 0 || col_idx >= my_spec.str_values_array_.count())) {
             ret = OB_ERR_UNEXPECTED;
@@ -526,7 +526,7 @@ OB_INLINE int ObExprValuesOp::calc_next_row()
 
         if (OB_SUCC(ret) && !dst_expr->obj_meta_.is_lob_storage()) {
           ObDatum &dst_datum = dst_expr->locate_datum_for_write(eval_ctx_);
-          if (ObObjDatumMapType::OBJ_DATUM_STRING == dst_expr->obj_datum_map_) {
+          if (SqlValueDatumMapType::OBJ_DATUM_STRING == dst_expr->obj_datum_map_) {
             ObExprStrResAlloc res_alloc(*dst_expr, eval_ctx_);
             if (OB_FAIL(dst_datum.deep_copy(*datum, res_alloc))) {
             }

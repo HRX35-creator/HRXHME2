@@ -29,7 +29,7 @@ namespace common
 // and one shared type. Both descriptors and payloads belong to the caller arena.
 struct DatumParameterArray
 {
-  DatumParameterArray() : data_(nullptr), count_(0), element_() {}
+  DatumParameterArray() : data_(nullptr), count_(0), element_(), source_value_size_(0) {}
 
   static DatumParameterArray *alloc(ObIAllocator &allocator, int64_t count)
   {
@@ -49,6 +49,32 @@ struct DatumParameterArray
   int serialize(char *buf, int64_t length, int64_t &pos) const;
   int64_t get_serialize_size() const;
 
+  // Release only a value owned by clone_parameter() or deep_copy(), never a
+  // borrowed descriptor. Cloned arrays are acyclic and have independent leaves.
+  static void release_owned(DatumParameter &value, ObIAllocator &allocator)
+  {
+    if (!value.is_null()) {
+      if (value.is_ext_sql_array()) {
+        DatumParameterArray *array = value.get_array<DatumParameterArray>();
+        release_array(array, allocator);
+      }
+      allocator.free(const_cast<char *>(value.datum_.ptr_));
+    }
+    value.reset();
+  }
+
+  static void release_array(DatumParameterArray *array, ObIAllocator &allocator)
+  {
+    if (array != nullptr) {
+      for (int64_t i = 0; i < array->count_; ++i) {
+        release_owned(array->data_[i], allocator);
+        array->data_[i].~DatumParameter();
+      }
+      array->~DatumParameterArray();
+      allocator.free(array);
+    }
+  }
+
   // Recursively owns array descriptors and payloads in allocator. Unlike a
   // shallow parameter copy, this is safe after the source arena is reset.
   static int clone_parameter(const DatumParameter &source, DatumParameter &output,
@@ -66,6 +92,7 @@ struct DatumParameterArray
       } else if ((owned = alloc(allocator, array->count_)) == nullptr) { ret = OB_ALLOCATE_MEMORY_FAILED; }
       else {
         owned->element_ = array->element_;
+        owned->source_value_size_ = array->source_value_size_;
         for (int64_t i = 0; ret == OB_SUCCESS && i < array->count_; ++i) {
           ret = clone_parameter(array->data_[i], owned->data_[i], allocator, depth + 1);
         }
@@ -74,6 +101,7 @@ struct DatumParameterArray
           ret = copy.alloc_datum_reserved_buff(source.get_type_meta(), source.get_precision(), allocator);
           if (ret == OB_SUCCESS) { copy.set_array_address(owned); }
         }
+        if (ret != OB_SUCCESS) { release_array(owned, allocator); }
       }
     }
     if (ret == OB_SUCCESS) { output = copy; }
@@ -85,6 +113,11 @@ struct DatumParameterArray
   DatumParameter *data_;
   int64_t count_;
   ObDataType element_;
+  // Runtime provenance only; not part of the array or parameter wire format.
+  // Live arrays have size 0, matching a newly created old Ext value. A decoded
+  // SQL-array value remembers its outer declared body length, which need not
+  // equal the length if this mutable native array is serialized again later.
+  int32_t source_value_size_;
 };
 
 } // namespace common

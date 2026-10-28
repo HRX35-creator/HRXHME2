@@ -104,7 +104,9 @@ int ObDASLocalLookupIter::init_scan_param(ObTableScanParam &param, const ObDASSc
     param.allocator_ = &rtdef->stmt_allocator_;
     param.tx_lock_timeout_ = rtdef->tx_lock_timeout_;
     param.index_id_ = ctdef->ref_table_id_;
-    param.is_get_ = ctdef->is_get_;
+    // Native lookup keys are point keys even when an auxiliary CtDef keeps
+    // its default scan flag. Preserve the mode chosen while saving the key.
+    param.is_get_ = nullptr != param.datum_lookup_keys_ || ctdef->is_get_;
     param.is_for_foreign_check_ = rtdef->is_for_foreign_check_;
     param.timeout_ = rtdef->timeout_ts_;
     param.scan_flag_ = rtdef->scan_flag_;

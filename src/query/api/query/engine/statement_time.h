@@ -54,9 +54,9 @@ public:
   {
     using namespace common;
     if (buf == nullptr || pos < 0 || length < pos) { return OB_INVALID_ARGUMENT; }
-    if (length - pos < sizeof(ObObjMeta)) { return OB_DESERIALIZE_ERROR; }
+    if (length - pos < sizeof(SqlTypeMeta)) { return OB_DESERIALIZE_ERROR; }
     int64_t cursor = pos;
-    ObObjMeta meta;
+    SqlTypeMeta meta;
     int64_t timestamp = microseconds_;
     int ret = meta.deserialize(buf, length, cursor);
     if (ret == OB_SUCCESS) {
@@ -78,7 +78,7 @@ public:
   TO_STRING_KV("timestamp", microseconds_, "present", has_value());
 private:
   int64_t microseconds_;
-  common::ObObjMeta meta_;
+  common::SqlTypeMeta meta_;
 };
 
 } // namespace sql

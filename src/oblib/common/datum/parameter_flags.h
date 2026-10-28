@@ -53,7 +53,7 @@ struct ParamFlag
       uint8_t expected_bool_value_ : 1;//bool value, effective only when need_to_check_bool_value_ is true
       uint8_t need_to_check_extend_type_ : 1; // True if the extended type needs to be checked
       uint8_t reserved_legacy_bit_ : 1;
-      uint8_t is_pl_mock_default_param_ : 1; // TRUE if ObObjParam is pl default param
+      uint8_t is_pl_mock_default_param_ : 1; // TRUE if DatumParameter is pl default param
       uint8_t is_boolean_ : 1; // to distinguish T_BOOL and T_TINYINT
       uint8_t is_batch_parameter_ : 1; // indicates it is a batch parameter
     };

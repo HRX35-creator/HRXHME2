@@ -63,11 +63,11 @@ public:
       is_not_null_(false),
       order_type_(default_asc_direction()) {
   }
-  ObOpSchemaObj(common::ObObjType obj_type)
+  ObOpSchemaObj(common::SqlValueType obj_type)
     : obj_type_(obj_type),
       is_not_null_(false),
       order_type_(default_asc_direction()) {}
-  ObOpSchemaObj(common::ObObjType obj_type, ObOrderDirection order_type)
+  ObOpSchemaObj(common::SqlValueType obj_type, ObOrderDirection order_type)
     : obj_type_(obj_type), is_not_null_(false), order_type_(order_type) {}
 
   bool is_null_first() const {
@@ -79,7 +79,7 @@ public:
   }
   TO_STRING_KV(K_(obj_type), K_(is_not_null), K_(order_type));
 public:
-  common::ObObjType obj_type_;
+  common::SqlValueType obj_type_;
   bool is_not_null_;
   // Because ObSortColumn is serializable, but ObSortColumn does not use the serialization framework for information
   // Adding any field inside ObSortColumn will have compatibility issues

@@ -166,7 +166,7 @@ public:
   int reserve_param_space(int64_t param_count);
   const ParamStore &get_param_store() const { return param_store_; }
   ParamStore &get_param_store_for_update() { return param_store_; }
-  const common::ObObjParam *get_param_mem() const
+  const common::DatumParameter *get_param_mem() const
   {
     if (param_store_.count() <= 0) {
       return nullptr;
@@ -174,18 +174,16 @@ public:
       return &param_store_.at(0);
     }
   }
-  DatumParamStore &get_datum_param_store() { return datum_param_store_; }
-  const DatumParamStore &get_datum_param_store() const { return datum_param_store_; }
+  DatumParamStore &get_datum_param_store() { return param_store_; }
+  const DatumParamStore &get_datum_param_store() const { return param_store_; }
   const ObIArray<char *> &get_param_frame_ptrs() const { return param_frame_ptrs_; }
   int init_datum_param_store();
-  // Runtime values and metadata are authoritative in the native store. Keep a
-  // view for remaining legacy range/PL consumers until those are migrated.
+  // Parameters have a single native owner; SQL frames borrow Datum views.
   // The caller owns the value payload for as long as this binding is used.
   int set_runtime_parameter(int64_t index, const DatumParameter &parameter);
   void reset_datum_param_store()
   {
     param_store_.reuse();
-    datum_param_store_.reuse();
     param_frame_ptrs_.reuse();
     original_param_cnt_ = 0;
     param_frame_capacity_ = 0;
@@ -479,7 +477,7 @@ public:
                                                const ObDataType &elem_type,
                                                uint16_t &subschema_id);
   int get_subschema_id_by_type_string(const ObString &type_string, uint16_t &subschema_id);
-  int get_subschema_id_by_type_info(const ObObjMeta &obj_meta,
+  int get_subschema_id_by_type_info(const SqlTypeMeta &obj_meta,
                                     const ObIArray<common::ObString> &type_info,
                                     uint16_t &subschema_id);
   int build_subschema_by_fields(const ColumnsFieldIArray *fields,
@@ -501,7 +499,7 @@ private:
   void get_param_frame_info(int64_t param_idx,
                             ObDatum *&datum,
                             ObEvalInfo *&eval_info);
-  int inner_get_subschema_id_by_type_info(const ObObjMeta &obj_meta,
+  int inner_get_subschema_id_by_type_info(const SqlTypeMeta &obj_meta,
                                           const ObIArray<common::ObString> &type_info,
                                           uint16_t &subschema_id) const;
 private:
@@ -526,7 +524,6 @@ private:
   int64_t ts_timeout_us_;
   common::ObConsistencyLevel consistency_level_;
   ParamStore param_store_;
-  DatumParamStore datum_param_store_;
   common::ObSEArray<char *, 1, common::ModulePageAllocator, true> param_frame_ptrs_;
   // Original param cont for input SQL, used in static engine for param frames allocation.
   // Param store can be divided into three continuous part:

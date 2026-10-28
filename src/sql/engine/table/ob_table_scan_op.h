@@ -692,7 +692,7 @@ protected:
   OB_INLINE void* locate_range_buffer()
   {
     int64_t column_count = MY_SPEC.tsc_ctdef_.get_query_range_provider().get_column_count();
-    size_t range_size = sizeof(ObNewRange) + sizeof(ObObj) * column_count * 2;
+    size_t range_size = sizeof(ObNewRange) + sizeof(DatumValue) * column_count * 2;
     void *range_buffers = static_cast<char*>(tsc_rtdef_.range_buffers_) + tsc_rtdef_.range_buffer_idx_ * range_size;
     return range_buffers;
   }

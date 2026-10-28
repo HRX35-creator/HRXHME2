@@ -31,13 +31,9 @@ namespace oceanbase
 namespace common
 {
 
-// Transitional bridge declarations only; the native core never needs a
-// complete legacy value definition.
-class ObObj;
-
 //
-// ObDatum is new structure for data of one cell, almost the same as the old ObObj without the
-// metadata part. All data types is stored in continuous memory, here is the memory layout of
+// ObDatum stores the value bytes for one cell; type and accuracy metadata are stored separately.
+// All data types are stored in continuous memory, here is the memory layout of
 // all types:
 //
 //   | type                | memory layout                 | min length | max length          |
@@ -81,16 +77,16 @@ class ObObj;
 //   | ObDecimalIntType    | char[]                        | 4          |  64                 |
 #define OB_DATUM_SIZE 12
 
-// ObObj to ObDatum memory layout mapping type, see ObDatum::get_obj_datum_map_type()
-enum ObObjDatumMapType : uint8_t {
+// Datum memory layout mapping type, see ObDatum::get_sql_value_datum_map_type()
+enum SqlValueDatumMapType : uint8_t {
   OBJ_DATUM_NULL, // null
   OBJ_DATUM_STRING, // string
   OBJ_DATUM_NUMBER, // number
-  OBJ_DATUM_8BYTE_DATA, // 8 bytes ObObj::v_
-  OBJ_DATUM_4BYTE_DATA, // 4 bytes ObObj::v_
-  OBJ_DATUM_1BYTE_DATA, // 1 bytes ObObj::v_
-  OBJ_DATUM_4BYTE_LEN_DATA, // 4 bytes ObObj::val_len_ + 8 bytes ObObj::v_
-  OBJ_DATUM_2BYTE_LEN_DATA, // 2 bytes ObObj::val_len_ + 8 bytes ObObj::v_
+  OBJ_DATUM_8BYTE_DATA, // 8-byte value
+  OBJ_DATUM_4BYTE_DATA, // 4-byte value
+  OBJ_DATUM_1BYTE_DATA, // 1-byte value
+  OBJ_DATUM_4BYTE_LEN_DATA, // 4-byte length + 8-byte value
+  OBJ_DATUM_2BYTE_LEN_DATA, // 2-byte length + 8-byte value
   OBJ_DATUM_EXTEND,  // typed extended value (subtype, size, payload)
   OBJ_DATUM_DECIMALINT, // decimal int
   OBJ_DATUM_MAPPING_MAX,
@@ -224,22 +220,14 @@ public:
     }
     return equal;
   }
-  static ObObjDatumMapType get_obj_datum_map_type(const ObObjType type);
+  static SqlValueDatumMapType get_sql_value_datum_map_type(const SqlValueType type);
   // Get reserved size for specified type.
   // For some types, we can get a finer size through precision, so if you get precison,
   // plz be sure to pass in the function instead of using the default value.
-  static uint32_t get_reserved_size(const ObObjDatumMapType type,
+  static uint32_t get_reserved_size(const SqlValueDatumMapType type,
                                     const int16_t prec = PRECISION_UNKNOWN_YET);
-  // From ObObj, the caller is responsible for ensuring %ptr_ has enough memory
-  inline int from_obj(const ObObj &obj, const ObObjDatumMapType map_type);
-  inline int from_storage_datum(const ObDatum &datum, const ObObjDatumMapType map_type, bool need_copy = false);
-  // From ObObj, the caller is responsible for ensuring %ptr_ has enough memory
-  inline int from_obj(const ObObj &obj);
+  inline int from_storage_datum(const ObDatum &datum, const SqlValueDatumMapType map_type, bool need_copy = false);
   inline int64_t checksum(const int64_t current) const;
-
-  // Convert to ObObj
-  inline int to_obj(ObObj &obj, const ObObjMeta &meta, const ObObjDatumMapType map_type) const;
-  inline int to_obj(ObObj &obj, const ObObjMeta &meta) const;
 
   // remember to check is_null() before get_bool()
   inline bool get_bool() const { return 0 != get_int(); }
@@ -383,12 +371,10 @@ public:
   //
   // We reserve enough memory in sql expression, it's safe to use the setter functions in sql
   // expression evaluate.
-  // Set integer, same as the following ObObj interfaces:
-  //    set_tinyint, set_smallint, set_mediumint, set_int32, set_int
+  // Set a signed integer value.
   inline void set_int(const int64_t v) { *no_cv(int_) = v; pack_ = sizeof(int64_t); };
   inline void set_int32(const int32_t v) { set_int(static_cast<int64_t>(v)); }
-  // Set unsigned integer, same as following ObObj interfaces:
-  //    set_utinyint, set_usmallint, set_umediumint, set_uint32, set_uint
+  // Set an unsigned integer value.
   inline void set_uint(const uint64_t v) { *no_cv(uint_) = v; pack_ = sizeof(uint64_t); }
   inline void set_uint32(const uint32_t v) { set_uint(static_cast<uint64_t>(v)); }
   inline void set_bit(const uint64_t v) { set_uint(v); }
@@ -410,7 +396,7 @@ public:
     no_cv(timestamp_tiny_)->time_us_ = v.time_us_;
     pack_ = sizeof(ObOTimestampTinyData);
   }
-  // Same as ObObj::set_time
+  // Set a time value.
   inline void set_time(const int64_t v) { set_int(v); }
   inline void set_otimestamp(const ObOTimestampData &v)
   { memcpy(no_cv(ptr_), &v, sizeof(v)); pack_ = sizeof(v); }
@@ -420,10 +406,10 @@ public:
     memcpy(no_cv(ptr_) + sizeof(time_us), &time_desc, sizeof(time_desc));
   }
 
-  // Same as ObObj::set_date
+  // Set a date value.
   inline void set_date(const int32_t v)
   { memcpy(no_cv(ptr_), &v, sizeof(v)); pack_ = sizeof(v); }
-  // Same as ObObj::set_year
+  // Set a year value.
   inline void set_year(const int8_t v)
   { memcpy(no_cv(ptr_), &v, sizeof(v)); pack_ = sizeof(v); }
 
@@ -499,11 +485,7 @@ public:
   template <typename T>
   inline __attribute__((always_inline)) T *no_cv(const T *ptr) { return const_cast<T *>(ptr); }
 
-  template <ObObjDatumMapType type>
-  inline void obj2datum(const ObObj &obj);
-  template <ObObjDatumMapType type>
-  inline void datum2obj(ObObj &obj) const;
-  template <ObObjDatumMapType type>
+  template <SqlValueDatumMapType type>
   inline void datum2datum(const ObDatum &datum);
 
 }__attribute__ ((packed)) ;
@@ -520,7 +502,7 @@ struct ObDatumVector {
 };
 
 // Get payload of datum for reading, some type class will specialization this.
-template <ObObjTypeClass TC>
+template <SqlTypeClass TC>
 struct ObDatumPayload
 {
   // return ptr_ for default implement
@@ -680,7 +662,7 @@ inline void ObDatum::datum2datum<OBJ_DATUM_DECIMALINT>(const ObDatum &datum)
 }
 
 
-inline int ObDatum::from_storage_datum(const ObDatum &datum, const ObObjDatumMapType map_type, bool need_copy)
+inline int ObDatum::from_storage_datum(const ObDatum &datum, const SqlValueDatumMapType map_type, bool need_copy)
 {
   int ret = common::OB_SUCCESS;
   if (datum.is_ext()) {

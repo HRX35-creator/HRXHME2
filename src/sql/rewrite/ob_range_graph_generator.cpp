@@ -1162,7 +1162,7 @@ int ObRangeGraphGenerator::generate_expr_final_info()
       ret = OB_ERR_UNEXPECTED;
     } else if (T_QUESTIONMARK == expr->get_expr_type()) {
       const ObConstRawExpr *const_expr = static_cast<const ObConstRawExpr *>(expr);
-      const ObObj& val = const_expr->get_value();
+      const DatumValue &val = const_expr->get_value();
       if (OB_UNLIKELY(!val.is_unknown())) {
         ret = OB_ERR_UNEXPECTED;
         LOG_WARN("get unexpected value type", K(val));
@@ -1177,8 +1177,12 @@ int ObRangeGraphGenerator::generate_expr_final_info()
       else {
         expr_info.const_val_ = new(ptr)ObDatum();
         expr_info.is_const_ = true;
-        ret = copy_legacy_value(const_expr->get_value(), *expr_info.const_val_,
-                                expr_info.const_meta_, allocator_);
+        DatumValue owned;
+        if (OB_FAIL(clone_typed_value(const_expr->get_value(), owned, allocator_))) {
+        } else {
+          *expr_info.const_val_ = owned.datum_;
+          expr_info.const_meta_ = owned.meta_;
+        }
       }
     } else if (OB_FAIL(ObStaticEngineExprCG::gen_expr_with_row_desc(
             expr, row_desc,

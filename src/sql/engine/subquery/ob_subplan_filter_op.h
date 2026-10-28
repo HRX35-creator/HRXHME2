@@ -147,7 +147,7 @@ private:
   ObBatchResultHolder brs_holder_;
   // for vectorized end
   
-  common::ObArrayWrap<ObObjParam> das_batch_params_recovery_;
+  common::ObArrayWrap<DatumParameter> das_batch_params_recovery_;
   // for das batch spf end
 };
 

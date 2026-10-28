@@ -16,7 +16,5 @@
 
 #pragma once
 
-// Compatibility include for unmigrated value consumers. New native code uses
-// datum_core.h and does not include the Obj adapters.
+// Compatibility include for consumers of the native Datum value type.
 #include "common/datum/datum_core.h"
-#include "common/datum/datum_obj_bridge.h"

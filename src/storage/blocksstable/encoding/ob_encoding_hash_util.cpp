@@ -148,7 +148,7 @@ int ObEncodingHashTableBuilder::build(const ObColDatums &col_datums, const ObCol
     STORAGE_LOG(WARN, "invalid argument", K(ret), K_(node_num),
         "row_count", col_datums.count());
   } else {
-    ObObjTypeStoreClass store_class = get_store_class_map()[col_desc.col_type_.get_type_class()];
+    SqlValueTypeStoreClass store_class = get_store_class_map()[col_desc.col_type_.get_type_class()];
     const bool need_binary_hash =
         store_class == ObTextSC || store_class == ObJsonSC || store_class == ObLobSC || store_class == ObGeometrySC;
     const bool need_batch_hash = !need_binary_hash;
@@ -356,7 +356,7 @@ void ObEncodingHashTableFactory::clear()
 }
 
 int build_column_encoding_ctx(ObEncodingHashTable *ht,
-                              const ObObjTypeStoreClass store_class,
+                              const SqlValueTypeStoreClass store_class,
                               const int64_t type_store_size,
                               ObColumnEncodingCtx &col_ctx)
 {

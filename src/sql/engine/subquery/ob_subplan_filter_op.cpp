@@ -631,7 +631,7 @@ int ObSubPlanFilterOp::inner_open()
         } else if (OB_FAIL(iter->init_mem_entity())) {
         } else if (MY_SPEC.exec_param_array_[i - 1].count() > 0) {
           //min of buckets is 16,
-          //max will not exceed card of left_child and HASH_MAP_MEMORY_LIMIT/ObObj
+          //max will not exceed card of left_child and HASH_MAP_MEMORY_LIMIT/sizeof(ObDatum)
           if (OB_FAIL(iter->init_hashmap(max(
                   16/*hard code*/, min(get_child(0)->get_spec().get_rows(),
                       iter->HASH_MAP_MEMORY_LIMIT / static_cast<int64_t>(sizeof(ObDatum))))))) {

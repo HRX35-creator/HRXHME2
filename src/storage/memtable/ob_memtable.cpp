@@ -624,7 +624,7 @@ int ObMemtable::get(
     ObStoreRowLockState lock_state;
     bool is_snapshot_opt = context.query_flag_.is_snapshot_opt();
     // Local index-back can arrive as datums only. Materialize the legacy
-    // MemTable key here, so SSTable-only reads never construct ObObj cells.
+    // MemTable key here, so SSTable-only reads stay on the Datum row path.
     if (!store_key->is_valid()) {
       if (OB_FAIL(rowkey.to_store_rowkey(out_cols, *context.get_range_allocator(), adapted_key))) {
       } else {

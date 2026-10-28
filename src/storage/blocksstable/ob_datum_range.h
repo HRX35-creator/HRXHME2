@@ -63,7 +63,7 @@ public:
                               common::ObIAllocator &allocator,
                               common::ObStoreRange &store_range) const;
   OB_INLINE int to_multi_version_range(common::ObIAllocator &allocator, ObDatumRange &dest) const;
-  OB_INLINE int to_new_range(common::ObNewRange &range, const ObObjMeta* obj_metas, ObIAllocator & allocator) const;
+  OB_INLINE int to_new_range(common::ObNewRange &range, const SqlTypeMeta* obj_metas, ObIAllocator & allocator) const;
   OB_INLINE int prepare_memtable_readable(const common::ObIArray<share::schema::ObColDesc> &col_descs,
                                           common::ObIAllocator &allocator);
   OB_INLINE int is_memtable_single_rowkey(const int64_t schema_rowkey_cnt,
@@ -233,7 +233,7 @@ OB_INLINE int ObDatumRange::is_memtable_single_rowkey(const int64_t schema_rowke
   } else {
     bool can_use_single_get = true;
     for (int64_t i = 0; can_use_single_get && i < schema_rowkey_cnt; i++) {
-      if (ob_is_real_type(start_key_.store_rowkey_.get_obj_ptr()[i].get_type())) {
+      if (ob_is_real_type(start_key_.store_rowkey_.get_cell(i).get_type())) {
         can_use_single_get = false;
       }
     }
@@ -341,7 +341,7 @@ OB_INLINE int ObDatumRange::to_multi_version_range(common::ObIAllocator &allocat
   return ret;
 }
 
-OB_INLINE int ObDatumRange::to_new_range(common::ObNewRange& range, const ObObjMeta* obj_metas, ObIAllocator& allocator) const
+OB_INLINE int ObDatumRange::to_new_range(common::ObNewRange& range, const SqlTypeMeta* obj_metas, ObIAllocator& allocator) const
 {
   int ret = OB_SUCCESS;
   if (OB_FAIL(start_key_.to_rowkey(range.start_key_, obj_metas, allocator))) {
