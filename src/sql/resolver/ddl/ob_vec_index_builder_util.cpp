@@ -16,6 +16,7 @@
 
 #define USING_LOG_PREFIX COMMON
 #include "sql/resolver/ddl/ob_vec_index_builder_util.h"
+#include "share/ob_share_util.h"
 #include "sql/resolver/ddl/ob_index_builder_util.h"
 #include "sql/resolver/expr/ob_raw_expr_util.h"
 #include "sql/resolver/ddl/ob_fts_index_builder_util.h"
@@ -2794,6 +2795,7 @@ int ObVecIndexBuilderUtil::generate_vec_ivf_column(
     SMART_VAR(char[OB_MAX_DEFAULT_VALUE_LENGTH], vec_expr_def) {
       ObArray<ObString> extend_type_info;
       ObArenaAllocator tmp_alloc;
+      ObString escaped_column_name;
       MEMSET(vec_expr_def, 0, sizeof(vec_expr_def));
       int64_t def_pos = 0;
       if (OB_FAIL(construct_ivf_partial_column_info(vec_expr_def, col_type, def_pos, collection_type, obj_type, col_flag))) {
@@ -2808,7 +2810,14 @@ int ObVecIndexBuilderUtil::generate_vec_ivf_column(
           ret = OB_ERR_KEY_COLUMN_DOES_NOT_EXITS;
           LOG_USER_ERROR(OB_ERR_KEY_COLUMN_DOES_NOT_EXITS, column_name.length(), column_name.ptr());
         } else if (OB_FAIL(column_schema.add_cascaded_column_id(tmp_col_schema->get_column_id()))) {
-        } else if (OB_FAIL(databuff_printf(vec_expr_def, OB_MAX_DEFAULT_VALUE_LENGTH, def_pos, "`%s`, ", tmp_col_schema->get_column_name()))) {
+        } else if (OB_FAIL(ObShareUtil::escape_identifier(
+             tmp_alloc,
+             ObString::make_string(tmp_col_schema->get_column_name()),
+             escaped_column_name))) {
+        } else if (OB_FAIL(databuff_printf(vec_expr_def, OB_MAX_DEFAULT_VALUE_LENGTH, def_pos,
+                                           "`%.*s`, ",
+                                           static_cast<int>(escaped_column_name.length()),
+                                           escaped_column_name.ptr()))) {
         } else if (ObCollectionSQLType == obj_type) {
           if (tmp_col_schema->get_extended_type_info().count() != 1) {
             ret = OB_INVALID_ARGUMENT;
@@ -2970,6 +2979,8 @@ int ObVecIndexBuilderUtil::generate_type_column(
     ObColumnSchemaV2 column_schema;
     SMART_VAR(char[OB_MAX_DEFAULT_VALUE_LENGTH], vec_expr_def) {
       ObArray<ObString> extend_type_info;
+      ObArenaAllocator tmp_alloc;
+      ObString escaped_column_name;
       MEMSET(vec_expr_def, 0, sizeof(vec_expr_def));
       int64_t def_pos = 0;
       if (OB_FAIL(ret)) {
@@ -2986,9 +2997,14 @@ int ObVecIndexBuilderUtil::generate_type_column(
           LOG_USER_ERROR(OB_ERR_KEY_COLUMN_DOES_NOT_EXITS, column_name.length(),
               column_name.ptr());
         } else if (OB_FAIL(column_schema.add_cascaded_column_id(col_schema->get_column_id()))) {
+        } else if (OB_FAIL(ObShareUtil::escape_identifier(
+             tmp_alloc,
+             ObString::make_string(col_schema->get_column_name()),
+             escaped_column_name))) {
         } else if (OB_FAIL(databuff_printf(vec_expr_def, OB_MAX_DEFAULT_VALUE_LENGTH, def_pos,
-                                           "`%s`, ",
-                                           col_schema->get_column_name()))) {
+                                           "`%.*s`, ",
+                                           static_cast<int>(escaped_column_name.length()),
+                                           escaped_column_name.ptr()))) {
         } else if (OB_FAIL(extend_type_info.assign(col_schema->get_extended_type_info()))) {
         }
       }
@@ -3053,6 +3069,8 @@ int ObVecIndexBuilderUtil::generate_spiv_dim_column(
   } else if (!col_exists) {
     ObColumnSchemaV2 column_schema;
     SMART_VAR(char[OB_MAX_DEFAULT_VALUE_LENGTH], vec_expr_def) {
+      ObArenaAllocator tmp_alloc;
+      ObString escaped_column_name;
       ObArray<ObString> extend_type_info;
       MEMSET(vec_expr_def, 0, sizeof(vec_expr_def));
       int64_t def_pos = 0;
@@ -3069,9 +3087,14 @@ int ObVecIndexBuilderUtil::generate_spiv_dim_column(
           LOG_USER_ERROR(OB_ERR_KEY_COLUMN_DOES_NOT_EXITS, column_name.length(),
               column_name.ptr());
         } else if (OB_FAIL(column_schema.add_cascaded_column_id(col_schema->get_column_id()))) {
+        } else if (OB_FAIL(ObShareUtil::escape_identifier(
+             tmp_alloc,
+             ObString::make_string(col_schema->get_column_name()),
+             escaped_column_name))) {
         } else if (OB_FAIL(databuff_printf(vec_expr_def, OB_MAX_DEFAULT_VALUE_LENGTH, def_pos,
-                                            "`%s`, ",
-                                            col_schema->get_column_name()))) {
+                                            "`%.*s`, ",
+                                            static_cast<int>(escaped_column_name.length()),
+                                            escaped_column_name.ptr()))) {
         } else if (OB_FAIL(extend_type_info.assign(col_schema->get_extended_type_info()))) {
         }
       }
@@ -3133,6 +3156,8 @@ int ObVecIndexBuilderUtil::generate_spiv_value_column(
   } else if (!col_exists) {
     ObColumnSchemaV2 column_schema;
     SMART_VAR(char[OB_MAX_DEFAULT_VALUE_LENGTH], vec_expr_def) {
+      ObArenaAllocator tmp_alloc;
+      ObString escaped_column_name;
       ObArray<ObString> extend_type_info;
       MEMSET(vec_expr_def, 0, sizeof(vec_expr_def));
       int64_t def_pos = 0;
@@ -3149,9 +3174,14 @@ int ObVecIndexBuilderUtil::generate_spiv_value_column(
           LOG_USER_ERROR(OB_ERR_KEY_COLUMN_DOES_NOT_EXITS, column_name.length(),
               column_name.ptr());
         } else if (OB_FAIL(column_schema.add_cascaded_column_id(col_schema->get_column_id()))) {
+        } else if (OB_FAIL(ObShareUtil::escape_identifier(
+             tmp_alloc,
+             ObString::make_string(col_schema->get_column_name()),
+             escaped_column_name))) {
         } else if (OB_FAIL(databuff_printf(vec_expr_def, OB_MAX_DEFAULT_VALUE_LENGTH, def_pos,
-                                          "`%s`, ",
-                                          col_schema->get_column_name()))) {
+                                          "`%.*s`, ",
+                                          static_cast<int>(escaped_column_name.length()),
+                                          escaped_column_name.ptr()))) {
         } else if (OB_FAIL(extend_type_info.assign(col_schema->get_extended_type_info()))) {
         }
       }
@@ -3215,6 +3245,8 @@ int ObVecIndexBuilderUtil::generate_vector_column(
     ObColumnSchemaV2 column_schema;
     ObArray<ObString> extend_type_info;
     SMART_VAR(char[OB_MAX_DEFAULT_VALUE_LENGTH], vec_expr_def) {
+      ObArenaAllocator tmp_alloc;
+      ObString escaped_column_name;
       MEMSET(vec_expr_def, 0, sizeof(vec_expr_def));
       int64_t def_pos = 0;
       if (OB_FAIL(ret)) {
@@ -3232,9 +3264,14 @@ int ObVecIndexBuilderUtil::generate_vector_column(
           LOG_USER_ERROR(OB_ERR_KEY_COLUMN_DOES_NOT_EXITS, column_name.length(),
               column_name.ptr());
         } else if (OB_FAIL(column_schema.add_cascaded_column_id(col_schema->get_column_id()))) {
+        } else if (OB_FAIL(ObShareUtil::escape_identifier(
+             tmp_alloc,
+             ObString::make_string(col_schema->get_column_name()),
+             escaped_column_name))) {
         } else if (OB_FAIL(databuff_printf(vec_expr_def, OB_MAX_DEFAULT_VALUE_LENGTH, def_pos,
-                                           "`%s`, ",
-                                           col_schema->get_column_name()))) {
+                                           "`%.*s`, ",
+                                           static_cast<int>(escaped_column_name.length()),
+                                           escaped_column_name.ptr()))) {
         } else if (OB_FAIL(extend_type_info.assign(col_schema->get_extended_type_info()))) {
         }
       }
@@ -3302,6 +3339,8 @@ int ObVecIndexBuilderUtil::generate_scn_column(
   } else if (!col_exists) {
     ObColumnSchemaV2 column_schema;
     SMART_VAR(char[OB_MAX_DEFAULT_VALUE_LENGTH], vec_expr_def) {
+      ObArenaAllocator tmp_alloc;
+      ObString escaped_column_name;
       MEMSET(vec_expr_def, 0, sizeof(vec_expr_def));
       int64_t def_pos = 0;
       if (OB_FAIL(ret)) {
@@ -3319,9 +3358,14 @@ int ObVecIndexBuilderUtil::generate_scn_column(
           LOG_USER_ERROR(OB_ERR_KEY_COLUMN_DOES_NOT_EXITS, column_name.length(),
               column_name.ptr());
         } else if (OB_FAIL(column_schema.add_cascaded_column_id(col_schema->get_column_id()))) {
+        } else if (OB_FAIL(ObShareUtil::escape_identifier(
+             tmp_alloc,
+             ObString::make_string(col_schema->get_column_name()),
+             escaped_column_name))) {
         } else if (OB_FAIL(databuff_printf(vec_expr_def, OB_MAX_DEFAULT_VALUE_LENGTH, def_pos,
-                                           "`%s`, ",
-                                           col_schema->get_column_name()))) {
+                                           "`%.*s`, ",
+                                           static_cast<int>(escaped_column_name.length()),
+                                           escaped_column_name.ptr()))) {
         }
       }
       if (OB_FAIL(ret)) {
@@ -3388,6 +3432,8 @@ int ObVecIndexBuilderUtil::generate_key_column(
   } else if (!col_exists) {
     ObColumnSchemaV2 column_schema;
     SMART_VAR(char[OB_MAX_DEFAULT_VALUE_LENGTH], vec_expr_def) {
+      ObArenaAllocator tmp_alloc;
+      ObString escaped_column_name;
       MEMSET(vec_expr_def, 0, sizeof(vec_expr_def));
       int64_t def_pos = 0;
       if (OB_FAIL(ret)) {
@@ -3405,9 +3451,14 @@ int ObVecIndexBuilderUtil::generate_key_column(
           LOG_USER_ERROR(OB_ERR_KEY_COLUMN_DOES_NOT_EXITS, column_name.length(),
               column_name.ptr());
         } else if (OB_FAIL(column_schema.add_cascaded_column_id(col_schema->get_column_id()))) {
+        } else if (OB_FAIL(ObShareUtil::escape_identifier(
+             tmp_alloc,
+             ObString::make_string(col_schema->get_column_name()),
+             escaped_column_name))) {
         } else if (OB_FAIL(databuff_printf(vec_expr_def, OB_MAX_DEFAULT_VALUE_LENGTH, def_pos,
-                                           "`%s`, ",
-                                           col_schema->get_column_name()))) {
+                                           "`%.*s`, ",
+                                           static_cast<int>(escaped_column_name.length()),
+                                           escaped_column_name.ptr()))) {
         }
       }
       if (OB_FAIL(ret)) {
@@ -3473,6 +3524,8 @@ int ObVecIndexBuilderUtil::generate_data_column(
   } else if (!col_exists) {
     ObColumnSchemaV2 column_schema;
     SMART_VAR(char[OB_MAX_DEFAULT_VALUE_LENGTH], vec_expr_def) {
+      ObArenaAllocator tmp_alloc;
+      ObString escaped_column_name;
       MEMSET(vec_expr_def, 0, sizeof(vec_expr_def));
       int64_t def_pos = 0;
       if (OB_FAIL(ret)) {
@@ -3490,9 +3543,14 @@ int ObVecIndexBuilderUtil::generate_data_column(
           LOG_USER_ERROR(OB_ERR_KEY_COLUMN_DOES_NOT_EXITS, column_name.length(),
               column_name.ptr());
         } else if (OB_FAIL(column_schema.add_cascaded_column_id(col_schema->get_column_id()))) {
+        } else if (OB_FAIL(ObShareUtil::escape_identifier(
+             tmp_alloc,
+             ObString::make_string(col_schema->get_column_name()),
+             escaped_column_name))) {
         } else if (OB_FAIL(databuff_printf(vec_expr_def, OB_MAX_DEFAULT_VALUE_LENGTH, def_pos,
-                                           "`%s`, ",
-                                           col_schema->get_column_name()))) {
+                                           "`%.*s`, ",
+                                           static_cast<int>(escaped_column_name.length()),
+                                           escaped_column_name.ptr()))) {
         }
       }
       if (OB_FAIL(ret)) {
@@ -3558,6 +3616,8 @@ int ObVecIndexBuilderUtil::generate_chunk_column(
     ObColumnSchemaV2 column_schema;
     ObArray<ObString> extend_type_info;
     SMART_VAR(char[OB_MAX_DEFAULT_VALUE_LENGTH], vec_expr_def) {
+      ObArenaAllocator tmp_alloc;
+      ObString escaped_column_name;
       MEMSET(vec_expr_def, 0, sizeof(vec_expr_def));
       int64_t def_pos = 0;
       if (OB_FAIL(ret)) {
@@ -3574,9 +3634,14 @@ int ObVecIndexBuilderUtil::generate_chunk_column(
           LOG_USER_ERROR(OB_ERR_KEY_COLUMN_DOES_NOT_EXITS, column_name.length(),
               column_name.ptr());
         } else if (OB_FAIL(column_schema.add_cascaded_column_id(col_schema->get_column_id()))) {
+        } else if (OB_FAIL(ObShareUtil::escape_identifier(
+             tmp_alloc,
+             ObString::make_string(col_schema->get_column_name()),
+             escaped_column_name))) {
         } else if (OB_FAIL(databuff_printf(vec_expr_def, OB_MAX_DEFAULT_VALUE_LENGTH, def_pos,
-                                           "`%s`, ",
-                                           col_schema->get_column_name()))) {
+                                           "`%.*s`, ",
+                                           static_cast<int>(escaped_column_name.length()),
+                                           escaped_column_name.ptr()))) {
         } else if (OB_FAIL(extend_type_info.assign(col_schema->get_extended_type_info()))) {
         }
       }
@@ -3648,6 +3713,8 @@ int ObVecIndexBuilderUtil::generate_embedded_vec_column(
     ObVectorIndexParam index_param;
     ObString vector_type_str;
     SMART_VAR(char[OB_MAX_DEFAULT_VALUE_LENGTH], vec_expr_def) {
+      ObArenaAllocator tmp_alloc;
+      ObString escaped_column_name;
       MEMSET(vec_expr_def, 0, sizeof(vec_expr_def));
       int64_t def_pos = 0;
       if (OB_FAIL(ret)) {
@@ -3664,9 +3731,14 @@ int ObVecIndexBuilderUtil::generate_embedded_vec_column(
           LOG_USER_ERROR(OB_ERR_KEY_COLUMN_DOES_NOT_EXITS, column_name.length(),
               column_name.ptr());
         } else if (OB_FAIL(column_schema.add_cascaded_column_id(col_schema->get_column_id()))) {
+        } else if (OB_FAIL(ObShareUtil::escape_identifier(
+             tmp_alloc,
+             ObString::make_string(col_schema->get_column_name()),
+             escaped_column_name))) {
         } else if (OB_FAIL(databuff_printf(vec_expr_def, OB_MAX_DEFAULT_VALUE_LENGTH, def_pos,
-                                           "`%s`, ",
-                                           col_schema->get_column_name()))) {
+                                           "`%.*s`, ",
+                                           static_cast<int>(escaped_column_name.length()),
+                                           escaped_column_name.ptr()))) {
         } else if (OB_FAIL(extend_type_info.assign(col_schema->get_extended_type_info()))) {
         }
       }

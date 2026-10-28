@@ -41,6 +41,21 @@ public:
   static int get_server_ip(const common::ObAddr &self_addr,
                            common::ObIAllocator &allocator,
                            common::ObString &ip_string);
+  /**
+   * @brief Escape an identifier so that it can be embedded into a backtick
+   *        quoted identifier.
+   *
+   * Every backtick of the source name is doubled, which is the escaping rule of
+   * the MySQL text protocol. The helper lives in the terminal Share module so
+   * that Share code can quote identifiers without depending on an upper module.
+   *
+   * @param[in]  allocator  allocator used for the escaped name
+   * @param[in]  src        the raw identifier
+   * @param[out] dst        the escaped identifier, empty when src is empty
+   */
+  static int escape_identifier(common::ObIAllocator &allocator,
+                                const common::ObString &src,
+                                common::ObString &dst);
   // priority to set timeout_ctx: ctx > worker > default_timeout
   static int set_default_timeout_ctx(common::ObTimeoutCtx &ctx, const int64_t default_timeout);
   // moved up from rootserver::ObRootUtils(body uses only config::rpc_timeout() + set_default_timeout_ctx, share-clean)
