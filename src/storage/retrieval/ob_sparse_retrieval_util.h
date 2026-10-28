@@ -31,7 +31,22 @@ namespace storage
 inline int compare_binary_domain_id(const ObDatum &lhs, const ObDatum &rhs)
 {
   const int64_t length = MIN(lhs.len_, rhs.len_);
-  int cmp_ret = length > 0 ? MEMCMP(lhs.ptr_, rhs.ptr_, length) : 0;
+  int cmp_ret = 0;
+  int64_t pos = 0;
+  // Unsigned byte order equals the order of big-endian 8-byte words, which avoids a memcmp
+  // call per comparison for the usual 16-byte document ids.
+  for (; 0 == cmp_ret && pos + 8 <= length; pos += 8) {
+    uint64_t l = 0;
+    uint64_t r = 0;
+    MEMCPY(&l, lhs.ptr_ + pos, sizeof(l));
+    MEMCPY(&r, rhs.ptr_ + pos, sizeof(r));
+    if (l != r) {
+      cmp_ret = __builtin_bswap64(l) < __builtin_bswap64(r) ? -1 : 1;
+    }
+  }
+  if (0 == cmp_ret && pos < length) {
+    cmp_ret = MEMCMP(lhs.ptr_ + pos, rhs.ptr_ + pos, length - pos);
+  }
   if (0 == cmp_ret) {
     cmp_ret = (lhs.len_ > rhs.len_) - (lhs.len_ < rhs.len_);
   }

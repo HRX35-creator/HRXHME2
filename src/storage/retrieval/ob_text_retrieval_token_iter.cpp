@@ -531,8 +531,11 @@ int ObTextRetrievalDaaTTokenIter::save_docids()
   } else {
     cur_idx_ = 0;
     const ObDatumVector &doc_id_datum = inv_scan_domain_id_col_->locate_expr_datumvector(*eval_ctx_);
+    const sql::ObBitVector *skip = token_iter_->get_skip();
+    // a posting batch is rarely filtered, so test the skip bits once per batch
+    const bool no_skip = skip->is_all_false(count_);
     for (int64_t i = 0; OB_SUCC(ret) && i < count_; ++i) {
-      if (OB_LIKELY(!token_iter_->get_skip()->at(i))) {
+      if (OB_LIKELY(no_skip || !skip->at(i))) {
         if (OB_FAIL(doc_id_[i].from_datum(*doc_id_datum.at(i)))) {
         };
       }
