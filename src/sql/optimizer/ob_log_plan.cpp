@@ -12051,11 +12051,13 @@ int ObLogPlan::prepare_text_retrieval_scan(const ObIArray<ObRawExpr *> &scan_mat
       tr_info.pushdown_match_filter_ = nullptr;
     }
     // A natural-language match has a positive score for every posting that is
-    // returned. Scalar aggregation does not observe the implicit score order.
-    // If MATCH is used only as this boolean predicate, union the postings
-    // without collecting corpus statistics or evaluating BM25 for each row.
+    // returned. Scalar aggregation does not observe the implicit score order,
+    // and a query without ORDER BY has none (e.g. a view whose parent only
+    // counts its rows). If MATCH is used only as this boolean predicate, union
+    // the postings without collecting corpus statistics or evaluating BM25.
     if (get_stmt()->is_select_stmt()
-        && static_cast<const ObSelectStmt *>(get_stmt())->is_scala_group_by()
+        && (static_cast<const ObSelectStmt *>(get_stmt())->is_scala_group_by()
+            || !static_cast<const ObSelectStmt *>(get_stmt())->has_order_by())
         && !table_scan->get_index_back()
         && !get_stmt()->has_subquery()
         && membership_predicate) {
