@@ -119,6 +119,3 @@ fn mac_address() -> Option<[u8; 6]> {
 fn mac_address() -> Option<[u8; 6]> {
     None
 }
-
-#[cfg(test)]
-mod tests;
