@@ -752,6 +752,7 @@ public:
   int init_hnswsq_mem_data();
   int check_snap_hnswsq_index();
   int build_hnswsq_index(ObVectorIndexParam *param);
+  int build_hipvs_snap_index(ObVectorIndexParam *param);
   bool is_mem_data_init_atomic(ObVectorIndexRecordType type);
   int try_init_mem_data(ObVectorIndexRecordType type, ObVectorIndexAlgorithmType enforce_type = VIAT_MAX) {
     int ret = OB_SUCCESS;

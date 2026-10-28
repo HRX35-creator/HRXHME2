@@ -17,6 +17,8 @@
 #define USING_LOG_PREFIX LIB
 
 #include "ob_vsag_adaptor.h"
+#include "hipvs_build_loader.h"
+#include "hipvs_graph_import.h"
 #include <map>
 #include "vsag/vsag.h"
 #include "vsag/errors.h"
@@ -975,6 +977,80 @@ int build_index(VectorIndexPtr &index_handler, float *vector_list,
       dataset->ExtraInfos(extra_infos);
     }
     if (OB_FAIL(hnsw->build_index(dataset))) {
+    }
+  }
+  return ret;
+}
+
+int build_index_hipvs(VectorIndexPtr &index_handler, const float *vectors, const int64_t *ids,
+                      int dim, int64_t rows)
+{
+  int ret = OB_SUCCESS;
+  HnswIndexHandler *handler = static_cast<HnswIndexHandler *>(index_handler);
+  if (nullptr == handler || dim <= 0 || rows < 0 ||
+      (rows > 0 && (nullptr == vectors || nullptr == ids)) ||
+      uint64_t(rows) > SIZE_MAX / uint64_t(dim)) {
+    ret = OB_INVALID_ARGUMENT;
+  } else if (handler->get_index_type() != HNSW_TYPE || handler->get_extra_info_size() != 0 ||
+             handler->get_dim() != dim || 0 != strcmp(handler->get_metric(), "l2") ||
+             0 != strcmp(handler->get_dtype(), "float32") || handler->get_index()->GetNumElements() != 0 ||
+             vsag::version() != "012a0f2") {
+    // The binary consumer must match the pinned SDK tested by this adapter.
+    ret = OB_NOT_SUPPORTED;
+  } else if (rows == 0) {
+    // Empty snapshots have no graph construction to accelerate.
+  } else {
+    try {
+      hipvs::BuildExport exported;
+      std::string error;
+      if (!hipvs::build_export(vectors, rows, dim, handler->get_max_degree(), exported, error)) {
+        ret = OB_ERR_VSAG_RETURN_ERROR;
+        LOG_WARN("hipVS GPU build failed; no CPU fallback", K(ret), KCSTRING(error.c_str()), K(rows), K(dim));
+      } else {
+        const char *invalid = hipvs::GraphImport::convert(
+            {exported.bytes_, exported.length_}, {vectors, size_t(rows) * dim}, {ids, size_t(rows)},
+            dim, handler->get_max_degree(), handler->get_ef_construction());
+        if (invalid != nullptr) {
+          ret = OB_ERR_VSAG_RETURN_ERROR;
+          LOG_WARN("hipVS graph export rejected", K(ret), KCSTRING(invalid), K(rows), K(dim));
+        } else {
+          char parameters[1024] = {};
+          if (OB_FAIL(construct_vsag_create_param(HNSW_TYPE, handler->get_dtype(), handler->get_metric(),
+                  dim, handler->get_max_degree(), handler->get_ef_construction(), handler->get_ef_search(),
+                  handler->get_allocator(), 0, 0, 32, false, parameters))) {
+          } else {
+            auto candidate = vsag::Factory::CreateIndex("hnsw", parameters, handler->get_allocator());
+            if (!candidate.has_value()) {
+              ret = vsag_errcode2ob(candidate.error().type);
+            } else {
+              // Borrow the export until synchronous Deserialize completes.
+              vsag::Binary blob;
+              blob.size = exported.length_;
+              blob.data = std::shared_ptr<int8_t[]>(reinterpret_cast<int8_t *>(exported.bytes_), [](int8_t *) {});
+              vsag::BinarySet binary;
+              binary.Set(vsag::HNSW_DATA, blob);
+              auto loaded = candidate.value()->Deserialize(binary);
+              if (!loaded.has_value()) {
+                ret = vsag_errcode2ob(loaded.error().type);
+              } else if (candidate.value()->GetNumElements() != rows) {
+                ret = OB_ERR_UNEXPECTED;
+              } else {
+                // Publish only a completely validated, loaded index. No CPU
+                // Build/Add has constructed its graph; normal persistence works.
+                handler->set_index(candidate.value());
+                LOG_INFO("hipVS GPU graph imported", K(rows), K(dim), K(exported.length_));
+              }
+            }
+          }
+        }
+      }
+    } catch (const std::bad_alloc &) {
+      ret = OB_ALLOCATE_MEMORY_FAILED;
+    } catch (const std::exception &error) {
+      ret = OB_ERR_VSAG_RETURN_ERROR;
+      LOG_WARN("hipVS graph import exception", K(ret), "what", error.what());
+    } catch (...) {
+      ret = OB_ERR_VSAG_RETURN_ERROR;
     }
   }
   return ret;
