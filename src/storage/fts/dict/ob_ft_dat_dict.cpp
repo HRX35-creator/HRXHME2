@@ -299,10 +299,25 @@ template class ObFTDATReader<void>;
 
 ObArrayHashMap *ObFTDAT::get_map() { return reinterpret_cast<ObArrayHashMap *>(buff); }
 
+namespace
+{
+uint64_t dictionary_word_hash(const ObFTSingleWord &word)
+{
+  const ObString text = word.get_word();
+  switch (text.length()) {
+    case 1: return common::murmurhash(text.ptr(), 1, 0);
+    case 2: return common::murmurhash(text.ptr(), 2, 0);
+    case 3: return common::murmurhash(text.ptr(), 3, 0);
+    case 4: return common::murmurhash(text.ptr(), 4, 0);
+    default: return text.hash();
+  }
+}
+} // namespace
+
 int ObArrayHashMap::find(const ObFTSingleWord &word, ObFTWordCode &code) const
 {
   int ret = OB_ENTRY_NOT_EXIST;
-  uint64_t hash = word.get_word().hash();
+  uint64_t hash = dictionary_word_hash(word);
   uint64_t index = hash % header_.capacity_;
   while (header_.data[index].used) {
     if (header_.data[index].word == word) {
