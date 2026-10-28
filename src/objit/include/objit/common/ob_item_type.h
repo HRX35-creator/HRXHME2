@@ -916,6 +916,10 @@ typedef enum ObItemType
   T_FUN_SYS_AI_RERANK = 2084,
   T_FUN_MD5_CNN_WS = 2085,
   T_FUN_SYS_BUCKET = 2086,
+  T_FUN_SYS_READ_CSV = 2087,
+  T_FUN_SYS_READ_JSON = 2088,
+  T_FUN_SYS_READ_PARQUET = 2089,
+  T_FUN_SYS_GLOB = 2090,
   T_MAX_OP = 3000,
 
   //pseudo column, to mark the group iterator id
@@ -2274,6 +2278,12 @@ typedef enum ObItemType
   T_FORK_DATABASE = 4917,
   T_DIFF_TABLE = 4918,
   T_MERGE_TABLE = 4919,
+
+  T_AI_COLUMN = 4930,
+  T_AI_COLUMN_OPTION_LIST = 4931,
+  T_AI_COLUMN_OPTION = 4932,
+  T_RETRY_AI_COLUMN = 4933,
+  T_SHOW_AI_COLUMNS = 4934,
   T_MAX //Attention: add a new type before T_MAX
 } ObItemType;
 

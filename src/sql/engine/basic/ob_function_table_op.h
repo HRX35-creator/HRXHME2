@@ -20,6 +20,9 @@
 #include "sql/engine/ob_operator.h"
 #include "sql/engine/basic/ob_chunk_datum_store.h"
 #include "lib/charset/ob_charset.h"
+#include "sql/engine/basic/ob_file_scan_utils.h"
+#include <string>
+#include <vector>
 
 namespace oceanbase
 {
@@ -32,11 +35,24 @@ class ObFunctionTableSpec : public ObOpSpec
 OB_UNIS_VERSION_V(1);
 public:
   ObFunctionTableSpec(common::ObIAllocator &alloc, const ObPhyOperatorType type)
-    : ObOpSpec(alloc, type), value_expr_(nullptr), column_exprs_(alloc), has_correlated_expr_(false)
+    : ObOpSpec(alloc, type),
+      value_expr_(nullptr),
+      column_exprs_(alloc),
+      has_correlated_expr_(false),
+      is_file_scan_(false),
+      file_format_(0),
+      file_header_(1),
+      file_delimiter_(','),
+      file_quote_('"')
   {}
   ObExpr *value_expr_;
   common::ObFixedArray<ObExpr*, common::ObIAllocator> column_exprs_;
   bool has_correlated_expr_;
+  bool is_file_scan_;
+  int64_t file_format_;
+  int64_t file_header_;
+  int64_t file_delimiter_;
+  int64_t file_quote_;
 };
 
 class ObFunctionTableOp : public ObOperator
@@ -58,6 +74,7 @@ public:
   virtual int inner_close() override;
   virtual void destroy() override;
 private:
+  int inner_get_next_row_file_scan();
   int inner_get_next_row_udf();
   int inner_get_next_row_sys_func();
   int get_current_result(common::ObObj &result);
@@ -67,6 +84,16 @@ private:
   int64_t col_count_;
   common::ObObj value_;
   pl::ObPLCollection *value_table_;
+  ObFileCsvReader csv_reader_;
+  std::vector<std::string> csv_record_;
+  ObFileJsonlReader jsonl_reader_;
+  std::vector<std::string> jsonl_record_;
+  std::vector<bool> jsonl_nulls_;
+  ObFileParquetReader parquet_reader_;
+  std::vector<std::string> parquet_record_;
+  std::vector<bool> parquet_nulls_;
+  std::vector<std::string> glob_files_;
+  size_t glob_idx_;
   int (ObFunctionTableOp::*next_row_func_)();
 };
 
