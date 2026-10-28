@@ -18,3 +18,4 @@ config = { path = "../config" }
 local = { path = "../local" }
 in-process = { path = "../in-process" }
 regex-engine = { path = "../regex-engine" }
+uuid-generator = { path = "../uuid-generator" }
