@@ -225,8 +225,8 @@ OB_INLINE int ObDatumRange::is_memtable_single_rowkey(const int64_t schema_rowke
   } else if (!border_flag_.inclusive_start() || !border_flag_.inclusive_end()) {
   } else if (start_key_.is_ext_rowkey() || start_key_.is_static_rowkey() ||
              end_key_.is_ext_rowkey() || end_key_.is_static_rowkey()) {
-  } else if (OB_UNLIKELY(start_key_.store_rowkey_.get_obj_cnt() < schema_rowkey_cnt ||
-                         end_key_.store_rowkey_.get_obj_cnt() < schema_rowkey_cnt)) {
+  } else if (OB_UNLIKELY(start_key_.store_rowkey_.get_value_count() < schema_rowkey_cnt ||
+                         end_key_.store_rowkey_.get_value_count() < schema_rowkey_cnt)) {
     ret = OB_ERR_UNEXPECTED;
     STORAGE_LOG(WARN, "Unexpected rowkey cnt", K(ret), K(schema_rowkey_cnt),
                 K(start_key_.store_rowkey_), K(end_key_.store_rowkey_));

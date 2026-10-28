@@ -18,7 +18,6 @@
 #include "common/datum/datum_value_projection.h"
 #include "share/datum/typed_datum_compare.h"
 #include "data_plane/native_key_value_buffer.h"
-#include "config_bridge.h"
 #include "rust/config.h"
 #include "sql/das/iter/ob_das_hnsw_scan_iter.h"
 #include "share/rc/ob_server_runtime.h"
@@ -1709,8 +1708,8 @@ int ObDASHNSWScanIter::build_embedded_table_rowkey(ObIAllocator &allocator, cons
   if (OB_ISNULL(main_rowkey) || OB_ISNULL(vid)) {
     ret = OB_ERR_UNEXPECTED;
   } else {
-    int64_t main_rowkey_cnt = main_rowkey->get_obj_cnt();
-    int64_t vid_cnt = vid->get_obj_cnt();
+    int64_t main_rowkey_cnt = main_rowkey->get_value_count();
+    int64_t vid_cnt = vid->get_value_count();
     int64_t total_cnt = main_rowkey_cnt + vid_cnt;
 
     if (OB_UNLIKELY(total_cnt <= 0)) {
@@ -2355,7 +2354,7 @@ int ObDASHNSWScanIter::set_func_lookup_rowkey(ObRowkey &rowkey)
     ObDocIdExt doc_id;
     ObDatum doc_datum;
     char extended[DATUM_EXTEND_PAYLOAD_SIZE];
-    if (rowkey.get_obj_cnt() != 1) {
+    if (rowkey.get_value_count() != 1) {
       ret = OB_ERR_UNEXPECTED;
     } else if (func_data_iter->has_main_lookup_iter()) {
       ret = OB_ERR_UNEXPECTED;

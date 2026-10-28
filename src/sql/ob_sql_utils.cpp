@@ -2675,15 +2675,15 @@ int ObVirtualTableResultConverter::get_need_convert_key_ranges_pos(ObNewRange &k
   pos = INT64_MAX;
   const ObRowkey &start_key = key_range.start_key_;
   const ObRowkey &end_key = key_range.end_key_;
-  if (start_key.get_obj_cnt() != end_key.get_obj_cnt()) {
+  if (start_key.get_value_count() != end_key.get_value_count()) {
     ret = OB_ERR_UNEXPECTED;
     LOG_WARN("start key is not match with end key", K(ret),
-      "start key cnt", start_key.get_obj_cnt(),
-      "end key cnt", end_key.get_obj_cnt());
-  } else if (start_key.get_obj_cnt() > 0) {
+      "start key cnt", start_key.get_value_count(),
+      "end key cnt", end_key.get_value_count());
+  } else if (start_key.get_value_count() > 0) {
     const DatumValue *start_key_objs = start_key.get_values();
     const DatumValue *end_key_objs = end_key.get_values();
-    for (uint64_t nth_obj = 0; OB_SUCC(ret) && nth_obj < start_key.get_obj_cnt(); ++nth_obj) {
+    for (uint64_t nth_obj = 0; OB_SUCC(ret) && nth_obj < start_key.get_value_count(); ++nth_obj) {
       if ((start_key_objs[nth_obj].is_ext() || start_key_objs[nth_obj].is_null()) &&
           !end_key_objs[nth_obj].is_ext()) {
         pos = nth_obj;
@@ -2732,19 +2732,19 @@ int ObVirtualTableResultConverter::convert_key(const ObRowkey &src, ObRowkey &ds
 {
   int ret = OB_SUCCESS;
   UNUSED(is_start_key);
-  if (src.get_obj_cnt() > 0) {
+  if (src.get_value_count() > 0) {
     const DatumValue *src_key_objs = src.get_values();
     void *tmp_ptr = NULL;
     DatumValue *new_key_obj = NULL;
-    tmp_ptr = key_alloc_->alloc(src.get_obj_cnt() * sizeof(DatumValue));
+    tmp_ptr = key_alloc_->alloc(src.get_value_count() * sizeof(DatumValue));
     if (OB_ISNULL(tmp_ptr)) {
       ret = OB_ALLOCATE_MEMORY_FAILED;
-    } else if (OB_ISNULL(new_key_obj = new (tmp_ptr) DatumValue[src.get_obj_cnt()])) {
+    } else if (OB_ISNULL(new_key_obj = new (tmp_ptr) DatumValue[src.get_value_count()])) {
       ret = OB_ALLOCATE_MEMORY_FAILED;
-    } else if (src.get_obj_cnt() != key_types_->count()) {
+    } else if (src.get_value_count() != key_types_->count()) {
       ret = OB_ERR_UNEXPECTED;
     }
-    for (int64_t nth_obj = 0; OB_SUCC(ret) && nth_obj < src.get_obj_cnt(); ++nth_obj) {
+    for (int64_t nth_obj = 0; OB_SUCC(ret) && nth_obj < src.get_value_count(); ++nth_obj) {
       const DatumValue &src_obj = src_key_objs[nth_obj];
       if (pos == nth_obj && (src_obj.is_ext() || src_obj.is_null())) {
         /**
@@ -2764,7 +2764,7 @@ int ObVirtualTableResultConverter::convert_key(const ObRowkey &src, ObRowkey &ds
          **/
         if (is_start_key) {
           if (src_obj.is_min_value()) {
-            for (int64_t null_pos = nth_obj; null_pos < src.get_obj_cnt() && OB_SUCC(ret); ++null_pos) {
+            for (int64_t null_pos = nth_obj; null_pos < src.get_value_count() && OB_SUCC(ret); ++null_pos) {
               if (src_key_objs[null_pos].is_min_value()) {
                 if (null_pos == nth_obj) {
                   new_key_obj[nth_obj].set_null();
@@ -2776,7 +2776,7 @@ int ObVirtualTableResultConverter::convert_key(const ObRowkey &src, ObRowkey &ds
           }
         } else {
           if (src_obj.is_null()) {
-            for (int64_t null_pos = nth_obj; null_pos < src.get_obj_cnt() && OB_SUCC(ret); ++null_pos) {
+            for (int64_t null_pos = nth_obj; null_pos < src.get_value_count() && OB_SUCC(ret); ++null_pos) {
               if (src_key_objs[null_pos].is_null()) {
                 if (pos != nth_obj) {
                   ret = OB_ERR_UNEXPECTED;
@@ -2807,7 +2807,7 @@ int ObVirtualTableResultConverter::convert_key(const ObRowkey &src, ObRowkey &ds
       }
     }//end for
     if (OB_SUCC(ret)) {
-      dst.assign(new_key_obj, src.get_obj_cnt());
+      dst.assign(new_key_obj, src.get_value_count());
     }
   }
   return ret;

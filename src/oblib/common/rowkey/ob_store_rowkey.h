@@ -48,7 +48,7 @@ public:
   const ObRowkey &get_rowkey() const { return key_; }
 
   inline bool is_valid() const { return key_.is_valid(); }
-  inline int64_t get_obj_cnt() const { return key_.get_obj_cnt(); }
+  inline int64_t get_value_count() const { return key_.get_value_count(); }
   inline const DatumValue *get_values() const { return key_.get_values(); }
   const DatumValue &get_cell(int64_t index) const { return key_.get_cell(index); }
   DatumValue &get_cell(int64_t index) { return key_.get_cell(index); }

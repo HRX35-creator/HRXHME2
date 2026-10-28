@@ -2778,7 +2778,7 @@ int ObDASIvfPQScanIter::pre_compute_inner_prod_table(
 uint64_t ObDASIvfPQScanIter::hash_val_for_rk(const common::ObRowkey& rk)
 {
   uint64_t hash_val = 0;
-  for (int i = 0; i < rk.get_obj_cnt(); i++) {
+  for (int i = 0; i < rk.get_value_count(); i++) {
     (void)hash_datum_value(rk.get_cell(i), hash_val, hash_val);
   }
   return hash_val;
@@ -3090,7 +3090,7 @@ bool ObIvfPreFilter::test(const ObRowkey& main_rowkey)
   int ret = OB_SUCCESS;
   if (type_ == FilterType::ROARING_BITMAP) {
     uint64_t hash_val = 0;
-    for (int i = 0; i < main_rowkey.get_obj_cnt(); i++) {
+    for (int i = 0; i < main_rowkey.get_value_count(); i++) {
       (void)hash_datum_value(main_rowkey.get_cell(i), hash_val, hash_val);
     }
     bret = roaring::api::roaring64_bitmap_contains(roaring_bitmap_, hash_val);

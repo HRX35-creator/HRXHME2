@@ -111,15 +111,15 @@ int ObAllVirtualTxData::get_primary_key_()
     SERVER_LOG(WARN, "invalid key ranges", KR(ret));
   } else {
     ObNewRange &key_range = key_ranges_.at(0);
-    if (OB_UNLIKELY(key_range.get_start_key().get_obj_cnt() < 1 || key_range.get_end_key().get_obj_cnt() < 1)) {
+    if (OB_UNLIKELY(key_range.get_start_key().get_value_count() < 1 || key_range.get_end_key().get_value_count() < 1)) {
       ret = OB_ERR_UNEXPECTED;
       SERVER_LOG(ERROR,
                  "unexpected key_ranges_ of rowkey columns",
                  KR(ret),
                  "size of start key",
-                 key_range.get_start_key().get_obj_cnt(),
+                 key_range.get_start_key().get_value_count(),
                  "size of end key",
-                 key_range.get_end_key().get_obj_cnt());
+                 key_range.get_end_key().get_value_count());
     } else if (OB_FAIL(handle_key_range_(key_range))) {
     }
   }

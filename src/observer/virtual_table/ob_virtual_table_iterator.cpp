@@ -100,21 +100,21 @@ int ObVirtualTableIterator::free_convert_ctx()
 int ObVirtualTableIterator::convert_key(const ObRowkey &src, ObRowkey &dst, common::ObIArray<const ObColumnSchemaV2*> &key_cols)
 {
   int ret = OB_SUCCESS;
-  if (src.get_obj_cnt() > 0) {
+  if (src.get_value_count() > 0) {
     const DatumValue *src_key_objs = src.get_values();
     void *tmp_ptr = NULL;
     DatumValue *new_key_obj = NULL;
-    tmp_ptr = allocator_->alloc(src.get_obj_cnt() * sizeof(DatumValue));
+    tmp_ptr = allocator_->alloc(src.get_value_count() * sizeof(DatumValue));
     if (OB_ISNULL(tmp_ptr)) {
       ret = OB_ALLOCATE_MEMORY_FAILED;
-    } else if (OB_ISNULL(new_key_obj = new (tmp_ptr) DatumValue[src.get_obj_cnt()])) {
+    } else if (OB_ISNULL(new_key_obj = new (tmp_ptr) DatumValue[src.get_value_count()])) {
       ret = OB_ALLOCATE_MEMORY_FAILED;
-    } else if (src.get_obj_cnt() > key_cols.count()) {
+    } else if (src.get_value_count() > key_cols.count()) {
       ret = OB_ERR_UNEXPECTED;
     }
     const ObDataTypeCastParams dtc_params = ObBasicSessionInfo::create_dtc_params(session_);
     ObCastCtx cast_ctx(allocator_, &dtc_params, CM_NONE, ObCharset::get_system_collation());
-    for (uint64_t nth_obj = 0; OB_SUCC(ret) && nth_obj < src.get_obj_cnt(); ++nth_obj) {
+    for (uint64_t nth_obj = 0; OB_SUCC(ret) && nth_obj < src.get_value_count(); ++nth_obj) {
       const DatumValue &src_obj = src_key_objs[nth_obj];
       if (src_obj.is_min_value()) {
         new_key_obj[nth_obj].set_min_value();
@@ -131,7 +131,7 @@ int ObVirtualTableIterator::convert_key(const ObRowkey &src, ObRowkey &dst, comm
       }
     }//end for
     if (OB_SUCC(ret)) {
-      dst.assign(new_key_obj, src.get_obj_cnt());
+      dst.assign(new_key_obj, src.get_value_count());
     }
   }
   return ret;

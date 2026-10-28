@@ -38,7 +38,7 @@ int ObRowkey::serialize(char *buffer,int64_t size,int64_t &pos) const
 { return values_.serialize(buffer,size,pos); }
 int64_t ObRowkey::get_serialize_size() const
 { return values_.get_serialize_size(); }
-int ObRowkey::serialize_objs(char *buffer,int64_t size,int64_t &pos) const
+int ObRowkey::serialize_datums(char *buffer,int64_t size,int64_t &pos) const
 {
   int ret=OB_SUCCESS;
   if(buffer==nullptr||size<=0)ret=OB_INVALID_ARGUMENT;
@@ -47,7 +47,7 @@ int ObRowkey::serialize_objs(char *buffer,int64_t size,int64_t &pos) const
     ret=DatumParameterCodec::encode_value(get_cell(i).datum_,get_cell(i).meta_,buffer,size,pos);
   return ret;
 }
-int64_t ObRowkey::get_serialize_objs_size() const
+int64_t ObRowkey::get_serialize_datums_size() const
 {
   int64_t result=0;
   for(int64_t i=0;i<count();++i){int64_t size=0;if(DatumParameterCodec::value_size(get_cell(i).datum_,get_cell(i).meta_,size)!=OB_SUCCESS)return 0;result+=size;}
@@ -90,7 +90,7 @@ int ObRowkey::decode(ObIAllocator &owner,const char *buffer,int64_t size,int64_t
   }
   return ret;
 }
-int ObRowkey::deserialize_objs(const char *buffer,int64_t size,int64_t &pos)
+int ObRowkey::deserialize_datums(const char *buffer,int64_t size,int64_t &pos)
 {
   int ret=OB_SUCCESS;int64_t next=pos;ObSEArray<DatumValue,4> staged;
   if(get_values()==nullptr)ret=OB_ERR_UNEXPECTED;

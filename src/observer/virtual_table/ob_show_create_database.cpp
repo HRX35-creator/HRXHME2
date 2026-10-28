@@ -88,7 +88,7 @@ int ObShowCreateDatabase::calc_show_database_id(uint64_t &show_database_id)
     ObRowkey end_key = key_ranges_.at(i).end_key_;
     const DatumValue *start_key_obj_ptr = start_key.get_values();
     const DatumValue *end_key_obj_ptr = end_key.get_values();
-    if (start_key.get_obj_cnt() > 0 && start_key.get_obj_cnt() == end_key.get_obj_cnt()) {
+    if (start_key.get_value_count() > 0 && start_key.get_value_count() == end_key.get_value_count()) {
       if (OB_UNLIKELY(NULL == start_key_obj_ptr || NULL == end_key_obj_ptr)) {
         ret = OB_ERR_UNEXPECTED;
       } else if (key_filter_equal(start_key_obj_ptr[0], end_key_obj_ptr[0])

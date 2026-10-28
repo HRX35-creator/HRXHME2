@@ -312,7 +312,7 @@ int ObDMLService::check_rowkey_whether_distinct(const ObExprPtrIArray &row,
   if (T_DISTINCT_NONE != distinct_algo) {
     if (T_HASH_DISTINCT == distinct_algo) {
       ObIAllocator &allocator = root_ctx.get_allocator();
-      const int64_t rowkey_cnt = tmp_table_rowkey.get_obj_cnt();
+      const int64_t rowkey_cnt = tmp_table_rowkey.get_value_count();
       if (OB_ISNULL(rowkey_dist_ctx)) {
         ret = OB_ERR_UNEXPECTED;
       } else {

@@ -93,9 +93,9 @@ TEST(NativeStorageRowkeyConsumers, read_key_matches_actual_old_storage_flags_byt
 {
   const auto rows=fixture("READ");ASSERT_EQ(13,rows.size());
   for(const auto &fields:rows){ASSERT_EQ(5,fields.size());SCOPED_TRACE(fields[1]);ObArenaAllocator owner;
-    ObStoreRowkey key;key_from(fields[2],owner,key);ObDatumRow row;ASSERT_EQ(OB_SUCCESS,row.init(owner,key.get_obj_cnt()));
+    ObStoreRowkey key;key_from(fields[2],owner,key);ObDatumRow row;ASSERT_EQ(OB_SUCCESS,row.init(owner,key.get_value_count()));
     EXPECT_EQ(std::stoi(fields[3]),ObReadRow::iterate_row_key(key,row));std::string actual;
-    for(int64_t i=0;i<key.get_obj_cnt();++i){if(i)actual+=';';actual+=storage_value(row.storage_datums_[i]);}
+    for(int64_t i=0;i<key.get_value_count();++i){if(i)actual+=';';actual+=storage_value(row.storage_datums_[i]);}
     EXPECT_EQ(fields[4],actual);
   }
 }
@@ -163,7 +163,7 @@ TEST(NativeStorageRowkeyConsumers, mutator_key_payloads_survive_input_overwrite_
 {
   const auto rows=fixture("MUTATOR");ASSERT_EQ(3,rows.size());ObMemtableMutatorRow value;
   for(int pass=0;pass<3;++pass){const auto &fields=rows.at(pass);std::string bytes=unhex(fields[3]);value.reset();
-    EXPECT_EQ(OB_MAX_ROWKEY_COLUMN_NUMBER,value.rowkey_.get_obj_cnt());int64_t pos=0;
+    EXPECT_EQ(OB_MAX_ROWKEY_COLUMN_NUMBER,value.rowkey_.get_value_count());int64_t pos=0;
     ASSERT_EQ(OB_SUCCESS,value.deserialize(bytes.data(),bytes.size(),pos));MEMSET(bytes.data(),0xa5,bytes.size());
     // New/old row-data intentionally still borrow the serialized frame; only
     // the native key has an independent owner. Do not read those row bodies.

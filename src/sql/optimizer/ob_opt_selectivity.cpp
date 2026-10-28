@@ -1736,11 +1736,11 @@ int ObOptSelectivity::get_single_newrange_selectivity(const OptTableMetas &table
   } else {
     const ObRowkey &startkey = range.get_start_key();
     const ObRowkey &endkey = range.get_end_key();
-    if (startkey.get_obj_cnt() == endkey.get_obj_cnt() &&
-        range_columns.count() == startkey.get_obj_cnt()) {
+    if (startkey.get_value_count() == endkey.get_value_count() &&
+        range_columns.count() == startkey.get_value_count()) {
       selectivity = 1.0;
       double tmp_selectivity = 1.0;
-      int64_t column_num = startkey.get_obj_cnt();
+      int64_t column_num = startkey.get_value_count();
       //if prefix of range is single value, process next column;
       //stop at first range column
       bool last_column = false;
@@ -1988,8 +1988,8 @@ int ObOptSelectivity::refine_out_of_bounds_sel(const OptTableMetas &table_metas,
       if (OB_ISNULL(range = ranges.at(i))) {
         ret = OB_ERR_UNEXPECTED;
       } else if (range->is_whole_range() || range->empty() ||
-                 1 != range->get_start_key().get_obj_cnt() ||
-                 1 != range->get_end_key().get_obj_cnt()) {
+                 1 != range->get_start_key().get_value_count() ||
+                 1 != range->get_end_key().get_value_count()) {
         // do nothing
       } else {
         const DatumValue &startobj = range->get_start_key().get_cell(0);
@@ -2454,8 +2454,8 @@ int ObOptSelectivity::get_range_sel_by_histogram(const OptSelectivityCtx &ctx,
       const ObRowkey &startkey = range->get_start_key();
       const ObRowkey &endkey = range->get_end_key();
 
-      if (startkey.get_obj_cnt() == endkey.get_obj_cnt() &&
-          1 == startkey.get_obj_cnt()) {
+      if (startkey.get_value_count() == endkey.get_value_count() &&
+          1 == startkey.get_value_count()) {
         DatumValue start_value, end_value;
         const DatumValue *startobj = &start_value;
         const DatumValue *endobj = &end_value;

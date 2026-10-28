@@ -347,24 +347,27 @@ TEST(DynamicParamCapture, native_update_preserves_value_type_and_slot_metadata) 
   f.parameters().get_param_flag().flag_ = 0x5a;
   f.parameters().set_raw_text_info(17, 23);
 
+  char input_storage[sizeof(int64_t)] = {};
   ObDatum input;
+  input.ptr_ = input_storage;
   input.set_int(-987654321);
   ASSERT_EQ(OB_SUCCESS, setter.update_dynamic_param(ctx, input));
   EXPECT_EQ(-987654321, f.parameters().datum_.get_int());
   EXPECT_EQ(ObIntType, f.parameters().get_type_meta().get_type());
-  EXPECT_TRUE(f.parameters().get_param_meta().is_null());
+  EXPECT_EQ(ObIntType, f.parameters().get_param_meta().get_type());
   EXPECT_EQ(0xa5, f.parameters().get_result_flag());
   EXPECT_EQ(0x5a, f.parameters().get_param_flag().flag_);
   EXPECT_EQ(17, f.parameters().get_raw_text_pos());
   EXPECT_EQ(23, f.parameters().get_raw_text_len());
   EXPECT_EQ(-987654321, f.native().datum_.get_int());
 
-  // A NULL update clears the old payload while preserving the declared type
-  // and slot-level result metadata.
+  // A NULL update clears the active value type while retaining the declared
+  // parameter type and slot-level result metadata.
   input.set_null();
   ASSERT_EQ(OB_SUCCESS, setter.update_dynamic_param(ctx, input));
   EXPECT_TRUE(f.parameters().is_null());
-  EXPECT_EQ(ObIntType, f.parameters().get_type_meta().get_type());
+  EXPECT_EQ(ObNullType, f.parameters().get_type_meta().get_type());
+  EXPECT_EQ(ObIntType, f.parameters().get_param_meta().get_type());
   EXPECT_EQ(0xa5, f.parameters().get_result_flag());
   EXPECT_EQ(0x5a, f.parameters().get_param_flag().flag_);
 }

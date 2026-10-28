@@ -318,13 +318,13 @@ int ObPlanCachePlanExplain::set_plan_id_filter(const common::ObIArray<common::Ob
     const DatumValue *start_key_obj_ptr = start_key.get_values();
     scan_all_plan_ = false;
     if (OB_ISNULL(start_key_obj_ptr)
-        || start_key.get_obj_cnt() < 1) {
+        || start_key.get_value_count() < 1) {
       ret = OB_ERR_UNEXPECTED;
       SERVER_LOG(WARN,
                  "fail to init plan visitor",
                  K(ret),
                  K(start_key_obj_ptr),
-                 "count", start_key.get_obj_cnt());
+                 "count", start_key.get_value_count());
     } else {
       
       plan_id_ = start_key_obj_ptr[0].get_int();  // plan_id is at index 0

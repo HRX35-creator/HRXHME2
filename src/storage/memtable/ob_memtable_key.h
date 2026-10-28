@@ -56,7 +56,7 @@ public:
   OB_INLINE int decode(common::ObStoreRowkey &rowkey) const
   {
     int ret = common::OB_SUCCESS;
-    ret = rowkey.assign(rowkey_->get_values(), rowkey_->get_obj_cnt());
+    ret = rowkey.assign(rowkey_->get_values(), rowkey_->get_value_count());
     return ret;
   }
 
@@ -164,13 +164,13 @@ public:
     if (!rowkey->is_regular()) {
       ret = common::OB_ERR_UNEXPECTED;
       TRANS_LOG(WARN, "trying to encode an irregular rowkey", K(rowkey), K(ret));
-    } else if (rowkey->get_obj_cnt() > columns.count()) {
+    } else if (rowkey->get_value_count() > columns.count()) {
       TRANS_LOG(WARN, "size does not match",
-                "rowkey_len", rowkey->get_obj_cnt(),
+                "rowkey_len", rowkey->get_value_count(),
                 "columns_size", columns.count());
       ret = common::OB_ERR_UNEXPECTED;
     }
-    for (int64_t i = 0; common::OB_SUCCESS == ret && i < rowkey->get_obj_cnt(); ++i) {
+    for (int64_t i = 0; common::OB_SUCCESS == ret && i < rowkey->get_value_count(); ++i) {
       common::DatumValue &value = const_cast<common::DatumValue &>(rowkey->get_values()[i]);
       const common::SqlTypeMeta &schema_meta = columns.at(i).col_type_;
       if (common::ObNullType != value.get_type()
@@ -207,13 +207,13 @@ public:
     if (!rowkey->is_regular()) {
        ret = common::OB_ERR_UNEXPECTED;
        TRANS_LOG(WARN, "trying to encode an irregular rowkey", K(rowkey), K(ret));
-    } else if (rowkey->get_obj_cnt() > columns.count()) {
+    } else if (rowkey->get_value_count() > columns.count()) {
       TRANS_LOG(WARN, "size does not match",
-                "rowkey_len", rowkey->get_obj_cnt(),
+                "rowkey_len", rowkey->get_value_count(),
                 "columns_size", columns.count());
       ret = common::OB_ERR_UNEXPECTED;
     }
-    for (int64_t i = 0; common::OB_SUCCESS == ret && i < rowkey->get_obj_cnt(); ++i) {
+    for (int64_t i = 0; common::OB_SUCCESS == ret && i < rowkey->get_value_count(); ++i) {
       common::DatumValue &value = const_cast<common::DatumValue &>(rowkey->get_values()[i]);
       const common::SqlTypeMeta &schema_meta = columns.at(i).col_type_;
       if (common::ObNullType != value.get_type()

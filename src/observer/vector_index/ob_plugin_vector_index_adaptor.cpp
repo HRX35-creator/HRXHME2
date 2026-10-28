@@ -344,7 +344,7 @@ int ObVectorQueryAdaptorResultContext::set_extra_info(int64_t index, const ObRow
                                                       const ObIArray<int64_t> &extra_in_rowkey_idxs)
 {
   INIT_SUCC(ret);
-  int64_t extra_column_count = rowkey.get_obj_cnt();
+  int64_t extra_column_count = rowkey.get_value_count();
   if (index >= get_count()) {
     ret = OB_ERR_UNEXPECTED;
   } else if (vec_data_.extra_column_count_ != extra_column_count) {
@@ -4592,7 +4592,7 @@ bool ObHnswBitmapFilter::test(int64_t id)
     if (OB_NOT_NULL(adaptor_)) {
       ObPluginVectorIndexAdaptor *adaptor = static_cast<ObPluginVectorIndexAdaptor*>(adaptor_);
       int64_t extra_info_actual_size = valid_cnt_;
-      int64_t extra_column_cnt = rk_range_.at(0)->get_start_key().get_obj_cnt();
+      int64_t extra_column_cnt = rk_range_.at(0)->get_start_key().get_value_count();
       if (OB_FAIL(adaptor->get_extra_info_by_ids(&id, 1, extra_buffer_, is_snap_))) {
       } else {
         bret = test(reinterpret_cast<const char*>(extra_buffer_));
@@ -4608,7 +4608,7 @@ bool ObHnswBitmapFilter::test(const char* data)
   int ret = OB_SUCCESS;
   if (type_ == FilterType::SIMPLE_RANGE) {
     int64_t extra_info_actual_size = valid_cnt_;
-    int64_t extra_column_cnt = rk_range_.at(0)->get_start_key().get_obj_cnt();
+    int64_t extra_column_cnt = rk_range_.at(0)->get_start_key().get_value_count();
     if (OB_FAIL(ObVecExtraInfo::extra_buf_to_values(data, extra_info_actual_size, extra_column_cnt, tmp_objs_, extra_in_rowkey_idxs_))) {
     } else {
       for (int64_t i = 0; i < extra_column_cnt && OB_SUCC(ret); ++i) {
@@ -4675,7 +4675,7 @@ int ObHnswBitmapFilter::init(void *adaptor, double selectivity, const ObIArray<c
     adaptor_ = adaptor;
     selectivity_ = selectivity;
     int64_t extra_info_actual_size = 0;
-    int64_t extra_column_cnt = rk_range_.at(0)->get_start_key().get_obj_cnt();
+    int64_t extra_column_cnt = rk_range_.at(0)->get_start_key().get_value_count();
     ObPluginVectorIndexAdaptor *adaptor = static_cast<ObPluginVectorIndexAdaptor*>(adaptor_);
     if (OB_FAIL(adaptor->get_extra_info_actual_size(extra_info_actual_size))) {
     } else if (extra_column_cnt == 0 || extra_info_actual_size == 0) {

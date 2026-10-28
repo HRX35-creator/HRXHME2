@@ -137,7 +137,7 @@ public:
     const ObMemtableMutatorRow &row = iterator.get_mutator_row();
     EXPECT_EQ(5001, row.table_id_);
     EXPECT_EQ(123, row.table_version_);
-    ASSERT_EQ(1, row.rowkey_.get_obj_cnt());
+    ASSERT_EQ(1, row.rowkey_.get_value_count());
     EXPECT_EQ(key_value, row.rowkey_.get_values()[0].get_int());
     EXPECT_EQ(blocksstable::ObDmlFlag::DF_UPDATE, row.dml_flag_);
     EXPECT_EQ(2, row.update_seq_);

@@ -58,7 +58,7 @@ uint64_t ObStoreRowkey::murmurhash(const uint64_t hash) const
 bool ObStoreRowkey::contains_min_or_max_obj() const
 {
   bool found = false;
-  for(int64_t i = 0; !found && i < key_.get_obj_cnt(); i++) {
+  for(int64_t i = 0; !found && i < key_.get_value_count(); i++) {
     if (key_.get_values()[i].is_min_value() || key_.get_values()[i].is_max_value()) {
       found = true;
     }
@@ -107,7 +107,7 @@ int ObExtStoreRowkey::get_possible_range_pos()
     ret = OB_NOT_INIT;
     COMMON_LOG(WARN, "ObExtStoreRowkey is not init", K(ret));
   } else {
-    for (int64_t i = 0; range_cut_pos_ < 0 && i < store_rowkey_.get_obj_cnt(); i++) {
+    for (int64_t i = 0; range_cut_pos_ < 0 && i < store_rowkey_.get_value_count(); i++) {
       if (store_rowkey_.get_values()[i].is_min_value()) {
         range_cut_pos_ = i;
         range_check_min_ = true;
@@ -121,7 +121,7 @@ int ObExtStoreRowkey::get_possible_range_pos()
       }
     }
     if (range_cut_pos_ < 0) {
-      range_cut_pos_ = store_rowkey_.get_obj_cnt();
+      range_cut_pos_ = store_rowkey_.get_value_count();
       range_check_min_ = true;
     }
   }

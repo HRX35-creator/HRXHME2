@@ -406,10 +406,10 @@ int ObAllVirtualSqlPlan::extract_plan_ids(const common::ObIArray<common::ObNewRa
     const DatumValue *start_key_obj_ptr = start_key.get_values();
     const DatumValue *end_key_obj_ptr = end_key.get_values();
 
-    if (start_key.get_obj_cnt() != end_key.get_obj_cnt() || 
-        start_key.get_obj_cnt() != ROWKEY_COUNT) {
+    if (start_key.get_value_count() != end_key.get_value_count() ||
+        start_key.get_value_count() != ROWKEY_COUNT) {
       ret = OB_ERR_UNEXPECTED;
-      SERVER_LOG(WARN, "invalid range", K(ret), K(start_key.get_obj_cnt()), K(ROWKEY_COUNT));
+      SERVER_LOG(WARN, "invalid range", K(ret), K(start_key.get_value_count()), K(ROWKEY_COUNT));
     } else if (OB_ISNULL(start_key_obj_ptr) || OB_ISNULL(end_key_obj_ptr)) {
       ret = OB_INVALID_ARGUMENT;
       SERVER_LOG(WARN, "invalid arguments", K(ret));

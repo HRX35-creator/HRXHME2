@@ -4987,7 +4987,7 @@ int ObPartitionUtils::get_hash_tablet_and_part_id_(
       || partition_num <= 0)) {
     ret = OB_INVALID_ARGUMENT;
   } else if (!range.is_single_rowkey()
-             || 1 != start_key.get_obj_cnt()
+             || 1 != start_key.get_value_count()
              || ObIntType != start_key.get_values()[0].get_type()) {
     if (OB_FAIL(get_all_tablet_and_part_id_(
         partition_array, partition_num, indexes))) {
@@ -5224,7 +5224,7 @@ int ObPartitionUtils::get_hash_tablet_and_subpart_id_(
     ret = OB_INVALID_ARGUMENT;
   } else if (OB_UNLIKELY(
              !range.is_single_rowkey()
-             || 1 != start_key.get_obj_cnt()
+             || 1 != start_key.get_value_count()
              || ObIntType != start_key.get_values()[0].get_type())) {
     if (OB_FAIL(get_all_tablet_and_subpart_id_(
         part_id, subpartition_array, subpartition_num, indexes))) {

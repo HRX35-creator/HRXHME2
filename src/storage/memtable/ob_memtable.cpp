@@ -687,7 +687,7 @@ int ObMemtable::get(
         }
         ObNopBitMap bitmap;
         int64_t row_scn = 0;
-        if (OB_FAIL(bitmap.init(request_cnt, store_rowkey->get_obj_cnt()))) {
+        if (OB_FAIL(bitmap.init(request_cnt, store_rowkey->get_value_count()))) {
         } else if (OB_FAIL(ObReadRow::iterate_row(*read_info, *store_rowkey, value_iter, row, bitmap, row_scn))) {
         } else {
           if (param.need_scn_) {
@@ -2331,7 +2331,7 @@ int ObMemtable::lock_(
   ObTxNodeArgs tx_node_args;
   ObMvccWriteResults mvcc_results;
 
-  const int64_t column_cnt = rowkey.get_obj_cnt();
+  const int64_t column_cnt = rowkey.get_value_count();
 
   if (OB_FAIL(mvcc_results.prepare_allocate(1))) {
   } else if (OB_FAIL(tx_node_args.prepare_allocate(1))) {

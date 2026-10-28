@@ -162,11 +162,11 @@ int ObRowWriter::write_lock_rowkey(const common::ObStoreRowkey &rowkey, char *&b
   len = 0;
   do {
     if (OB_FAIL(alloc_buf_and_init(OB_BUF_NOT_ENOUGH == ret))) {
-    } else if (OB_FAIL(append_row_header(ObDmlFlag::DF_LOCK, 0, 0, rowkey.get_obj_cnt(), rowkey.get_obj_cnt()))) {
+    } else if (OB_FAIL(append_row_header(ObDmlFlag::DF_LOCK, 0, 0, rowkey.get_value_count(), rowkey.get_value_count()))) {
     } else {
       update_idx_array_ = nullptr;
-      rowkey_column_cnt_ = rowkey.get_obj_cnt();
-      if (OB_FAIL(inner_write_cells(rowkey.get_values(), rowkey.get_obj_cnt()))) {
+      rowkey_column_cnt_ = rowkey.get_value_count();
+      if (OB_FAIL(inner_write_cells(rowkey.get_values(), rowkey.get_value_count()))) {
         if (OB_BUF_NOT_ENOUGH != ret) {
         }
       } else {

@@ -32,7 +32,6 @@ ObLobLocatorHelper::ObLobLocatorHelper()
     tablet_id_(OB_INVALID_ID),
     tx_read_snapshot_(),
     fb_snapshot_(),
-    rowid_objs_(),
     locator_allocator_(ObModIds::OB_LOB_READER, OB_MALLOC_NORMAL_BLOCK_SIZE),
     rowkey_str_(),
     enable_locator_v2_(),

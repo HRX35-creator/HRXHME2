@@ -330,11 +330,11 @@ int ObAllVirtualTabletSSTableMacroInfo::get_macro_info(
     const int64_t extra_rowkey_cnt = ObMultiVersionRowkeyHelpper::get_extra_rowkey_col_cnt();
     if (start_key != ObStoreRowkey::MIN_STORE_ROWKEY
         && OB_FAIL(start_key.assign(start_key.get_values(),
-            start_key.get_obj_cnt() > extra_rowkey_cnt ? start_key.get_obj_cnt() - extra_rowkey_cnt : start_key.get_obj_cnt()))) {
+            start_key.get_value_count() > extra_rowkey_cnt ? start_key.get_value_count() - extra_rowkey_cnt : start_key.get_value_count()))) {
       SERVER_LOG(WARN, "fail to set start key", K(ret), K(start_key));
     } else if (end_key != ObStoreRowkey::MAX_STORE_ROWKEY
         && OB_FAIL(end_key.assign(end_key.get_values(),
-            end_key.get_obj_cnt() > extra_rowkey_cnt ? end_key.get_obj_cnt() - extra_rowkey_cnt : end_key.get_obj_cnt()))) {
+            end_key.get_value_count() > extra_rowkey_cnt ? end_key.get_value_count() - extra_rowkey_cnt : end_key.get_value_count()))) {
       SERVER_LOG(WARN, "fail to set end key", K(ret), K(end_key));
     }
   }

@@ -17,7 +17,7 @@
 #pragma once
 #include "common/datum/datum_value.h"
 #include "share/datum/typed_datum_compare.h"
-#include "sql/parser/ob_item_type.h"
+#include "query/parser/ob_item_type.h"
 #include <utility>
 
 namespace oceanbase { namespace sql {

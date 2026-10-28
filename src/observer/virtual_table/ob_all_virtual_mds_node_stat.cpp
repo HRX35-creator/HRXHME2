@@ -212,13 +212,13 @@ int ObAllVirtualMdsNodeStat::get_primary_key_ranges_()
   if (key_ranges_.count() >= 1) {
     for (int64_t i = 0; OB_SUCC(ret) && i < key_ranges_.count(); i++) {
       ObNewRange &key_range = key_ranges_.at(i);
-      if (OB_UNLIKELY(key_range.get_start_key().get_obj_cnt() < 1
-                      || key_range.get_end_key().get_obj_cnt() < 1)) {
+      if (OB_UNLIKELY(key_range.get_start_key().get_value_count() < 1
+                      || key_range.get_end_key().get_value_count() < 1)) {
         ret = OB_ERR_UNEXPECTED;
         MDS_LOG(ERROR, "unexpected  # of rowkey columns",
                   K(ret),
-                  "size of start key", key_range.get_start_key().get_obj_cnt(),
-                  "size of end key", key_range.get_end_key().get_obj_cnt());
+                  "size of start key", key_range.get_start_key().get_value_count(),
+                  "size of end key", key_range.get_end_key().get_value_count());
       } else {
         const DatumValue &tablet_obj_low = (key_range.get_start_key().get_values()[0]);
         const DatumValue &tablet_obj_high = (key_range.get_end_key().get_values()[0]);

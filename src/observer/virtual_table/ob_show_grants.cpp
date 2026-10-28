@@ -695,8 +695,8 @@ int ObShowGrants::calc_show_user_id(uint64_t &show_user_id, ObIArray<uint64_t> &
     end_key = key_ranges_.at(i).end_key_;
     const DatumValue *start_key_obj_ptr = start_key.get_values();
     const DatumValue *end_key_obj_ptr = end_key.get_values();
-    if (start_key.get_obj_cnt() > 0
-        && start_key.get_obj_cnt() == end_key.get_obj_cnt()
+    if (start_key.get_value_count() > 0
+        && start_key.get_value_count() == end_key.get_value_count()
         && NULL != start_key_obj_ptr
         && NULL != end_key_obj_ptr) {
       if ((!start_key_obj_ptr[0].is_min_value() || !end_key_obj_ptr[0].is_max_value())
@@ -724,8 +724,8 @@ int ObShowGrants::calc_show_user_id(uint64_t &show_user_id, ObIArray<uint64_t> &
     } else {
       ret = OB_ERR_UNEXPECTED;
       SERVER_LOG(WARN, "Key range not valid", K(ret),
-                                              "start key cnt", start_key.get_obj_cnt(),
-                                              "end key cnt", end_key.get_obj_cnt(),
+                                              "start key cnt", start_key.get_value_count(),
+                                              "end key cnt", end_key.get_value_count(),
                                               "start key obj ptr", start_key_obj_ptr,
                                               "end key obj ptr", end_key_obj_ptr);
     }

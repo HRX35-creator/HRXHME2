@@ -16,8 +16,6 @@ public:
   void destroy(ObIAllocator &owner) { values_.destroy(owner); }
   int64_t count() const { return values_.count(); }
   int64_t get_value_count() const { return count(); }
-  // Count-only spelling retained for existing metadata callers; no object is stored.
-  int64_t get_obj_cnt() const { return count(); }
   int64_t length() const { return count(); }
   DatumValue *get_values() { return values_.get_cells(); }
   const DatumValue *get_values() const { return values_.get_cells(); }
@@ -59,9 +57,9 @@ public:
 
   int serialize(char *buffer, int64_t size, int64_t &pos) const;
   int64_t get_serialize_size() const;
-  int serialize_objs(char *buffer, int64_t size, int64_t &pos) const;
-  int64_t get_serialize_objs_size() const;
-  int deserialize_objs(const char *buffer, int64_t size, int64_t &pos);
+  int serialize_datums(char *buffer, int64_t size, int64_t &pos) const;
+  int64_t get_serialize_datums_size() const;
+  int deserialize_datums(const char *buffer, int64_t size, int64_t &pos);
   int to_yson(char *buffer, int64_t size, int64_t &pos) const {
     ObCStringHelper helper;
     return oceanbase::yson::databuff_encode_elements(buffer,size,pos,::oceanbase::name::rowkey,helper.convert(*this));

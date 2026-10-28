@@ -2501,7 +2501,7 @@ int ObTableScanOp::construct_partition_range(ObArenaAllocator &allocator,
       || OB_UNLIKELY(scan_range.end_key_.is_max_row())) {
     //the range contain min value or max value can not be pruned
     can_prune = false;
-  } else if (OB_UNLIKELY(scan_range.start_key_.get_obj_cnt() != scan_range.end_key_.get_obj_cnt())) {
+  } else if (OB_UNLIKELY(scan_range.start_key_.get_value_count() != scan_range.end_key_.get_value_count())) {
     ret = OB_ERR_UNEXPECTED;
   } else if (part_range_pos.count() > 0) {
     int64_t range_key_count = part_range_pos.count();
@@ -2521,7 +2521,7 @@ int ObTableScanOp::construct_partition_range(ObArenaAllocator &allocator,
       for (int64_t i = 0; OB_SUCC(ret) && can_prune && i < range_key_count; i++) {
         int64_t pos = part_range_pos.at(i);
         bool same = false;
-        if (OB_UNLIKELY(pos < 0) || OB_UNLIKELY(pos >= scan_range.start_key_.get_obj_cnt())) {
+        if (OB_UNLIKELY(pos < 0) || OB_UNLIKELY(pos >= scan_range.start_key_.get_value_count())) {
           ret = OB_ERR_UNEXPECTED;
         } else if (scan_range.start_key_.get_values()[pos].is_max_value() ||
                    scan_range.start_key_.get_values()[pos].is_min_value() ||

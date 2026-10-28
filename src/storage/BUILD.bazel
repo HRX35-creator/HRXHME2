@@ -169,6 +169,7 @@ _STORAGE_RUNTIME_NATIVE_DEPS = [
     "//src/oblib:common_sql_mode",
     "//src/oblib:oblib_foundation",
     "//src/data_plane:ascii_util_interface",
+    "//src/data_plane:column_param",
     "//src/data_plane:data_plane_api_interface",
     "//src/data_plane:datum_row_interface",
     "//src/data_plane:datum_reshape_interface",
@@ -398,6 +399,7 @@ cc_library(
     hdrs = STORAGE_PUBLIC_HEADER_ROOTS,
     textual_hdrs = STORAGE_INTERFACE_CLOSURE_HEADERS,
     deps = [
+        ":column_schema",
         ":_textual_ob_keybtree",
         ":tablet_autoincrement_state",
         "//rust:config_headers",

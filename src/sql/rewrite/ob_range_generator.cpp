@@ -1343,7 +1343,7 @@ int ObRangeGenerator::merge_and_remove_ranges()
             l_range = r_range;
           }
         } else if (cmp == 0) {
-          l_range->end_key_.assign(r_range->end_key_.get_values(), r_range->end_key_.get_obj_cnt());
+          l_range->end_key_.assign(r_range->end_key_.get_values(), r_range->end_key_.get_value_count());
           if (r_range->border_flag_.inclusive_end()) {
             l_range->border_flag_.set_inclusive_end();
           } else {
@@ -1352,7 +1352,7 @@ int ObRangeGenerator::merge_and_remove_ranges()
         } else {
           int cmp2 = l_range->compare_with_endkey2(*r_range);
           if (cmp2 < 0) {
-            l_range->end_key_.assign(r_range->end_key_.get_values(), r_range->end_key_.get_obj_cnt());
+            l_range->end_key_.assign(r_range->end_key_.get_values(), r_range->end_key_.get_value_count());
             if (r_range->border_flag_.inclusive_end()) {
               l_range->border_flag_.set_inclusive_end();
             } else {
@@ -2498,8 +2498,8 @@ int ObRangeGenerator::calc_copy_ranges_buffer_size(const ObIArray<ObNewRange*> &
     const ObNewRange *range = ranges.at(i);
     if (OB_ISNULL(range)) {
       ret = OB_ERR_UNEXPECTED;
-    } else if (OB_UNLIKELY(range->get_start_key().get_obj_cnt() != column_cnt ||
-                           range->get_end_key().get_obj_cnt() != column_cnt)) {
+    } else if (OB_UNLIKELY(range->get_start_key().get_value_count() != column_cnt ||
+                           range->get_end_key().get_value_count() != column_cnt)) {
       ret = OB_ERR_UNEXPECTED;
     } else {
       for (int64_t j = 0; j < column_cnt; ++j) {

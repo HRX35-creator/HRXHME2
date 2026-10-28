@@ -89,7 +89,9 @@ int ObInfoSchemaSessionStatusTable::fetch_all_session_status(
           const obmysql::ObSqlSockSession *sock_session = cur_session_->get_sock_desc().sock_desc_;
           const bool compressed = NULL != sock_session &&
               common::OB_MYSQL_COMPRESS_CS_TYPE == sock_session->conn_.get_cs_protocol_type();
-          obj.set_varchar(compressed ? "ON" : "OFF");
+          if (OB_FAIL(DatumValueBuffer::set_varchar_view(status_values, value_count, i,
+                  ObString::make_string(compressed ? "ON" : "OFF")))) {
+          }
           obj.set_collation_type(ObCharset::get_system_collation());
           break;
         }

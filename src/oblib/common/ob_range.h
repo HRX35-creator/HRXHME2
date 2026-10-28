@@ -484,8 +484,8 @@ public:
     } else {
       cmp = end_key_.compare(r.start_key_);
       if (0 == cmp) {
-        if (end_key_.get_values()[end_key_.get_obj_cnt() - 1].is_max_value() ||
-            end_key_.get_values()[end_key_.get_obj_cnt() - 1].is_min_value()) {
+        if (end_key_.get_values()[end_key_.get_value_count() - 1].is_max_value() ||
+            end_key_.get_values()[end_key_.get_value_count() - 1].is_min_value()) {
           // do nothing
         } else if (!border_flag_.inclusive_end() && !r.border_flag_.inclusive_start()) {
           cmp = -1;

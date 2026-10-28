@@ -35,7 +35,7 @@ int ObAllVirtualDiagIndexScan::set_index_ids(const common::ObIArray<common::ObNe
   for (int64_t i = 0; OB_SUCC(ret) && i < ranges.count(); ++i) {
     start_key = ranges.at(i).start_key_;
     end_key = ranges.at(i).end_key_;
-    if (start_key.get_obj_cnt() > 0 && start_key.get_obj_cnt() == end_key.get_obj_cnt()) {
+    if (start_key.get_value_count() > 0 && start_key.get_value_count() == end_key.get_value_count()) {
       start_key_obj_ptr = start_key.get_values();
       end_key_obj_ptr = end_key.get_values();
       if (NULL != start_key_obj_ptr && NULL != end_key_obj_ptr) {

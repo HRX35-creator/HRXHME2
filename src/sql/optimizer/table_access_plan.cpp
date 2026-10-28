@@ -4925,7 +4925,7 @@ int TableAccessPlan::try_split_integer_range(const common::ObIArray<common::ObNe
       LOG_WARN("invalid rowkey");
     } else if (range->start_key_.is_min_row() || range->end_key_.is_max_row()) {
       all_part = true;
-    } else if (range->start_key_.get_obj_cnt() != 1 || range->end_key_.get_obj_cnt() != 1) {
+    } else if (range->start_key_.get_value_count() != 1 || range->end_key_.get_value_count() != 1) {
       all_part = true;
     } else {
       const DatumValue &start_obj = range->start_key_.get_cell(0);
