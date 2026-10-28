@@ -9912,15 +9912,15 @@ static struct VarsInit{
     }();
 
     [&] (){
-      ObSysVars[719].default_value_ = "False" ;
+      ObSysVars[719].default_value_ = "0" ;
       ObSysVars[719].info_ = "enable reading local files (read_csv/read_json/read_parquet/glob) as tables in SQL" ;
       ObSysVars[719].name_ = "enable_file_sql" ;
-      ObSysVars[719].data_type_ = ObBoolType ;
+      ObSysVars[719].data_type_ = ObIntType ;
       ObSysVars[719].flags_ = ObSysVarFlag::SESSION_SCOPE | ObSysVarFlag::INFLUENCE_PLAN ;
       ObSysVars[719].id_ = SYS_VAR_ENABLE_FILE_SQL ;
       cur_max_var_id = MAX(cur_max_var_id, static_cast<int64_t>(SYS_VAR_ENABLE_FILE_SQL)) ;
       ObSysVarsIdToArrayIdx[SYS_VAR_ENABLE_FILE_SQL] = 719 ;
-      ObSysVars[719].base_value_ = "False" ;
+      ObSysVars[719].base_value_ = "0" ;
     ObSysVars[719].alias_ = "OB_SV_ENABLE_FILE_SQL" ;
     }();
 
