@@ -302,7 +302,7 @@ fn ffi_round_trip_owns_and_frees_outputs() {
             message: [1; 256],
         };
         assert_eq!(
-            seekdb_regex_compile(
+            regex_compile(
                 pattern.as_ptr(),
                 pattern.len(),
                 0,
@@ -318,7 +318,7 @@ fn ffi_round_trip_owns_and_frees_outputs() {
         let text = encoded("😀中文");
         let mut found = absent();
         assert_eq!(
-            seekdb_regex_find(
+            regex_find(
                 regex,
                 text.as_ptr(),
                 text.len(),
@@ -337,7 +337,7 @@ fn ffi_round_trip_owns_and_frees_outputs() {
             len: 0,
         };
         assert_eq!(
-            seekdb_regex_replace(
+            regex_replace(
                 regex,
                 text.as_ptr(),
                 text.len(),
@@ -351,13 +351,13 @@ fn ffi_round_trip_owns_and_frees_outputs() {
             0
         );
         assert_eq!(decode_utf16be(buffer.data, buffer.len).unwrap(), "😀<中>文");
-        seekdb_regex_buffer_free(&mut buffer);
+        regex_buffer_free(&mut buffer);
         assert!(buffer.data.is_null());
         assert_eq!(buffer.len, 0);
-        seekdb_regex_buffer_free(&mut buffer);
-        seekdb_regex_free(regex);
-        seekdb_regex_free(ptr::null_mut());
-        seekdb_regex_buffer_free(ptr::null_mut());
+        regex_buffer_free(&mut buffer);
+        regex_free(regex);
+        regex_free(ptr::null_mut());
+        regex_buffer_free(ptr::null_mut());
     }
 }
 
@@ -370,14 +370,14 @@ fn ffi_error_outputs_are_reset_and_never_unwind() {
             message: [1; 256],
         };
         assert_eq!(
-            seekdb_regex_compile(ptr::null(), 2, 0, 0, 0, &mut regex, &mut error),
+            regex_compile(ptr::null(), 2, 0, 0, 0, &mut regex, &mut error),
             1
         );
         assert!(regex.is_null());
         assert_eq!(error.kind, ARGUMENT);
         assert!(error.message.contains(&0));
         assert_eq!(
-            seekdb_regex_compile(
+            regex_compile(
                 ptr::null(),
                 MAX_PATTERN_BYTES + 1,
                 0,
@@ -390,7 +390,7 @@ fn ffi_error_outputs_are_reset_and_never_unwind() {
         );
         assert_eq!(error.kind, LIMIT);
         assert_eq!(
-            seekdb_regex_compile(ptr::null(), 0, 0, 0, 0, ptr::null_mut(), &mut error),
+            regex_compile(ptr::null(), 0, 0, 0, 0, ptr::null_mut(), &mut error),
             1
         );
         assert_eq!(error.kind, ARGUMENT);

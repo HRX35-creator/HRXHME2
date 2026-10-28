@@ -249,7 +249,7 @@ fn compile(pattern: String, flags: u32, stack_limit: i64, time_limit: i64) -> Re
 /// # Safety
 /// Buffers must be readable for their lengths. `out` must be writable and
 /// non-null; `error`, if non-null, must be writable. See the bridge contract.
-pub unsafe fn seekdb_regex_compile(
+pub unsafe fn regex_compile(
     pattern: *const u8,
     pattern_len: usize,
     flags: u32,
@@ -280,7 +280,7 @@ pub unsafe fn seekdb_regex_compile(
 /// # Safety
 /// `regex` must be null or a live handle returned by this library, with no calls
 /// in progress. It must be freed exactly once.
-pub unsafe fn seekdb_regex_free(regex: *mut RegexEngine) {
+pub unsafe fn regex_free(regex: *mut RegexEngine) {
     if !regex.is_null() {
         // SAFETY: ownership is returned once by the C caller.
         drop(unsafe { Box::from_raw(regex) });
@@ -371,7 +371,7 @@ fn find(regex: &Regex, text: &str, start: i64, occurrence: i64, group: i64) -> R
 /// `regex` must be a live compiled handle, input must be readable, and `out`
 /// must be writable. The handle must not be freed during this call.
 #[allow(clippy::too_many_arguments)]
-pub unsafe fn seekdb_regex_find(
+pub unsafe fn regex_find(
     regex: *const RegexEngine,
     text: *const u8,
     text_len: usize,
@@ -619,9 +619,9 @@ fn replace(
 ///
 /// # Safety
 /// `regex` must be live, inputs readable for their lengths, and `out` writable
-/// and fresh. Free the returned buffer with `seekdb_regex_buffer_free`.
+/// and fresh. Free the returned buffer with `regex_buffer_free`.
 #[allow(clippy::too_many_arguments)]
-pub unsafe fn seekdb_regex_replace(
+pub unsafe fn regex_replace(
     regex: *const RegexEngine,
     text: *const u8,
     text_len: usize,
@@ -666,7 +666,7 @@ pub unsafe fn seekdb_regex_replace(
 /// # Safety
 /// The object must contain a buffer returned by this library, unmodified and
 /// not previously freed, or an empty `{null, 0}` buffer.
-pub unsafe fn seekdb_regex_buffer_free(buffer: *mut RegexBuffer) {
+pub unsafe fn regex_buffer_free(buffer: *mut RegexBuffer) {
     if !buffer.is_null() {
         // SAFETY: the C caller returns the original pointer and length once.
         unsafe {

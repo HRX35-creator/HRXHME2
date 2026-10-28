@@ -88,7 +88,7 @@ void ObExprRegexContext::reset()
 void ObExprRegexContext::destroy()
 {
   if (regexp_engine_ != NULL) {
-    seekdb_regex_free(regexp_engine_);
+    regex_free(regexp_engine_);
     regexp_engine_ = NULL;
   }
   inited_ = false;
@@ -266,7 +266,7 @@ int ObExprRegexContext::init(ObExprStringBuf &string_buf,
     reset();
     RegexEngine *engine = NULL;
     RegexError error = {};
-    if (seekdb_regex_compile(reinterpret_cast<const uint8_t *>(pattern.ptr()),
+    if (regex_compile(reinterpret_cast<const uint8_t *>(pattern.ptr()),
                              pattern.length(), cflags, regex_vars.regexp_stack_limit_,
                              regex_vars.regexp_time_limit_, &engine, &error) != 0) {
       ret = check_regexp_status(error);
@@ -275,7 +275,7 @@ int ObExprRegexContext::init(ObExprStringBuf &string_buf,
       char *saved = NULL;
       if (!pattern.empty() && OB_ISNULL(saved = static_cast<char *>(pattern_allocator_.alloc(pattern.length())))) {
         ret = OB_ALLOCATE_MEMORY_FAILED;
-        seekdb_regex_free(engine);
+        regex_free(engine);
       } else {
         if (!pattern.empty()) {
           MEMCPY(saved, pattern.ptr(), pattern.length());
@@ -303,7 +303,7 @@ int ObExprRegexContext::match(ObExprStringBuf &string_buf, const ObString &text,
   RegexError error = {};
   if (!inited_ || OB_ISNULL(regexp_engine_)) {
     ret = OB_NOT_INIT;
-  } else if (seekdb_regex_find(regexp_engine_, reinterpret_cast<const uint8_t *>(text.ptr()),
+  } else if (regex_find(regexp_engine_, reinterpret_cast<const uint8_t *>(text.ptr()),
                               text.length(), start, 1, 0, &found, &error) != 0) {
     ret = check_regexp_status(error);
   } else {
@@ -326,7 +326,7 @@ int ObExprRegexContext::find(ObExprStringBuf &string_buf, const ObString &text,
     ret = OB_NOT_INIT;
   } else if (text.empty()) {
     // Preserve the SQL function's existing empty-input behavior.
-  } else if (seekdb_regex_find(regexp_engine_, reinterpret_cast<const uint8_t *>(text.ptr()),
+  } else if (regex_find(regexp_engine_, reinterpret_cast<const uint8_t *>(text.ptr()),
                               text.length(), start, occurrence == 0 ? 1 : occurrence,
                               subexpr, &found, &error) != 0) {
     ret = check_regexp_status(error);
@@ -348,7 +348,7 @@ int ObExprRegexContext::substr(ObExprStringBuf &string_buf, const ObString &text
   RegexError error = {};
   if (!inited_ || OB_ISNULL(regexp_engine_)) {
     ret = OB_NOT_INIT;
-  } else if (seekdb_regex_find(regexp_engine_, reinterpret_cast<const uint8_t *>(text.ptr()),
+  } else if (regex_find(regexp_engine_, reinterpret_cast<const uint8_t *>(text.ptr()),
                               text.length(), start, occurrence, subexpr, &found, &error) != 0) {
     ret = check_regexp_status(error);
   } else if (found.matched && found.end > found.start) {
@@ -376,7 +376,7 @@ int ObExprRegexContext::replace(ObExprStringBuf &string_buf, const ObString &tex
     ret = OB_NOT_INIT;
   } else if (text.empty()) {
     result = text;
-  } else if (seekdb_regex_replace(regexp_engine_, reinterpret_cast<const uint8_t *>(text.ptr()),
+  } else if (regex_replace(regexp_engine_, reinterpret_cast<const uint8_t *>(text.ptr()),
                                  text.length(), reinterpret_cast<const uint8_t *>(replacement.ptr()),
                                  replacement.length(), start, occurrence, &buffer, &error) != 0) {
     ret = check_regexp_status(error);
@@ -391,7 +391,7 @@ int ObExprRegexContext::replace(ObExprStringBuf &string_buf, const ObString &tex
       result.assign_ptr(buf, static_cast<int32_t>(buffer.len));
     }
   }
-  seekdb_regex_buffer_free(&buffer);
+  regex_buffer_free(&buffer);
   return ret;
 }
 

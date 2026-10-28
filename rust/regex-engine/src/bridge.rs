@@ -25,10 +25,7 @@
 //! sets per-delegate compilation/cache budgets and a VM instruction budget;
 //! time_limit sets a backtracking-count budget, not a wall-clock timeout.
 
-use crate::{
-    seekdb_regex_buffer_free, seekdb_regex_compile, seekdb_regex_find, seekdb_regex_free,
-    seekdb_regex_replace, RegexEngine,
-};
+use crate::{regex_buffer_free, regex_compile, regex_find, regex_free, regex_replace, RegexEngine};
 
 // Keep pointer/length pairs and SQL search options explicit at this boundary.
 #[allow(clippy::too_many_arguments)]
@@ -75,7 +72,7 @@ pub mod ffi {
     extern "Rust" {
         type RegexEngine;
 
-        unsafe fn seekdb_regex_compile(
+        unsafe fn regex_compile(
             pattern: *const u8,
             pattern_len: usize,
             flags: u32,
@@ -85,13 +82,13 @@ pub mod ffi {
             error: *mut RegexError,
         ) -> i32;
 
-        unsafe fn seekdb_regex_free(regex: *mut RegexEngine);
+        unsafe fn regex_free(regex: *mut RegexEngine);
 
         /// occurrence is one-based; group zero selects the whole match. A
         /// missing match or unmatched optional group yields {0, -1, -1}.
         /// A group beyond the capture count errors only when the selected
         /// whole-match occurrence exists. Negative groups are always invalid.
-        unsafe fn seekdb_regex_find(
+        unsafe fn regex_find(
             regex: *const RegexEngine,
             text: *const u8,
             text_len: usize,
@@ -107,7 +104,7 @@ pub mod ffi {
         /// ICU-style $n, ${name}, backslash quoting, and Unicode replacement
         /// escapes are supported. Runtime errors are propagated. The caller
         /// must release the returned UTF-16BE buffer with buffer_free.
-        unsafe fn seekdb_regex_replace(
+        unsafe fn regex_replace(
             regex: *const RegexEngine,
             text: *const u8,
             text_len: usize,
@@ -119,6 +116,6 @@ pub mod ffi {
             error: *mut RegexError,
         ) -> i32;
 
-        unsafe fn seekdb_regex_buffer_free(buffer: *mut RegexBuffer);
+        unsafe fn regex_buffer_free(buffer: *mut RegexBuffer);
     }
 }
