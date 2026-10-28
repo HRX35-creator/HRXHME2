@@ -216,6 +216,10 @@ int ObExprTokenize::parse_param(const ObExpr &expr,
   } else if (OB_FAIL(parse_parser_properties(expr, ctx, temp_allocator, param))) {
   } else if (!param.properties_.empty()
              && OB_FAIL(param.reform_parser_properties(param.properties_))) {
+    // Only the properties given by the user need to be validated and completed
+    // with defaults. An empty property string already means "parser defaults"
+    // for the parse helper, so skip building and re-parsing that default json
+    // on every call.
   } else if (OB_FAIL(param.try_load_dictionary_for_ik())) {
   }
   return ret;

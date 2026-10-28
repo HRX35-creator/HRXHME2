@@ -234,15 +234,38 @@ int ObAddWord::casedown_word(const ObFTWord &src, ObFTWord &dst)
   if (OB_UNLIKELY(src.empty())) {
     ret = OB_INVALID_ARGUMENT;
   } else if (flag_.casedown()) {
-    ObString dst_str;
-    if (OB_FAIL(ObCharset::tolower(
-                    word_meta_.get_collation_type(),
-                    src.get_word().get_string(),
-                    dst_str,
-                    allocator_))) {
+    const ObString src_str = src.get_word().get_string();
+    const ObCollationType coll_type = word_meta_.get_collation_type();
+    const ObCharsetInfo *cs = ObCharset::get_charset(coll_type);
+    // Most tokens have no upper case bytes at all (CJK tokens, or lower case
+    // words that were already folded by the analyzer), so convert a copy on the
+    // stack first and only take the allocator when the bytes really change.
+    constexpr int64_t STACK_CASEDOWN_LEN = 256;
+    if (OB_ISNULL(cs)) {
+      ret = OB_INVALID_ARGUMENT;
+    } else if (1 == cs->casedn_multiply && src_str.length() <= STACK_CASEDOWN_LEN) {
+      char buf[STACK_CASEDOWN_LEN];
+      MEMCPY(buf, src_str.ptr(), src_str.length());
+      const size_t size = cs->cset->casedn(cs, buf, src_str.length(), buf, src_str.length());
+      if (size == src_str.length() && 0 == MEMCMP(buf, src_str.ptr(), size)) {
+        dst = src;
+      } else {
+        char *ptr = nullptr;
+        if (OB_ISNULL(ptr = static_cast<char *>(allocator_.alloc(src_str.length())))) {
+          ret = OB_ALLOCATE_MEMORY_FAILED;
+        } else {
+          MEMCPY(ptr, buf, size);
+          ObFTWord tmp(size, ptr, word_meta_);
+          dst = tmp;
+        }
+      }
     } else {
-      ObFTWord tmp(dst_str.length(), dst_str.ptr(), word_meta_);
-      dst = tmp;
+      ObString dst_str;
+      if (OB_FAIL(ObCharset::tolower(coll_type, src_str, dst_str, allocator_))) {
+      } else {
+        ObFTWord tmp(dst_str.length(), dst_str.ptr(), word_meta_);
+        dst = tmp;
+      }
     }
   } else {
     dst = src;

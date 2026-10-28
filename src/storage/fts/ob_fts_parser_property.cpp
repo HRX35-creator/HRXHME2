@@ -1017,7 +1017,18 @@ int ObFTParserProperty::parse_for_parser_helper(const ObFTParser &parser, const 
 {
   int ret = OB_SUCCESS;
   ObFTParserJsonProps props;
-  if (OB_FAIL(props.init())) {
+  if (json_str.empty()) {
+    // No configuration was given, so the constructor defaults are used directly
+    // and there is no json to build or parse. The ik branch below also records
+    // these placeholder names so that a helper built from an empty property
+    // string still compares equal to one built from the default json in
+    // ObFTParseHelper::check_is_the_same().
+    if (parser.is_ik()) {
+      dict_table_ = ObString(ObFTSLiteral::CONFIG_NAME_DICT_TABLE);
+      stopword_table_ = ObString(ObFTSLiteral::CONFIG_NAME_STOPWORD_TABLE);
+      quantifier_table_ = ObString(ObFTSLiteral::CONFIG_NAME_QUANTIFIER_TABLE);
+    }
+  } else if (OB_FAIL(props.init())) {
   } else if (OB_FAIL(props.parse_from_valid_str(json_str))) {
   } else {
     if (parser.is_ik()) {
