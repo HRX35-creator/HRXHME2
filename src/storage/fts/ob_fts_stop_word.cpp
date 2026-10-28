@@ -100,7 +100,17 @@ bool check_ascii_stopword(const ObString &word, bool &is_stopword)
 {
   const uint64_t key = ascii_stopword_key(word);
   if (key == 0) {
-    return false;
+    if (word.length() <= 7) {
+      return false;
+    }
+    // A long word of ASCII letters cannot equal any valid short key below.
+    // Other bytes retain the collation-aware path (accents, padding, errors).
+    for (int64_t i = 0; i < word.length(); ++i) {
+      const unsigned char byte = static_cast<unsigned char>(word.ptr()[i]);
+      if (!((byte >= 'a' && byte <= 'z') || (byte >= 'A' && byte <= 'Z'))) {
+        return false;
+      }
+    }
   }
   // Derive from the same built-in list as the collation-aware hash set, so
   // adding a stopword cannot make the two paths disagree.
@@ -122,7 +132,7 @@ bool check_ascii_stopword(const ObString &word, bool &is_stopword)
   if (!words.valid_) {
     return false;
   }
-  is_stopword = std::binary_search(words.keys_.begin(), words.keys_.end(), key);
+  is_stopword = key != 0 && std::binary_search(words.keys_.begin(), words.keys_.end(), key);
   return true;
 }
 } // namespace
