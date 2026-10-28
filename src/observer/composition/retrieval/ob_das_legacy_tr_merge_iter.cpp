@@ -1241,7 +1241,7 @@ bool ObDASLegacyTRMergeIter::can_reuse_result() const
           && T_OP_BOOL == filter_expr->type_
           && 1 == filter_expr->arg_cnt_
           && relevance_proj_expr == filter_expr->args_[0]);
-  return (daat_mode_ || topk_mode_) && !taat_mode_ && !function_lookup_mode_
+  return (daat_mode_ || topk_mode_ || taat_mode_) && !function_lookup_mode_
       && NATURAL_LANGUAGE_MODE == ir_ctdef_->mode_flag_
       && is_bool_relevance_filter
       && query_tokens_.count() > 0
@@ -1262,10 +1262,12 @@ int ObDASLegacyTRMergeIter::build_result_cache_key(ObSqlString &key) const
   } else if (OB_FAIL(append_cache_key(key, ir_ctdef_->estimated_total_doc_cnt_))) {
   } else if (OB_FAIL(append_cache_key(key, ir_ctdef_->need_estimate_total_doc_cnt()))) {
   } else if (OB_FAIL(append_cache_key(key, ir_ctdef_->need_avg_doc_len_est()))) {
+  } else if (OB_FAIL(append_cache_key(key, ir_ctdef_->need_calc_relevance()))) {
   } else if (OB_FAIL(append_cache_key(key, param.field_boost_))) {
   } else if (OB_FAIL(append_cache_key(key, param.limit_param_->limit_))) {
   } else if (OB_FAIL(append_cache_key(key, param.limit_param_->offset_))) {
   } else if (OB_FAIL(append_cache_key(key, static_cast<int64_t>(topk_mode_)))) {
+  } else if (OB_FAIL(append_cache_key(key, static_cast<int64_t>(taat_mode_)))) {
   } else if (OB_FAIL(append_cache_key(key, topk_limit_))) {
   } else if (OB_FAIL(append_cache_key(key, nullptr != param.filter_expr_))) {
   } else if (OB_FAIL(append_cache_key(key, nullptr != param.relevance_proj_expr_))) {
@@ -1295,8 +1297,10 @@ int ObDASLegacyTRMergeIter::prepare_result_reuse()
   if (!reusable) {
   } else if (OB_FAIL(build_result_cache_key(key))) {
   } else if (OB_FAIL(collect_result_cache_tables(inv_idx_tablet_id_, snapshot, tables, reusable))) {
-  } else if (total_doc_cnt_tablet_id_ != inv_idx_tablet_id_
+  } else if (ir_ctdef_->need_calc_relevance() && !ir_ctdef_->need_estimate_total_doc_cnt()
+             && total_doc_cnt_tablet_id_ != inv_idx_tablet_id_
              && OB_FAIL(collect_result_cache_tables(total_doc_cnt_tablet_id_, snapshot, tables, reusable))) {
+    // the total doc count is only scanned for BM25 when it is not estimated
   } else if (!reusable) {
   } else if (nullptr != (cached_entry_ = ObFTSResultCache::instance().get(key.string(), tables))) {
     replay_pos_ = 0;
