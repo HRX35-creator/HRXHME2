@@ -10935,6 +10935,7 @@
   },
   "ob_hnsw_extra_info_max_size": {
     "id": 10751,
+    "placeholder": true,
     "name": "ob_hnsw_extra_info_max_size",
     "default_value": "1024",
     "base_value": "1024",
