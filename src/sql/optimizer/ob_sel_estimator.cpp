@@ -27,6 +27,60 @@ namespace sql
 {
 inline double revise_sel_ndv(double ndv) { return ndv < 1.0 ? 1.0 : ndv; }
 
+static bool is_signed_integer_literal_zero(const OptSelectivityCtx &ctx,
+                                           const ObRawExpr *expr)
+{
+  bool is_zero = false;
+  if (OB_NOT_NULL(expr) &&
+      ObIntTC == expr->get_type_class() &&
+      expr->is_static_scalar_const_expr()) {
+    const ObConstRawExpr *const_expr = static_cast<const ObConstRawExpr *>(expr);
+    if (T_INT == expr->get_expr_type()) {
+      is_zero = (0 == const_expr->get_value().get_int());
+    } else if (T_QUESTIONMARK == expr->get_expr_type() &&
+               !ctx.get_opt_ctx().is_ps_protocol()) {
+      const int64_t param_idx = const_expr->get_value().get_unknown();
+      const ParamStore *params = ctx.get_params();
+      if (OB_NOT_NULL(params) && param_idx >= 0 && param_idx < params->count()) {
+        const ObObjParam &param = params->at(param_idx);
+        is_zero = param.get_raw_text_pos() >= 0 &&
+                  param.get_raw_text_len() > 0 &&
+                  ObIntTC == param.get_type_class() &&
+                  0 == param.get_int();
+      }
+    }
+  }
+  return is_zero;
+}
+
+static const ObRawExpr *unwrap_integer_add_zero_column(const OptSelectivityCtx &ctx,
+                                                       const ObRawExpr *expr)
+{
+  const ObRawExpr *original_expr = expr;
+  const ObRawExpr *current_expr = expr;
+  bool can_unwrap = true;
+  while (can_unwrap && OB_NOT_NULL(current_expr) &&
+         T_OP_ADD == current_expr->get_expr_type() &&
+         ObIntTC == current_expr->get_type_class() &&
+         2 == current_expr->get_param_count()) {
+    const ObRawExpr *left_expr = current_expr->get_param_expr(0);
+    const ObRawExpr *right_expr = current_expr->get_param_expr(1);
+    if (is_signed_integer_literal_zero(ctx, left_expr) &&
+        OB_NOT_NULL(right_expr) && ObIntTC == right_expr->get_type_class()) {
+      current_expr = right_expr;
+    } else if (is_signed_integer_literal_zero(ctx, right_expr) &&
+               OB_NOT_NULL(left_expr) && ObIntTC == left_expr->get_type_class()) {
+      current_expr = left_expr;
+    } else {
+      can_unwrap = false;
+    }
+  }
+  return can_unwrap && OB_NOT_NULL(current_expr) &&
+         current_expr->is_column_ref_expr() && ObIntTC == current_expr->get_type_class()
+      ? current_expr
+      : original_expr;
+}
+
 void SimpleRange::set_whole_range()
 {
   start_.set_min_value();
@@ -1838,22 +1892,54 @@ int ObRangeSelEstimator::create_estimator(ObSelEstimatorFactory &factory,
                                           ObSelEstimator *&estimator)
 {
   int ret = OB_SUCCESS;
-  UNUSED(ctx);
   bool is_valid = true;
   estimator = NULL;
   ObArray<ObRawExpr*> column_exprs;
   ObRangeSelEstimator *range_estimator = NULL;
+  const ObRawExpr *range_expr = &expr;
   if (OB_FAIL(ObOptEstUtils::is_range_expr(&expr, is_valid))) {
+  } else if (!is_valid && IS_RANGE_CMP_OP(expr.get_expr_type())) {
+    const ObRawExpr *var_expr = NULL;
+    const ObRawExpr *const_expr = NULL;
+    const ObRawExpr *unused_const_expr = NULL;
+    ObItemType normalized_type = T_INVALID;
+    bool can_normalize = false;
+    ObOpRawExpr *normalized_expr = NULL;
+    if (OB_FAIL(ObOptEstUtils::extract_var_op_const(&expr,
+                                                    var_expr,
+                                                    const_expr,
+                                                    unused_const_expr,
+                                                    normalized_type,
+                                                    can_normalize))) {
+    } else if (!can_normalize || OB_ISNULL(var_expr) || OB_ISNULL(const_expr)) {
+      // do nothing
+    } else if (FALSE_IT(var_expr = unwrap_integer_add_zero_column(ctx, var_expr))) {
+    } else if (!var_expr->is_column_ref_expr()) {
+      // do nothing
+    } else if (OB_FAIL(ctx.get_opt_ctx().get_expr_factory().create_raw_expr(normalized_type,
+                                                                            normalized_expr))) {
+    } else if (OB_ISNULL(normalized_expr)) {
+      ret = OB_ERR_UNEXPECTED;
+    } else if (OB_FAIL(normalized_expr->set_param_exprs(const_cast<ObRawExpr *>(var_expr),
+                                                        const_cast<ObRawExpr *>(const_expr)))) {
+    } else if (OB_FAIL(normalized_expr->formalize(ctx.get_session_info()))) {
+    } else {
+      range_expr = normalized_expr;
+      is_valid = true;
+    }
   } else if (!is_valid) {
     // do nothing
-  } else if (OB_FAIL(ObRawExprUtils::extract_column_exprs(&expr, column_exprs))) {
+  }
+  if (OB_FAIL(ret) || !is_valid) {
+    // do nothing
+  } else if (OB_FAIL(ObRawExprUtils::extract_column_exprs(range_expr, column_exprs))) {
   } else if (column_exprs.count() != 1) {
     is_valid = false;
   } else if (OB_FAIL(factory.create_estimator_inner(range_estimator))) {
   } else {
     range_estimator->column_expr_ = static_cast<ObColumnRefRawExpr *>(column_exprs.at(0));
     range_estimator->eigen_expr_ = range_estimator->column_expr_;
-    if (OB_FAIL(range_estimator->range_exprs_.push_back(const_cast<ObRawExpr *>(&expr)))) {
+    if (OB_FAIL(range_estimator->range_exprs_.push_back(const_cast<ObRawExpr *>(range_expr)))) {
     } else {
       estimator = range_estimator;
     }
