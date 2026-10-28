@@ -51,6 +51,10 @@ private:
   // Resolves DESCRIBE over a file table function into the query itself, so the
   // result is the inferred column list. Leaves `stmt` null for other statements.
   int resolve_describe_select(const ParseNode *parse_tree, ObStmt *&stmt);
+  // Resolves `COPY (query) TO 'file' (options)` into the query carrying an
+  // into-item, so the existing SELECT INTO writer performs the export.
+  int resolve_copy_to_stmt(const ParseNode &parse_tree, ObStmt *&stmt);
+
 private:
   // data members
   ObResolverParams params_;

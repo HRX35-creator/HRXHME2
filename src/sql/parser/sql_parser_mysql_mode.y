@@ -504,6 +504,7 @@ END_P SET_VAR DELIMITER
 %type <node> vec_index_params vec_index_param vec_index_param_value opt_with_vector_index_parameters
 %type <node> json_table_expr unnest_expr mock_jt_on_error_on_empty jt_column_list json_table_column_def
 %type <node> file_table_expr file_table_arg_list file_table_arg
+%type <node> copy_to_stmt copy_option_list copy_option
 %type <node> json_table_ordinality_column_def json_table_exists_column_def json_table_value_column_def json_table_nested_column_def
 %type <node> opt_value_on_empty_or_error_or_mismatch opt_on_mismatch
 %type <node> table_values_clause table_values_clause_with_order_by_and_limit values_row_list row_value
@@ -653,6 +654,7 @@ stmt:
   | purge_stmt              { $$ = $1; check_question_mark($$, result); }
   | analyze_stmt            { $$ = $1; check_question_mark($$, result); }
   | load_data_stmt          { $$ = $1; check_question_mark($$, result); }
+  | copy_to_stmt            { $$ = $1; check_question_mark($$, result); }
   | optimize_stmt     { $$ = $1; check_question_mark($$, result); }
   | flush_privileges_stmt { $$ = $1; check_question_mark($$, result); }
   | dump_memory_stmt  { $$ = $1; check_question_mark($$, result); }
@@ -4150,6 +4152,48 @@ opt_field_or_var_spec opt_load_set_spec opt_load_data_extended_option_list
                            $9,            /* 13. partition */
                            NULL           /* 14. on_error */
                            );
+}
+;
+
+copy_to_stmt:
+COPY select_with_parens TO STRING_VALUE '(' copy_option_list ')'
+{
+  (void)($3);
+  malloc_non_terminal_node($$, result->malloc_pool_, T_COPY_TABLE_STMT, 3, $2, $4, $6);
+}
+| COPY select_with_parens TO STRING_VALUE
+{
+  (void)($3);
+  malloc_non_terminal_node($$, result->malloc_pool_, T_COPY_TABLE_STMT, 3, $2, $4, NULL);
+}
+;
+
+copy_option_list:
+copy_option
+{
+  $$ = $1;
+}
+| copy_option_list ',' copy_option
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_LINK_NODE, 2, $1, $3);
+}
+;
+
+// Option names are plain identifiers rather than keywords, so COPY gains no new
+// reserved words; the resolver matches them case-insensitively. An option takes
+// either no value (`header`), a string, or a bare word (`format csv`).
+copy_option:
+relation_name
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_COPY_OPTION, 2, $1, NULL);
+}
+| relation_name STRING_VALUE
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_COPY_OPTION, 2, $1, $2);
+}
+| relation_name relation_name
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_COPY_OPTION, 2, $1, $2);
 }
 ;
 
