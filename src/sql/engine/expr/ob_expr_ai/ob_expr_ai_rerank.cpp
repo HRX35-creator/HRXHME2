@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Copyright (c) 2025 OceanBase.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -310,11 +310,14 @@ int ObExprAIRerank::sort_document_array_by_model_result(ObIAllocator &allocator,
           int64_t index = (index_node->json_type() == ObJsonNodeType::J_INT)
               ? static_cast<ObJsonInt *>(index_node)->value()
               : static_cast<int64_t>(static_cast<ObJsonUint *>(index_node)->value());
-          double score = (score_node->json_type() == ObJsonNodeType::J_DOUBLE)
-              ? static_cast<ObJsonDouble *>(score_node)->value()
-              : static_cast<double>((score_node->json_type() == ObJsonNodeType::J_INT)
-                  ? static_cast<ObJsonInt *>(score_node)->value()
-                  : static_cast<double>(static_cast<ObJsonUint *>(score_node)->value())));
+          double score = 0.0;
+          if (score_node->json_type() == ObJsonNodeType::J_DOUBLE) {
+            score = static_cast<ObJsonDouble *>(score_node)->value();
+          } else if (score_node->json_type() == ObJsonNodeType::J_INT) {
+            score = static_cast<double>(static_cast<ObJsonInt *>(score_node)->value());
+          } else {
+            score = static_cast<double>(static_cast<ObJsonUint *>(score_node)->value());
+          }
           if (index < 0 || index >= document_array->element_count()) {
             // the model returned an out-of-range index: reject instead of
             // dereferencing an unrelated slot
