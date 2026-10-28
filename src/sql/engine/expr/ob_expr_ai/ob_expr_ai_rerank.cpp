@@ -321,19 +321,25 @@ int ObExprAIRerank::sort_document_array_by_model_result(ObIAllocator &allocator,
           if (index < 0 || index >= document_array->element_count()) {
             // the model returned an out-of-range index: reject instead of
             // dereferencing an unrelated slot
+            LOG_USER_ERROR(OB_ERR_UNEXPECTED, "dbg: index out of range");
             ret = OB_INVALID_DATA;
           } else {
           ObJsonObject *origin_obj = static_cast<ObJsonObject *>(document_array->get_value(index));
           ObJsonObject *new_obj = nullptr;
           ObJsonDouble *score_copy = nullptr;
           if (OB_ISNULL(origin_obj)) {
+            LOG_USER_ERROR(OB_ERR_UNEXPECTED, "dbg: origin null");
             ret = OB_ERR_UNEXPECTED;
           } else if (OB_ISNULL(score_copy = OB_NEWx(ObJsonDouble, &allocator, score))) {
+            LOG_USER_ERROR(OB_ERR_UNEXPECTED, "dbg: score alloc failed");
             ret = OB_ALLOCATE_MEMORY_FAILED;
           } else if (OB_ISNULL(new_obj = static_cast<ObJsonObject *>(origin_obj->clone(&allocator, true)))) {
+            LOG_USER_ERROR(OB_ERR_UNEXPECTED, "dbg: clone failed");
             ret = OB_ERR_UNEXPECTED;
           } else if (OB_FAIL(new_obj->add(MODEL_SCORE_KEY, score_copy))) {
+            LOG_USER_ERROR(OB_ERR_UNEXPECTED, "dbg: add failed");
           } else if (OB_FAIL(sorted_document_array_obj->append(new_obj))) {
+            LOG_USER_ERROR(OB_ERR_UNEXPECTED, "dbg: append failed");
           }
           }
         }
