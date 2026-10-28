@@ -7,8 +7,7 @@ connection default;
 # 正确
 select ai_prompt('{0}+{1}={2} 吗？请回答true或false','1');
 
-# not support
---error 1235 
+# a json argument is accepted
 select ai_prompt('{0}+{1}={2} 吗？请回答true或false',json_object("a","1"));
 
 
@@ -64,11 +63,9 @@ insert into t1 values(7, 'AA', 'bb', 'CC', 'dd');
 select ai_prompt(nr) from t1;
 --error 5083
 select ai_prompt(a) from t1;
---error 5083
 select ai_prompt(b) from t1;
 --error 5083
 select ai_prompt(c) from t1;
---error 5083
 select ai_prompt(d) from t1;
 
 drop table t1;
@@ -236,3 +233,22 @@ WITH t3 AS (
 SELECT * FROM t3;
 
 drop table t1;
+
+# a json array argument
+select ai_prompt('the array is {0}', json_array(1, 2, 3)) as r;
+
+# a nested prompt object, it is rendered with its own arguments
+select ai_prompt('the prompt is {0}', json_object('template', 'a{0}b', 'args', json_array('x'))) as r;
+
+# the same placeholder is used more than once in a nested prompt object
+select ai_prompt('{0}', json_object('template', '{0} and {0}', 'args', json_array('x'))) as r;
+
+# the index of a placeholder of a nested prompt object is out of range
+--error 1210
+select ai_prompt('{0}', json_object('template', '{5}', 'args', json_array('x'))) as r;
+
+# the same placeholder is used more than once
+select ai_prompt('{0} and {0}', 'x') as r;
+
+# a unicode argument
+select ai_prompt('{0}', '世界') as r;

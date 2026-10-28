@@ -75,6 +75,19 @@ public:
   static int get_header(common::ObIAllocator &allocator,
                         common::ObString &api_key,
                         common::ObArray<ObString> &headers);
+  /**
+   * @brief Extract the embeddings of an openai compatible response.
+   *        Every element of the data array holds an embedding and, optionally,
+   *        the index of the input it belongs to. The model may answer with the
+   *        results in another order than the order of the inputs, the index is
+   *        used to restore the order of the inputs.
+   * @param allocator the allocator of the result array
+   * @param data_array the data array of the response
+   * @param embeddings the embeddings in the order of the inputs
+   */
+  static int extract_embeddings(common::ObIAllocator &allocator,
+                                common::ObJsonArray *data_array,
+                                common::ObJsonArray *&embeddings);
 private:
   DISALLOW_COPY_AND_ASSIGN(ObOpenAIUtils);
 };
@@ -334,6 +347,16 @@ public:
                                            const int64_t dimension, float *&vector);
   static int decode_float_embedding_array(const ObIJsonBase &embedding_jbase, ObIAllocator &allocator,
                                           share::ObJsonReaderHelper &json_reader, const int64_t dimension, float *&vector);
+  /**
+   * @brief Check the embedding vector answered by the model.
+   *        The vector must be a json array, its length must be equal to the
+   *        expected dimension when the dimension is given and every element of
+   *        the vector must be a number.
+   * @param embedding_base the embedding vector
+   * @param dimension the expected dimension, no dimension is checked when it
+   *        is not greater than zero
+   */
+  static int check_embedding_vector(common::ObIJsonBase *embedding_base, const int64_t dimension);
   static int get_ai_func_info(ObIAllocator &allocator, const ObString &model_id,
                               share::schema::ObSchemaGetterGuard &guard, ObAIFuncExprInfo *&info);
   static int get_ai_func_info(ObIAllocator &allocator, const ObString &model_id, ObAIFuncExprInfo *&info);
@@ -379,6 +402,18 @@ public:
   static bool is_valid_prompt_object(ObJsonObject* prompt_object);
   static int replace_all_str_args_in_template(ObIAllocator &allocator, ObJsonObject* prompt_object, ObString& replaced_prompt_str);
   static int construct_prompt_object(ObIAllocator &allocator, ObString &template_str, ObJsonArray *args_array, ObJsonObject *&prompt_object);
+  /**
+   * @brief Check whether a json value can be used as an argument of ai_prompt.
+   *        A plain string and any json value are accepted, the json null is
+   *        not a valid argument.
+   */
+  static bool is_valid_prompt_arg(const ObIJsonBase *arg_node);
+  /**
+   * @brief Get the text that replaces the argument in the template. A string
+   *        argument is replaced by its content, any other json value is
+   *        replaced by its json text.
+   */
+  static int get_prompt_arg_text(ObIAllocator &allocator, ObJsonNode *arg_node, ObString &arg_text);
   static constexpr char prompt_template_key[20] = "template";
   static constexpr char prompt_args_key[20] = "args";
 private:

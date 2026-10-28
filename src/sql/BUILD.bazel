@@ -205,6 +205,20 @@ cc_library(
     visibility = ["//src/sql:__subpackages__"],
 )
 
+# The AI expression internals are exercised by the unit tests under
+# //unittest/sql/engine/expr. Expose the headers of the SQL engine to that
+# package only, the rest of the SQL internals stay private.
+cc_library(
+    name = "ai_expr_test_headers",
+    testonly = True,
+    deps = [
+        ":sql_runtime_interface",
+        ":sql_runtime_internal_headers",
+    ] + _SQL_INTERFACE_NATIVE_DEPS,
+    tags = ["manual"],
+    visibility = ["//unittest/sql/engine/expr:__pkg__"],
+)
+
 _SQL_RUNTIME_UNITY_GROUPS = groups_without(
     SQL_UNITY_GROUPS,
     OPTIMIZER_GROUP_NAMES,

@@ -57,8 +57,23 @@ private:
   static int sort_document_array_by_model_result(common::ObIAllocator &allocator, common::ObJsonArray *document_array, common::ObJsonArray *model_result_array, common::ObJsonArray *&sorted_document_array);
   static int construct_config_json(common::ObIAllocator &allocator, int64_t top_k, int64_t return_doc, common::ObJsonObject *&config_json);
   static int construct_batch_document_array(common::ObIAllocator &allocator, common::ObJsonArray *document_array, int64_t start_idx, int64_t end_idx, common::ObJsonArray *&batch_document_array);
-  static int batch_result_add_base(common::ObIAllocator &allocator, common::ObJsonArray *array, int64_t start_idx);
-  static int compact_json_array_by_key(common::ObIAllocator &allocator, common::ObJsonArray *array1, common::ObJsonArray *array2, common::ObString &score_key, common::ObJsonArray *&compact_array);
+  static int batch_result_add_base(common::ObIAllocator &allocator, common::ObJsonArray *array, int64_t start_idx, int64_t doc_count);
+  /**
+   * @brief Get the index and the score of a result of the model.
+   */
+  static int get_rerank_score_and_index(common::ObJsonObject *result_obj, int64_t &index, double &score);
+  /**
+   * @brief Sort the results of the model by the score, the result with the
+   *        bigger score comes first, the result with the smaller index comes
+   *        first when the scores are equal.
+   */
+  static int sort_rerank_result_by_score(common::ObIAllocator &allocator, common::ObJsonArray *result_array, common::ObJsonArray *&sorted_array);
+  /**
+   * @brief Merge the results of two batches, both of them are sorted by the
+   *        score. The order of the documents is kept when the scores are
+   *        equal.
+   */
+  static int merge_rerank_result_by_score(common::ObIAllocator &allocator, common::ObJsonArray *array1, common::ObJsonArray *array2, common::ObJsonArray *&merged_array);
   static constexpr int MODEL_IDX = 0;
   static constexpr int QUERY_IDX = 1;
   static constexpr int DOCUMENTS_IDX = 2;

@@ -1,0 +1,220 @@
+# The end to end test of the AI functions.
+#
+# The test needs a mock AI service that listens on 0.0.0.0:8000, the
+# competition committee provides it.  A local stand in that speaks the same
+# protocols is in mock_ai_service.py, it is started with
+#
+#   python3 mock_ai_service.py --host 0.0.0.0 --port 8000
+#
+# The answer of the model is not known, the queries that call the model are
+# only checked for the absence of a crash.  Their result is not written to the
+# result file and an error of them does not stop the test, so that the test
+# gives the same result whether the mock service is running or not.  The
+# queries that do not call the model are checked with their exact answer.
+
+connection default;
+
+--disable_warnings
+drop table if exists t_ai_enhance;
+--enable_warnings
+
+### the objects of a former run are removed
+--error 0,11112
+call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('ai_enhance_ep_completion');
+--error 0,11112
+call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('ai_enhance_ep_embedding');
+--error 0,11112
+call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('ai_enhance_ep_rerank');
+--error 0,11112
+call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('ai_enhance_ep_ollama_completion');
+--error 0,11112
+call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('ai_enhance_ep_ollama_embedding');
+--error 0,11118
+call DBMS_AI_SERVICE.DROP_AI_MODEL('ai_enhance_completion');
+--error 0,11118
+call DBMS_AI_SERVICE.DROP_AI_MODEL('ai_enhance_embedding');
+--error 0,11118
+call DBMS_AI_SERVICE.DROP_AI_MODEL('ai_enhance_rerank');
+--error 0,11118
+call DBMS_AI_SERVICE.DROP_AI_MODEL('ai_enhance_ollama_completion');
+--error 0,11118
+call DBMS_AI_SERVICE.DROP_AI_MODEL('ai_enhance_ollama_embedding');
+
+### the models of the mock service
+call DBMS_AI_SERVICE.CREATE_AI_MODEL('ai_enhance_completion', '{"type": "completion", "model_name": "mock-completion"}');
+call DBMS_AI_SERVICE.CREATE_AI_MODEL('ai_enhance_embedding', '{"type": "dense_embedding", "model_name": "mock-embedding"}');
+call DBMS_AI_SERVICE.CREATE_AI_MODEL('ai_enhance_rerank', '{"type": "rerank", "model_name": "mock-rerank"}');
+call DBMS_AI_SERVICE.CREATE_AI_MODEL('ai_enhance_ollama_completion', '{"type": "completion", "model_name": "mock-ollama-completion"}');
+call DBMS_AI_SERVICE.CREATE_AI_MODEL('ai_enhance_ollama_embedding', '{"type": "dense_embedding", "model_name": "mock-ollama-embedding"}');
+
+### the model is registered
+select NAME, TYPE, MODEL_NAME from oceanbase.DBA_OB_AI_MODELS where NAME = 'ai_enhance_completion';
+
+### the endpoints of the mock service
+call DBMS_AI_SERVICE.CREATE_AI_MODEL_ENDPOINT('ai_enhance_ep_completion', '{"ai_model_name": "ai_enhance_completion", "url": "http://127.0.0.1:8000/v1/chat/completions", "access_key": "sk-test", "provider": "openai"}');
+call DBMS_AI_SERVICE.CREATE_AI_MODEL_ENDPOINT('ai_enhance_ep_embedding', '{"ai_model_name": "ai_enhance_embedding", "url": "http://127.0.0.1:8000/v1/embeddings", "access_key": "sk-test", "provider": "openai"}');
+call DBMS_AI_SERVICE.CREATE_AI_MODEL_ENDPOINT('ai_enhance_ep_rerank', '{"ai_model_name": "ai_enhance_rerank", "url": "http://127.0.0.1:8000/v1/rerank", "access_key": "sk-test", "provider": "siliconflow"}');
+
+### the ollama provider speaks its own protocol, it does not need an access key
+call DBMS_AI_SERVICE.CREATE_AI_MODEL_ENDPOINT('ai_enhance_ep_ollama_completion', '{"ai_model_name": "ai_enhance_ollama_completion", "url": "http://127.0.0.1:8000/api/generate", "provider": "ollama"}');
+call DBMS_AI_SERVICE.CREATE_AI_MODEL_ENDPOINT('ai_enhance_ep_ollama_embedding', '{"ai_model_name": "ai_enhance_ollama_embedding", "url": "http://127.0.0.1:8000/api/embeddings", "provider": "ollama"}');
+
+### the name of the provider is not case sensitive
+call DBMS_AI_SERVICE.ALTER_AI_MODEL_ENDPOINT('ai_enhance_ep_ollama_completion', '{"provider" : "OLLAMA"}');
+
+### the provider of the endpoint is checked
+--error 11116
+call DBMS_AI_SERVICE.ALTER_AI_MODEL_ENDPOINT('ai_enhance_ep_completion', '{"provider" : "no_such_provider"}');
+
+### the access key is needed by the providers that authenticate the request
+--error 11114
+call DBMS_AI_SERVICE.ALTER_AI_MODEL_ENDPOINT('ai_enhance_ep_ollama_completion', '{"provider" : "openai"}');
+
+### the number of the parameters is checked
+--error 1582
+select ai_complete();
+--error 1582
+select ai_complete('ai_enhance_completion', 'hello', '{}', '{}');
+--error 1582
+select ai_embed('ai_enhance_embedding');
+--error 1582
+select ai_embed('ai_enhance_embedding', 'hello', 4, 4);
+--error 1582
+select ai_rerank('ai_enhance_rerank', 'query');
+--error 1582
+select ai_rerank('ai_enhance_rerank', 'query', json_array('doc1'), 'text', 'text');
+
+### the type of the prompt of ai_complete is checked
+--error 5083
+select ai_complete('ai_enhance_completion', 1);
+
+### the null of the arguments of ai_complete is refused
+--error 1210
+select ai_complete(cast(null as char), 'hello');
+--error 1210
+select ai_complete('ai_enhance_completion', cast(null as char));
+
+### the model id and the prompt of ai_complete must not be empty
+--error 1210
+select ai_complete('', 'hello');
+--error 1210
+select ai_complete('ai_enhance_completion', '');
+
+### the null of the model id of ai_embed is propagated to the result
+select ai_embed(cast(null as char), 'hello') as r;
+
+### the null of the input of ai_embed is propagated to the result
+select ai_embed('ai_enhance_embedding', cast(null as char)) as r;
+
+### the model id and the input of ai_embed must not be empty
+--error 1210
+select ai_embed('', 'hello');
+--error 1210
+select ai_embed('ai_enhance_embedding', '');
+
+### the dimension of ai_embed must be a positive integer
+--error 1210
+select ai_embed('ai_enhance_embedding', 'hello', 0);
+--error 1210
+select ai_embed('ai_enhance_embedding', 'hello', -1);
+--error 1210
+select ai_embed('ai_enhance_embedding', 'hello', 1.5);
+
+### the null of the arguments of ai_rerank is refused
+--error 1210
+select ai_rerank(cast(null as char), 'query', json_array('doc1'));
+
+### the documents of ai_rerank must be a not empty array
+--error 1210
+select ai_rerank('ai_enhance_rerank', 'query', json_array());
+--error 1210
+select ai_rerank('ai_enhance_rerank', 'query', json_object('a', 'b'));
+--error 1210
+select ai_rerank('ai_enhance_rerank', 'query', json_array(1, 2));
+
+### the value of the document key of ai_rerank must be a string
+--error 1210
+select ai_rerank('ai_enhance_rerank', 'query', json_array(json_object('id', 1)), 'text');
+
+### the document key of ai_rerank must not be empty
+--error 1210
+select ai_rerank('ai_enhance_rerank', 'query', json_array(json_object('text', 'doc1')), '');
+
+### the table that is used by the batch of ai_embed
+create table t_ai_enhance (id int primary key, content varchar(64), dim int);
+insert into t_ai_enhance values (1, 'alpha', null);
+insert into t_ai_enhance values (2, 'beta', null);
+insert into t_ai_enhance values (3, null, null);
+insert into t_ai_enhance values (4, 'delta', 8);
+
+### the null of the input of a row is propagated to the result of the row
+select id, ai_embed('ai_enhance_embedding', content) as r from t_ai_enhance where id = 3;
+
+### the queries below call the model, the answer of the model is not known
+--disable_abort_on_error
+--disable_result_log
+
+### ai_complete, the prompt is a plain text
+select ai_complete('ai_enhance_completion', 'hello');
+
+### ai_complete, the prompt is the result of ai_prompt
+select ai_complete('ai_enhance_completion', ai_prompt('hello {0}', 'world'));
+
+### ai_complete, the config is a json object
+select ai_complete('ai_enhance_completion', 'hello', '{"temperature": 0.1, "max_tokens": 16}');
+
+### ai_complete, the config is null, the model is called with the default config
+select ai_complete('ai_enhance_completion', 'hello', cast(null as char));
+
+### ai_complete, the config is a json null, the model is called with the default config
+select ai_complete('ai_enhance_completion', 'hello', cast('null' as json));
+
+### ai_embed, one row
+select ai_embed('ai_enhance_embedding', 'hello');
+
+### ai_embed, one row with the dimension of the vector
+select ai_embed('ai_enhance_embedding', 'hello', 4);
+
+### ai_embed, the rows of a table scan are sent to the model in one request
+select id, ai_embed('ai_enhance_embedding', content) from t_ai_enhance order by id;
+
+### ai_embed, the dimension is a column, the null of the dimension is ignored
+select id, ai_embed('ai_enhance_embedding', content, dim) from t_ai_enhance order by id;
+
+### ai_embed, the null of the input is propagated to the result
+select id, ai_embed('ai_enhance_embedding', content) from t_ai_enhance where id < 3 order by id;
+
+### ai_embed, the rows are filtered before the model is called
+select id, ai_embed('ai_enhance_embedding', content) from t_ai_enhance order by id limit 2;
+
+### ai_rerank, the documents are an array of strings
+select ai_rerank('ai_enhance_rerank', 'query', json_array('doc1', 'doc2', 'doc3'));
+
+### ai_rerank, the documents are an array of objects, the text is taken from the field
+select ai_rerank('ai_enhance_rerank', 'query', json_array(json_object('id', 1, 'text', 'doc1'), json_object('id', 2, 'text', 'doc2')), 'text');
+
+### ai_rerank, the documents are sent to the model in more than one request
+select ai_rerank('ai_enhance_rerank', 'query', json_array('d1', 'd2', 'd3', 'd4', 'd5', 'd6', 'd7', 'd8', 'd9', 'd10', 'd11', 'd12', 'd13', 'd14', 'd15', 'd16', 'd17', 'd18', 'd19', 'd20', 'd21'));
+
+### the ollama provider, the native completion protocol
+select ai_complete('ai_enhance_ollama_completion', 'hello');
+
+### the ollama provider, the native embedding protocol
+select ai_embed('ai_enhance_ollama_embedding', 'hello');
+
+--enable_result_log
+--enable_abort_on_error
+
+drop table t_ai_enhance;
+
+### the objects of the test are removed
+call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('ai_enhance_ep_completion');
+call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('ai_enhance_ep_embedding');
+call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('ai_enhance_ep_rerank');
+call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('ai_enhance_ep_ollama_completion');
+call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('ai_enhance_ep_ollama_embedding');
+call DBMS_AI_SERVICE.DROP_AI_MODEL('ai_enhance_completion');
+call DBMS_AI_SERVICE.DROP_AI_MODEL('ai_enhance_embedding');
+call DBMS_AI_SERVICE.DROP_AI_MODEL('ai_enhance_rerank');
+call DBMS_AI_SERVICE.DROP_AI_MODEL('ai_enhance_ollama_completion');
+call DBMS_AI_SERVICE.DROP_AI_MODEL('ai_enhance_ollama_embedding');

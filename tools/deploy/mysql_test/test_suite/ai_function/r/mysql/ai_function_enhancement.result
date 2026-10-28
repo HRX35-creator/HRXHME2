@@ -1,0 +1,114 @@
+drop table if exists t_ai_enhance;
+call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('ai_enhance_ep_completion');
+call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('ai_enhance_ep_embedding');
+call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('ai_enhance_ep_rerank');
+call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('ai_enhance_ep_ollama_completion');
+call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('ai_enhance_ep_ollama_embedding');
+call DBMS_AI_SERVICE.DROP_AI_MODEL('ai_enhance_completion');
+call DBMS_AI_SERVICE.DROP_AI_MODEL('ai_enhance_embedding');
+call DBMS_AI_SERVICE.DROP_AI_MODEL('ai_enhance_rerank');
+call DBMS_AI_SERVICE.DROP_AI_MODEL('ai_enhance_ollama_completion');
+call DBMS_AI_SERVICE.DROP_AI_MODEL('ai_enhance_ollama_embedding');
+call DBMS_AI_SERVICE.CREATE_AI_MODEL('ai_enhance_completion', '{"type": "completion", "model_name": "mock-completion"}');
+call DBMS_AI_SERVICE.CREATE_AI_MODEL('ai_enhance_embedding', '{"type": "dense_embedding", "model_name": "mock-embedding"}');
+call DBMS_AI_SERVICE.CREATE_AI_MODEL('ai_enhance_rerank', '{"type": "rerank", "model_name": "mock-rerank"}');
+call DBMS_AI_SERVICE.CREATE_AI_MODEL('ai_enhance_ollama_completion', '{"type": "completion", "model_name": "mock-ollama-completion"}');
+call DBMS_AI_SERVICE.CREATE_AI_MODEL('ai_enhance_ollama_embedding', '{"type": "dense_embedding", "model_name": "mock-ollama-embedding"}');
+select NAME, TYPE, MODEL_NAME from oceanbase.DBA_OB_AI_MODELS where NAME = 'ai_enhance_completion';
+NAME	TYPE	MODEL_NAME
+ai_enhance_completion	COMPLETION	mock-completion
+call DBMS_AI_SERVICE.CREATE_AI_MODEL_ENDPOINT('ai_enhance_ep_completion', '{"ai_model_name": "ai_enhance_completion", "url": "http://127.0.0.1:8000/v1/chat/completions", "access_key": "sk-test", "provider": "openai"}');
+call DBMS_AI_SERVICE.CREATE_AI_MODEL_ENDPOINT('ai_enhance_ep_embedding', '{"ai_model_name": "ai_enhance_embedding", "url": "http://127.0.0.1:8000/v1/embeddings", "access_key": "sk-test", "provider": "openai"}');
+call DBMS_AI_SERVICE.CREATE_AI_MODEL_ENDPOINT('ai_enhance_ep_rerank', '{"ai_model_name": "ai_enhance_rerank", "url": "http://127.0.0.1:8000/v1/rerank", "access_key": "sk-test", "provider": "siliconflow"}');
+call DBMS_AI_SERVICE.CREATE_AI_MODEL_ENDPOINT('ai_enhance_ep_ollama_completion', '{"ai_model_name": "ai_enhance_ollama_completion", "url": "http://127.0.0.1:8000/api/generate", "provider": "ollama"}');
+call DBMS_AI_SERVICE.CREATE_AI_MODEL_ENDPOINT('ai_enhance_ep_ollama_embedding', '{"ai_model_name": "ai_enhance_ollama_embedding", "url": "http://127.0.0.1:8000/api/embeddings", "provider": "ollama"}');
+call DBMS_AI_SERVICE.ALTER_AI_MODEL_ENDPOINT('ai_enhance_ep_ollama_completion', '{"provider" : "OLLAMA"}');
+call DBMS_AI_SERVICE.ALTER_AI_MODEL_ENDPOINT('ai_enhance_ep_completion', '{"provider" : "no_such_provider"}');
+ERROR HY000: The value of param 'provider' is invalid
+call DBMS_AI_SERVICE.ALTER_AI_MODEL_ENDPOINT('ai_enhance_ep_ollama_completion', '{"provider" : "openai"}');
+ERROR HY000: The param 'access_key' is empty or null
+select ai_complete();
+ERROR 42000: Incorrect parameter count in the call to native function 'ai_complete'
+select ai_complete('ai_enhance_completion', 'hello', '{}', '{}');
+ERROR 42000: Incorrect parameter count in the call to native function 'ai_complete'
+select ai_embed('ai_enhance_embedding');
+ERROR 42000: Incorrect parameter count in the call to native function 'ai_embed'
+select ai_embed('ai_enhance_embedding', 'hello', 4, 4);
+ERROR 42000: Incorrect parameter count in the call to native function 'ai_embed'
+select ai_rerank('ai_enhance_rerank', 'query');
+ERROR 42000: Incorrect parameter count in the call to native function 'ai_rerank'
+select ai_rerank('ai_enhance_rerank', 'query', json_array('doc1'), 'text', 'text');
+ERROR 42000: Incorrect parameter count in the call to native function 'ai_rerank'
+select ai_complete('ai_enhance_completion', 1);
+ERROR 22000: Invalid data type for the operation
+select ai_complete(cast(null as char), 'hello');
+ERROR HY000: Incorrect arguments to ai_complete, parameters is null
+select ai_complete('ai_enhance_completion', cast(null as char));
+ERROR HY000: Incorrect arguments to ai_complete, parameters is null
+select ai_complete('', 'hello');
+ERROR HY000: Incorrect arguments to ai_complete, model id or input is empty
+select ai_complete('ai_enhance_completion', '');
+ERROR HY000: Incorrect arguments to ai_complete, model id or input is empty
+select ai_embed(cast(null as char), 'hello') as r;
+r
+NULL
+select ai_embed('ai_enhance_embedding', cast(null as char)) as r;
+r
+NULL
+select ai_embed('', 'hello');
+ERROR HY000: Incorrect arguments to ai_embed, model id or input is empty
+select ai_embed('ai_enhance_embedding', '');
+ERROR HY000: Incorrect arguments to ai_embed, model id or input is empty
+select ai_embed('ai_enhance_embedding', 'hello', 0);
+ERROR HY000: Incorrect arguments to ai_embed, dimension parameter must be a positive integer
+select ai_embed('ai_enhance_embedding', 'hello', -1);
+ERROR HY000: Incorrect arguments to ai_embed, dimension parameter must be a positive integer
+select ai_embed('ai_enhance_embedding', 'hello', 1.5);
+ERROR HY000: Incorrect arguments to ai_embed, dimension parameter must be an integer, not a decimal or float
+select ai_rerank(cast(null as char), 'query', json_array('doc1'));
+ERROR HY000: Incorrect arguments to ai_rerank, model id or query or documents is null
+select ai_rerank('ai_enhance_rerank', 'query', json_array());
+ERROR HY000: Incorrect arguments to ai_rerank, document_array is empty
+select ai_rerank('ai_enhance_rerank', 'query', json_object('a', 'b'));
+ERROR HY000: Incorrect arguments to ai_rerank, document_array is not array
+select ai_rerank('ai_enhance_rerank', 'query', json_array(1, 2));
+ERROR HY000: Incorrect arguments to ai_rerank, document_array element is not string
+select ai_rerank('ai_enhance_rerank', 'query', json_array(json_object('id', 1)), 'text');
+ERROR HY000: Incorrect arguments to ai_rerank, the value for given doc key is null
+select ai_rerank('ai_enhance_rerank', 'query', json_array(json_object('text', 'doc1')), '');
+ERROR HY000: Invalid argument
+create table t_ai_enhance (id int primary key, content varchar(64), dim int);
+insert into t_ai_enhance values (1, 'alpha', null);
+insert into t_ai_enhance values (2, 'beta', null);
+insert into t_ai_enhance values (3, null, null);
+insert into t_ai_enhance values (4, 'delta', 8);
+select id, ai_embed('ai_enhance_embedding', content) as r from t_ai_enhance where id = 3;
+id	r
+3	NULL
+select ai_complete('ai_enhance_completion', 'hello');
+select ai_complete('ai_enhance_completion', ai_prompt('hello {0}', 'world'));
+select ai_complete('ai_enhance_completion', 'hello', '{"temperature": 0.1, "max_tokens": 16}');
+select ai_complete('ai_enhance_completion', 'hello', cast(null as char));
+select ai_complete('ai_enhance_completion', 'hello', cast('null' as json));
+select ai_embed('ai_enhance_embedding', 'hello');
+select ai_embed('ai_enhance_embedding', 'hello', 4);
+select id, ai_embed('ai_enhance_embedding', content) from t_ai_enhance order by id;
+select id, ai_embed('ai_enhance_embedding', content, dim) from t_ai_enhance order by id;
+select id, ai_embed('ai_enhance_embedding', content) from t_ai_enhance where id < 3 order by id;
+select id, ai_embed('ai_enhance_embedding', content) from t_ai_enhance order by id limit 2;
+select ai_rerank('ai_enhance_rerank', 'query', json_array('doc1', 'doc2', 'doc3'));
+select ai_rerank('ai_enhance_rerank', 'query', json_array(json_object('id', 1, 'text', 'doc1'), json_object('id', 2, 'text', 'doc2')), 'text');
+select ai_rerank('ai_enhance_rerank', 'query', json_array('d1', 'd2', 'd3', 'd4', 'd5', 'd6', 'd7', 'd8', 'd9', 'd10', 'd11', 'd12', 'd13', 'd14', 'd15', 'd16', 'd17', 'd18', 'd19', 'd20', 'd21'));
+select ai_complete('ai_enhance_ollama_completion', 'hello');
+select ai_embed('ai_enhance_ollama_embedding', 'hello');
+drop table t_ai_enhance;
+call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('ai_enhance_ep_completion');
+call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('ai_enhance_ep_embedding');
+call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('ai_enhance_ep_rerank');
+call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('ai_enhance_ep_ollama_completion');
+call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('ai_enhance_ep_ollama_embedding');
+call DBMS_AI_SERVICE.DROP_AI_MODEL('ai_enhance_completion');
+call DBMS_AI_SERVICE.DROP_AI_MODEL('ai_enhance_embedding');
+call DBMS_AI_SERVICE.DROP_AI_MODEL('ai_enhance_rerank');
+call DBMS_AI_SERVICE.DROP_AI_MODEL('ai_enhance_ollama_completion');
+call DBMS_AI_SERVICE.DROP_AI_MODEL('ai_enhance_ollama_embedding');

@@ -37,7 +37,19 @@ public:
                                 int64_t param_num,
                                 common::ObExprTypeCtx &type_ctx) const override;
   static int eval_ai_embed(const ObExpr &expr, ObEvalCtx &ctx, ObDatum &res);
-  virtual int cg_expr(ObExprCGCtx &expr_cg_ctx, 
+  static int eval_ai_embed_batch(const ObExpr &expr, ObEvalCtx &ctx, const common::ObBitVector &skip, const int64_t size);
+  /**
+   * @brief Call the model with the given contents and write the answers into
+   *        the result datum of every row.
+   */
+  static int call_model_and_set_result(const ObExpr &expr,
+                                       ObEvalCtx &ctx,
+                                       common::ObIAllocator &allocator,
+                                       const common::ObString &model_id,
+                                       const int64_t dimension,
+                                       common::ObArray<common::ObString> &contents,
+                                       common::ObArray<common::ObString> &results);
+  virtual int cg_expr(ObExprCGCtx &expr_cg_ctx,
                       const ObRawExpr &raw_expr,
                       ObExpr &rt_expr) const override;
   virtual bool need_rt_ctx() const override { return true; }
@@ -45,6 +57,8 @@ private:
   static constexpr int MODEL_IDX = 0;
   static constexpr int CONTENT_IDX = 1;
   static constexpr int DIM_IDX = 2;
+  // the maximum number of the inputs that are sent to the model in one request
+  static constexpr int64_t MAX_BATCH_CONTENT_CNT = 64;
   DISALLOW_COPY_AND_ASSIGN(ObExprAIEmbed);
 };
 

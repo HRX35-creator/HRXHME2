@@ -37,6 +37,7 @@ const char *VALID_PROVIDERS[] = {
   "SILICONFLOW",
   "COHERE",
   "HUNYUAN-OPENAI",
+  "OLLAMA",
   "OPENAI"
 };
 
@@ -112,7 +113,9 @@ int ObAiModelEndpointInfo::check_valid() const
   } else if (url_.empty()) {
     ret = OB_AI_FUNC_PARAM_EMPTY;
     LOG_USER_ERROR(OB_AI_FUNC_PARAM_EMPTY, strlen("url"), "url");
-  } else if (access_key_.empty()) {
+  } else if (access_key_.empty() && !is_provider_without_access_key(provider_)) {
+    // the providers that speak their native protocol do not authenticate the
+    // request, the access key is optional for them
     ret = OB_AI_FUNC_PARAM_EMPTY;
     LOG_USER_ERROR(OB_AI_FUNC_PARAM_EMPTY, strlen("access_key"), "access_key");
     LOG_WARN("access_key is empty", K(ret), K(*this));
@@ -145,6 +148,13 @@ bool ObAiModelEndpointInfo::is_valid_provider(const ObString &provider)
     }
   }
   return is_valid;
+}
+
+bool ObAiModelEndpointInfo::is_provider_without_access_key(const ObString &provider)
+{
+  // the ollama provider speaks its native protocol and does not authenticate
+  // the request with an api key
+  return provider.case_compare("OLLAMA") == 0;
 }
 
 int ObAiModelEndpointInfo::merge_delta_endpoint(common::ObArenaAllocator &allocator, const ObIJsonBase &delta_jbase)
