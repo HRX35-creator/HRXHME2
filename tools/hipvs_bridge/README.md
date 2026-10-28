@@ -5,9 +5,11 @@ with hipVS CAGRA, validates/converts the export, and loads it into VSAG without
 CPU Build/Add construction. Existing VSAG serialization, CPU queries, filtering
 and incremental writes remain in use. Ordinary `lib=vsag` is unchanged.
 
-This is a development implementation. Real AMD GPU correctness, scale, recall,
-memory accounting and end-to-end speedup have not yet been established. It is
-not a competition submission or a performance result.
+This is a development implementation. Real AMD GPU smoke, SQL build/restart,
+and mutation checks have passed on gfx1100. The 100k exploratory dataset shows
+a construction speed gain but lower recall than the CPU baseline. Quality at
+the required workload, memory accounting and concurrent builds remain open.
+This is not a competition submission or an acceptance result.
 
 Local validation on 2026-10-28: full seekdb compilation succeeded; all three
 standalone test groups passed, including 25,434 graph/consumer checks under
@@ -16,6 +18,59 @@ explicit synthetic plugin: unsupported options, CPU and imported-graph index
 creation, restart without the plugin, insert, delete, and another restart.
 Both query plans used VECTOR INDEX SCAN and the snapshot import event was
 observed. These results establish local integration, not AMD GPU execution.
+
+## Real GPU validation on 2026-10-28
+
+The source-built server from `f63c1f8c66a761ec2e5940e1e662c60292b62639`,
+plus the C API linkage fix in this directory, was tested on Radeon Cloud
+gfx1100. The container quota was 16 CPUs / 55 GiB; seekdb was configured with
+`cpu_count=8` and `memory_limit=8G`. No synthetic plugin was deployed.
+
+All inputs were 128-dimensional float32 L2 vectors, with `m=16`,
+`ef_construction=200`, `ef_search=64`, and immediate synchronization. CAGRA
+uses the different construction parameters documented below. Timing starts
+at CREATE VECTOR INDEX after raw insertion and ends after the first valid
+ANN query. It includes conversion, synchronization and loading. Each run uses
+a fresh table/index; three-run trials alternate CPU/GPU order in one server.
+A direct GPU smoke runs in the Python driver beforehand; it does not share
+the server's process or CUDA/HIP context. Kernel tracing is excluded from
+these performance runs.
+
+| Data | Trials per library | CPU median seconds | GPU median seconds | CPU Recall@10 | GPU Recall@10 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Template first 2,000 rows, 10 queries | 1 | 0.7724 | 2.0613 | 0.900 | 0.980 |
+| Template 10,000 rows, 100 queries | 3 | 2.5823 | 2.5221 | 0.640 | 0.704-0.714 |
+| Generated Gaussian 100,000 rows, 100 queries, seed 20261028 | 3 | 39.2652 | 6.3644 | 0.509 | 0.395-0.433 |
+
+The 100k timing ratio is 6.17x, but its worse recall prevents an equal-quality
+speedup claim. Generated data is exploratory, not an official evaluation set.
+Recall uses exact float64 L2 top-10 truth on the same saved query vectors.
+All returned IDs were valid and distinct, query plans used VECTOR INDEX SCAN,
+and every GPU index produced a graph-import event and survived restart without
+the optional builder. A separate check on the real 2k GPU index passed insert
+with a greater-than-2^53 ID, vector update, snapshot-row deletion and persistence
+of these changes after another restart, all without the builder on its path.
+
+A standalone bridge `rocprofv3 --kernel-trace --output-format csv` run exited
+0 and recorded 199 dispatches, including NN-Descent local-join and reverse-edge
+kernels. This is direct bridge evidence; SQL construction is separately evidenced
+by its import events. An earlier trace of the entire SQL test exited 1 after
+losing the database connection; that failure is retained and not counted as
+a passed SQL profile. Its root cause remains undetermined.
+
+Reproduce the performance runs with
+`python3 unittest/lib/vector/benchmark_hipvs_snapshot.py --root /path/to/candidate`.
+The staging root contains `bin/seekdb`, `manifest.json`, the built plugin under
+`build_hipvs/`, and optional system runtime libraries under `runtime/`. Use
+`--rows 10000 --queries 100 --repeats 3`, or `--rows 100000` for the exploratory
+scale check. The script records input origin and hashes, exact-query results,
+individual timings, plugin/runtime identity, failures and restart checks.
+Its completion flag checks functional execution, not a competition quality
+or performance threshold. The 10k template dataset must be present under
+`/seekdb_workspace/datasets`; otherwise the script explicitly reports generated
+data. The real mutation and profiling scripts and all attempts are retained in
+the local evidence archive with SHA-256
+`765457718f28fa9cfd8fcf258010a8ac6938b59d6d70813a97e98c9620f8ee75`.
 
 ## Compatibility and limits
 
@@ -38,6 +93,9 @@ observed. These results establish local integration, not AMD GPU execution.
 ## Build and load the optional plugin
 
 Build against an actual AMD hipVS/ROCm SDK. The server does not link the SDK.
+The C ABI requires `libcuvs_c.so` (or `libhipvs_c.so`), not only the C++ library.
+The plugin link rejects unresolved symbols so a missing C ABI fails at build
+time instead of failing later at `dlopen`.
 
 ```sh
 cmake -S tools/hipvs_bridge -B build_hipvs -DHIPVS_ROOT=/path/to/hipvs
@@ -76,8 +134,9 @@ The public GPU query prototype in seekdb PR #1314 helped identify the snapshot
 gap and worker stack constraint. This implementation builds the snapshot before
 persistence; it does not reuse that PR's lazy query-side CAGRA index cache.
 
-Before submission: build and test the real plugin, run SQL create/restart and
-mutation checks on AMD, record kernel/build evidence, and run at least three
-fresh CPU and GPU index builds with identical input and explicit construction
-parameters. Report exact recall separately from timing and include first query
-and any deferred work. Do not report synthetic fixtures as GPU evidence.
+Before submission: improve the observed large-data recall gap, validate the
+required evaluation dataset and resource limits, and repeat at least three
+fresh CPU and GPU builds at comparable quality. Report exact recall separately
+from timing and include first query and any deferred work. Preserve the full
+failed attempts as well as successes. Do not report synthetic fixtures as GPU
+evidence.
