@@ -25,15 +25,15 @@ fn replaced(regex: &Regex, text: &str, replacement: &str, start: i64, occurrence
     // SAFETY: the Vec holds the complete readable buffer.
     unsafe { decode_utf16be(bytes.as_ptr(), bytes.len()) }.unwrap()
 }
-fn span(start: i64, end: i64) -> SeekdbRegexMatch {
-    SeekdbRegexMatch {
+fn span(start: i64, end: i64) -> RegexMatch {
+    RegexMatch {
         matched: 1,
         start,
         end,
     }
 }
-fn absent() -> SeekdbRegexMatch {
-    SeekdbRegexMatch {
+fn absent() -> RegexMatch {
+    RegexMatch {
         matched: 0,
         start: -1,
         end: -1,
@@ -297,7 +297,7 @@ fn ffi_round_trip_owns_and_frees_outputs() {
     unsafe {
         let pattern = encoded("(中)");
         let mut regex = ptr::null_mut();
-        let mut error = SeekdbRegexError {
+        let mut error = RegexError {
             kind: 99,
             message: [1; 256],
         };
@@ -332,7 +332,7 @@ fn ffi_round_trip_owns_and_frees_outputs() {
         );
         assert_eq!(found, span(2, 3));
         let replacement = encoded("<$1>");
-        let mut buffer = SeekdbRegexBuffer {
+        let mut buffer = RegexBuffer {
             data: ptr::null_mut(),
             len: 0,
         };
@@ -365,7 +365,7 @@ fn ffi_round_trip_owns_and_frees_outputs() {
 fn ffi_error_outputs_are_reset_and_never_unwind() {
     unsafe {
         let mut regex = ptr::null_mut();
-        let mut error = SeekdbRegexError {
+        let mut error = RegexError {
             kind: 99,
             message: [1; 256],
         };

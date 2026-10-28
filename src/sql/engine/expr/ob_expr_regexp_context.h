@@ -142,7 +142,7 @@ public:
   static int check_binary_compatible(const ObExprResType *types, int64_t num);
 
 private:
-  int check_regexp_status(const SeekdbRegexError &error) const;
+  int check_regexp_status(const RegexError &error) const;
 private:
   bool inited_;
   ObInplaceAllocator pattern_allocator_;
@@ -150,7 +150,7 @@ private:
   int cflags_;
   int64_t stack_limit_;
   int64_t time_limit_;
-  SeekdbRegex *regexp_engine_;
+  RegexEngine *regexp_engine_;
 };
 }
 }

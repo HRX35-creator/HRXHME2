@@ -5,8 +5,9 @@
 - Add the repository's standard OceanBase copyright and Apache 2.0 license header to every new database source file, including C/C++ headers and Rust sources.
 - Scripts and build files, including Bazel files, do not require license headers.
 
-## C++ Type Naming
+## Type Naming
 
+- Do not add `Seekdb` or `SeekDB` prefixes to new type names. Use namespaces or modules to distinguish types.
 - New C++ classes, including interface classes, do not need the legacy `Ob` prefix.
 - Keep the `I` prefix for interface classes. For example, use `ICacheMemoryGetter` instead of `ObICacheMemoryGetter`.
 - Do not rename existing types only to remove the `Ob` prefix unless the task explicitly requires it.

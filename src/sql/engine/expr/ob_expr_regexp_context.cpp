@@ -264,8 +264,8 @@ int ObExprRegexContext::init(ObExprStringBuf &string_buf,
              && time_limit_ == regex_vars.regexp_time_limit_) {
   } else {
     reset();
-    SeekdbRegex *engine = NULL;
-    SeekdbRegexError error = {};
+    RegexEngine *engine = NULL;
+    RegexError error = {};
     if (seekdb_regex_compile(reinterpret_cast<const uint8_t *>(pattern.ptr()),
                              pattern.length(), cflags, regex_vars.regexp_stack_limit_,
                              regex_vars.regexp_time_limit_, &engine, &error) != 0) {
@@ -299,8 +299,8 @@ int ObExprRegexContext::match(ObExprStringBuf &string_buf, const ObString &text,
   UNUSEDx(string_buf, cs_type);
   int ret = OB_SUCCESS;
   result = false;
-  SeekdbRegexMatch found = {};
-  SeekdbRegexError error = {};
+  RegexMatch found = {};
+  RegexError error = {};
   if (!inited_ || OB_ISNULL(regexp_engine_)) {
     ret = OB_NOT_INIT;
   } else if (seekdb_regex_find(regexp_engine_, reinterpret_cast<const uint8_t *>(text.ptr()),
@@ -320,8 +320,8 @@ int ObExprRegexContext::find(ObExprStringBuf &string_buf, const ObString &text,
   UNUSEDx(string_buf, cs_type);
   int ret = OB_SUCCESS;
   result = 0;
-  SeekdbRegexMatch found = {};
-  SeekdbRegexError error = {};
+  RegexMatch found = {};
+  RegexError error = {};
   if (!inited_ || OB_ISNULL(regexp_engine_)) {
     ret = OB_NOT_INIT;
   } else if (text.empty()) {
@@ -344,8 +344,8 @@ int ObExprRegexContext::substr(ObExprStringBuf &string_buf, const ObString &text
   UNUSEDx(string_buf, cs_type);
   int ret = OB_SUCCESS;
   result.reset();
-  SeekdbRegexMatch found = {};
-  SeekdbRegexError error = {};
+  RegexMatch found = {};
+  RegexError error = {};
   if (!inited_ || OB_ISNULL(regexp_engine_)) {
     ret = OB_NOT_INIT;
   } else if (seekdb_regex_find(regexp_engine_, reinterpret_cast<const uint8_t *>(text.ptr()),
@@ -370,8 +370,8 @@ int ObExprRegexContext::replace(ObExprStringBuf &string_buf, const ObString &tex
   UNUSED(cs_type);
   int ret = OB_SUCCESS;
   result.reset();
-  SeekdbRegexBuffer buffer = {};
-  SeekdbRegexError error = {};
+  RegexBuffer buffer = {};
+  RegexError error = {};
   if (!inited_ || OB_ISNULL(regexp_engine_)) {
     ret = OB_NOT_INIT;
   } else if (text.empty()) {
@@ -395,28 +395,28 @@ int ObExprRegexContext::replace(ObExprStringBuf &string_buf, const ObString &tex
   return ret;
 }
 
-int ObExprRegexContext::check_regexp_status(const SeekdbRegexError &error) const
+int ObExprRegexContext::check_regexp_status(const RegexError &error) const
 {
   int ret = OB_SUCCESS;
-  switch (static_cast<SeekdbRegexErrorKind>(error.kind)) {
-    case SeekdbRegexErrorKind::None:
+  switch (static_cast<RegexErrorKind>(error.kind)) {
+    case RegexErrorKind::None:
       break;
-    case SeekdbRegexErrorKind::Paren:
+    case RegexErrorKind::Paren:
       ret = OB_ERR_REGEXP_EPAREN;
       break;
-    case SeekdbRegexErrorKind::Bracket:
+    case RegexErrorKind::Bracket:
       ret = OB_ERR_REGEXP_EBRACK;
       break;
-    case SeekdbRegexErrorKind::Escape:
+    case RegexErrorKind::Escape:
       ret = OB_ERR_REGEXP_EESCAPE;
       break;
-    case SeekdbRegexErrorKind::InvalidEncoding:
+    case RegexErrorKind::InvalidEncoding:
       ret = OB_ERR_INCORRECT_STRING_VALUE;
       break;
-    case SeekdbRegexErrorKind::Allocation:
+    case RegexErrorKind::Allocation:
       ret = OB_ALLOCATE_MEMORY_FAILED;
       break;
-    case SeekdbRegexErrorKind::Argument:
+    case RegexErrorKind::Argument:
       ret = OB_INVALID_ARGUMENT;
       break;
     default:
@@ -435,14 +435,14 @@ int ObExprRegexContext::get_regexp_flags(const ObString &match_param,
 {
   UNUSEDx(is_som_leftmost, is_single_match);
   int ret = OB_SUCCESS;
-  flags = is_case_sensitive ? 0 : static_cast<uint32_t>(SeekdbRegexFlags::CaseInsensitive);
+  flags = is_case_sensitive ? 0 : static_cast<uint32_t>(RegexFlags::CaseInsensitive);
   for (int i = 0; OB_SUCC(ret) && i < match_param.length(); ++i) {
     switch (match_param.ptr()[i]) {
-      case 'c': flags &= ~static_cast<uint32_t>(SeekdbRegexFlags::CaseInsensitive); break;
-      case 'i': flags |= static_cast<uint32_t>(SeekdbRegexFlags::CaseInsensitive); break;
-      case 'm': flags |= static_cast<uint32_t>(SeekdbRegexFlags::Multiline); break;
-      case 'n': flags |= static_cast<uint32_t>(SeekdbRegexFlags::DotAll); break;
-      case 'u': flags |= static_cast<uint32_t>(SeekdbRegexFlags::UnixLines); break;
+      case 'c': flags &= ~static_cast<uint32_t>(RegexFlags::CaseInsensitive); break;
+      case 'i': flags |= static_cast<uint32_t>(RegexFlags::CaseInsensitive); break;
+      case 'm': flags |= static_cast<uint32_t>(RegexFlags::Multiline); break;
+      case 'n': flags |= static_cast<uint32_t>(RegexFlags::DotAll); break;
+      case 'u': flags |= static_cast<uint32_t>(RegexFlags::UnixLines); break;
       default:
         ret = OB_INVALID_ARGUMENT;
         LOG_USER_ERROR(OB_INVALID_ARGUMENT, "use match param in regexp expression");

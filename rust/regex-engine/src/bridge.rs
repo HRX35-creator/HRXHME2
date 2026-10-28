@@ -27,7 +27,7 @@
 
 use crate::{
     seekdb_regex_buffer_free, seekdb_regex_compile, seekdb_regex_find, seekdb_regex_free,
-    seekdb_regex_replace, SeekdbRegex,
+    seekdb_regex_replace, RegexEngine,
 };
 
 // Keep pointer/length pairs and SQL search options explicit at this boundary.
@@ -35,7 +35,7 @@ use crate::{
 #[cxx::bridge(namespace = "oceanbase::sql")]
 pub mod ffi {
     #[repr(u32)]
-    enum SeekdbRegexFlags {
+    enum RegexFlags {
         CaseInsensitive = 1,
         Multiline = 2,
         DotAll = 4,
@@ -43,7 +43,7 @@ pub mod ffi {
     }
 
     #[repr(i32)]
-    enum SeekdbRegexErrorKind {
+    enum RegexErrorKind {
         None = 0,
         Generic = 1,
         Paren = 2,
@@ -55,25 +55,25 @@ pub mod ffi {
         Argument = 8,
     }
 
-    struct SeekdbRegexError {
+    struct RegexError {
         kind: i32,
         message: [c_char; 256],
     }
 
     #[derive(Debug, PartialEq, Eq)]
-    struct SeekdbRegexMatch {
+    struct RegexMatch {
         matched: i32,
         start: i64,
         end: i64,
     }
 
-    struct SeekdbRegexBuffer {
+    struct RegexBuffer {
         data: *mut u8,
         len: usize,
     }
 
     extern "Rust" {
-        type SeekdbRegex;
+        type RegexEngine;
 
         unsafe fn seekdb_regex_compile(
             pattern: *const u8,
@@ -81,25 +81,25 @@ pub mod ffi {
             flags: u32,
             stack_limit: i64,
             time_limit: i64,
-            out: *mut *mut SeekdbRegex,
-            error: *mut SeekdbRegexError,
+            out: *mut *mut RegexEngine,
+            error: *mut RegexError,
         ) -> i32;
 
-        unsafe fn seekdb_regex_free(regex: *mut SeekdbRegex);
+        unsafe fn seekdb_regex_free(regex: *mut RegexEngine);
 
         /// occurrence is one-based; group zero selects the whole match. A
         /// missing match or unmatched optional group yields {0, -1, -1}.
         /// A group beyond the capture count errors only when the selected
         /// whole-match occurrence exists. Negative groups are always invalid.
         unsafe fn seekdb_regex_find(
-            regex: *const SeekdbRegex,
+            regex: *const RegexEngine,
             text: *const u8,
             text_len: usize,
             start: i64,
             occurrence: i64,
             group: i64,
-            out: *mut SeekdbRegexMatch,
-            error: *mut SeekdbRegexError,
+            out: *mut RegexMatch,
+            error: *mut RegexError,
         ) -> i32;
 
         /// occurrence zero replaces all matches at/after start; otherwise only
@@ -108,17 +108,17 @@ pub mod ffi {
         /// escapes are supported. Runtime errors are propagated. The caller
         /// must release the returned UTF-16BE buffer with buffer_free.
         unsafe fn seekdb_regex_replace(
-            regex: *const SeekdbRegex,
+            regex: *const RegexEngine,
             text: *const u8,
             text_len: usize,
             replacement: *const u8,
             replacement_len: usize,
             start: i64,
             occurrence: i64,
-            out: *mut SeekdbRegexBuffer,
-            error: *mut SeekdbRegexError,
+            out: *mut RegexBuffer,
+            error: *mut RegexError,
         ) -> i32;
 
-        unsafe fn seekdb_regex_buffer_free(buffer: *mut SeekdbRegexBuffer);
+        unsafe fn seekdb_regex_buffer_free(buffer: *mut RegexBuffer);
     }
 }

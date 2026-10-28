@@ -21,9 +21,7 @@
 
 mod bridge;
 
-pub use bridge::ffi::{
-    SeekdbRegexBuffer, SeekdbRegexError, SeekdbRegexErrorKind, SeekdbRegexFlags, SeekdbRegexMatch,
-};
+pub use bridge::ffi::{RegexBuffer, RegexError, RegexErrorKind, RegexFlags, RegexMatch};
 
 use fancy_regex::{Captures, CompileError, Error, ParseError, Regex, RegexBuilder};
 use std::borrow::Cow;
@@ -31,10 +29,10 @@ use std::ffi::c_char;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::ptr;
 
-const CASE_INSENSITIVE: u32 = SeekdbRegexFlags::CaseInsensitive.repr;
-const MULTILINE: u32 = SeekdbRegexFlags::Multiline.repr;
-const DOTALL: u32 = SeekdbRegexFlags::DotAll.repr;
-const UNIX_LINES: u32 = SeekdbRegexFlags::UnixLines.repr;
+const CASE_INSENSITIVE: u32 = RegexFlags::CaseInsensitive.repr;
+const MULTILINE: u32 = RegexFlags::Multiline.repr;
+const DOTALL: u32 = RegexFlags::DotAll.repr;
+const UNIX_LINES: u32 = RegexFlags::UnixLines.repr;
 const MAX_BUFFER_BYTES: usize = i32::MAX as usize;
 const MAX_PATTERN_BYTES: usize = 1024 * 1024;
 const DEFAULT_COMPILED_BYTES: usize = 8 * 1024 * 1024;
@@ -42,16 +40,16 @@ const MAX_COMPILED_BYTES: usize = 64 * 1024 * 1024;
 const DEFAULT_BACKTRACKS: usize = 1_000_000;
 const MAX_BACKTRACKS: usize = 100_000_000;
 
-const GENERIC: i32 = SeekdbRegexErrorKind::Generic.repr;
-const PAREN: i32 = SeekdbRegexErrorKind::Paren.repr;
-const BRACKET: i32 = SeekdbRegexErrorKind::Bracket.repr;
-const ESCAPE: i32 = SeekdbRegexErrorKind::Escape.repr;
-const INVALID_ENCODING: i32 = SeekdbRegexErrorKind::InvalidEncoding.repr;
-const LIMIT: i32 = SeekdbRegexErrorKind::Limit.repr;
-const ALLOCATION: i32 = SeekdbRegexErrorKind::Allocation.repr;
-const ARGUMENT: i32 = SeekdbRegexErrorKind::Argument.repr;
+const GENERIC: i32 = RegexErrorKind::Generic.repr;
+const PAREN: i32 = RegexErrorKind::Paren.repr;
+const BRACKET: i32 = RegexErrorKind::Bracket.repr;
+const ESCAPE: i32 = RegexErrorKind::Escape.repr;
+const INVALID_ENCODING: i32 = RegexErrorKind::InvalidEncoding.repr;
+const LIMIT: i32 = RegexErrorKind::Limit.repr;
+const ALLOCATION: i32 = RegexErrorKind::Allocation.repr;
+const ARGUMENT: i32 = RegexErrorKind::Argument.repr;
 
-pub struct SeekdbRegex {
+pub struct RegexEngine {
     regex: Regex,
 }
 
@@ -99,7 +97,7 @@ fn regex_error(error: Error) -> BridgeError {
 // catch_unwind also protects debug/test consumers. Release builds use the
 // repository's panic=abort policy; allocation failures inside dependencies can
 // still abort rather than returning an allocation error.
-unsafe fn ffi_call(error: *mut SeekdbRegexError, f: impl FnOnce() -> Result<()>) -> i32 {
+unsafe fn ffi_call(error: *mut RegexError, f: impl FnOnce() -> Result<()>) -> i32 {
     let result = match catch_unwind(AssertUnwindSafe(f)) {
         Ok(result) => result,
         Err(_) => Err(err(GENERIC, "regular-expression engine panicked")),
@@ -225,7 +223,7 @@ fn limits(stack_limit: i64, time_limit: i64) -> Result<(usize, usize)> {
     Ok((compiled, backtracks))
 }
 
-fn compile(pattern: String, flags: u32, stack_limit: i64, time_limit: i64) -> Result<SeekdbRegex> {
+fn compile(pattern: String, flags: u32, stack_limit: i64, time_limit: i64) -> Result<RegexEngine> {
     if flags & !(CASE_INSENSITIVE | MULTILINE | DOTALL | UNIX_LINES) != 0 {
         return Err(err(ARGUMENT, "unknown regular-expression flags"));
     }
@@ -241,7 +239,7 @@ fn compile(pattern: String, flags: u32, stack_limit: i64, time_limit: i64) -> Re
         .delegate_dfa_size_limit(compiled_bytes)
         .delegate_dfa_skip_cache_capacity_check(false)
         .max_prog_size((compiled_bytes / 64).max(1));
-    Ok(SeekdbRegex {
+    Ok(RegexEngine {
         regex: builder.build().map_err(regex_error)?,
     })
 }
@@ -257,8 +255,8 @@ pub unsafe fn seekdb_regex_compile(
     flags: u32,
     stack_limit: i64,
     time_limit: i64,
-    out: *mut *mut SeekdbRegex,
-    error: *mut SeekdbRegexError,
+    out: *mut *mut RegexEngine,
+    error: *mut RegexError,
 ) -> i32 {
     // SAFETY: the caller follows the pointer contract documented above.
     unsafe {
@@ -282,7 +280,7 @@ pub unsafe fn seekdb_regex_compile(
 /// # Safety
 /// `regex` must be null or a live handle returned by this library, with no calls
 /// in progress. It must be freed exactly once.
-pub unsafe fn seekdb_regex_free(regex: *mut SeekdbRegex) {
+pub unsafe fn seekdb_regex_free(regex: *mut RegexEngine) {
     if !regex.is_null() {
         // SAFETY: ownership is returned once by the C caller.
         drop(unsafe { Box::from_raw(regex) });
@@ -330,18 +328,12 @@ fn next_captures<'t>(
     Ok(captures)
 }
 
-fn find(
-    regex: &Regex,
-    text: &str,
-    start: i64,
-    occurrence: i64,
-    group: i64,
-) -> Result<SeekdbRegexMatch> {
+fn find(regex: &Regex, text: &str, start: i64, occurrence: i64, group: i64) -> Result<RegexMatch> {
     let mut next = Some(utf16_to_byte(text, start)?);
     if occurrence < 1 || group < 0 {
         return Err(err(ARGUMENT, "invalid occurrence or capture-group index"));
     }
-    let absent = SeekdbRegexMatch {
+    let absent = RegexMatch {
         matched: 0,
         start: -1,
         end: -1,
@@ -360,7 +352,7 @@ fn find(
             return Ok(match captures.get(group as usize) {
                 Some(found) => {
                     checked_slice(text, found.start(), found.end())?;
-                    SeekdbRegexMatch {
+                    RegexMatch {
                         matched: 1,
                         start: byte_to_utf16(text, found.start())?,
                         end: byte_to_utf16(text, found.end())?,
@@ -380,14 +372,14 @@ fn find(
 /// must be writable. The handle must not be freed during this call.
 #[allow(clippy::too_many_arguments)]
 pub unsafe fn seekdb_regex_find(
-    regex: *const SeekdbRegex,
+    regex: *const RegexEngine,
     text: *const u8,
     text_len: usize,
     start: i64,
     occurrence: i64,
     group: i64,
-    out: *mut SeekdbRegexMatch,
-    error: *mut SeekdbRegexError,
+    out: *mut RegexMatch,
+    error: *mut RegexError,
 ) -> i32 {
     // SAFETY: the caller follows the pointer contract documented above.
     unsafe {
@@ -395,7 +387,7 @@ pub unsafe fn seekdb_regex_find(
             if out.is_null() {
                 return Err(err(ARGUMENT, "null match output"));
             }
-            *out = SeekdbRegexMatch {
+            *out = RegexMatch {
                 matched: 0,
                 start: -1,
                 end: -1,
@@ -630,15 +622,15 @@ fn replace(
 /// and fresh. Free the returned buffer with `seekdb_regex_buffer_free`.
 #[allow(clippy::too_many_arguments)]
 pub unsafe fn seekdb_regex_replace(
-    regex: *const SeekdbRegex,
+    regex: *const RegexEngine,
     text: *const u8,
     text_len: usize,
     replacement: *const u8,
     replacement_len: usize,
     start: i64,
     occurrence: i64,
-    out: *mut SeekdbRegexBuffer,
-    error: *mut SeekdbRegexError,
+    out: *mut RegexBuffer,
+    error: *mut RegexError,
 ) -> i32 {
     // SAFETY: the caller follows the pointer contract documented above.
     unsafe {
@@ -646,7 +638,7 @@ pub unsafe fn seekdb_regex_replace(
             if out.is_null() {
                 return Err(err(ARGUMENT, "null replacement output"));
             }
-            *out = SeekdbRegexBuffer {
+            *out = RegexBuffer {
                 data: ptr::null_mut(),
                 len: 0,
             };
@@ -658,7 +650,7 @@ pub unsafe fn seekdb_regex_replace(
             let result = replace(&(*regex).regex, &text, &replacement, start, occurrence)?;
             if !result.is_empty() {
                 let mut bytes = result.into_boxed_slice();
-                *out = SeekdbRegexBuffer {
+                *out = RegexBuffer {
                     data: bytes.as_mut_ptr(),
                     len: bytes.len(),
                 };
@@ -674,7 +666,7 @@ pub unsafe fn seekdb_regex_replace(
 /// # Safety
 /// The object must contain a buffer returned by this library, unmodified and
 /// not previously freed, or an empty `{null, 0}` buffer.
-pub unsafe fn seekdb_regex_buffer_free(buffer: *mut SeekdbRegexBuffer) {
+pub unsafe fn seekdb_regex_buffer_free(buffer: *mut RegexBuffer) {
     if !buffer.is_null() {
         // SAFETY: the C caller returns the original pointer and length once.
         unsafe {
@@ -684,7 +676,7 @@ pub unsafe fn seekdb_regex_buffer_free(buffer: *mut SeekdbRegexBuffer) {
                     (*buffer).len,
                 )));
             }
-            *buffer = SeekdbRegexBuffer {
+            *buffer = RegexBuffer {
                 data: ptr::null_mut(),
                 len: 0,
             };
