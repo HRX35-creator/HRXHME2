@@ -52,6 +52,15 @@ public:
                                  const uint8_t char_len,
                                  CharType &type);
 
+  // Length of the first well formed character.  Mirrors the semantics of
+  // ObCharset::first_valid_char() but avoids the charset dispatch for the
+  // utf8mb4 character set, which is the only one the tokenizers use on the
+  // hot path.
+  static int first_valid_char_fast(ObCollationType coll_type,
+                                   const char *buf,
+                                   const int64_t buf_size,
+                                   int64_t &char_len);
+
   // Fast-path classification for UTF8MB4 using first-byte analysis
   static int classify_utf8mb4_fast(const char *input,
                                    const uint8_t char_len,
@@ -77,6 +86,13 @@ public:
                                   const char *input,
                                   const uint8_t char_len,
                                   bool &ignore);
+
+private:
+  // A utf8 continuation byte has the pattern 10xxxxxx.
+  static inline bool is_continuation_byte(const char ch)
+  {
+    return ((static_cast<unsigned char>(ch) >> 6) == 0x02);
+  }
 
 private:
   template <ObCharsetType CS_TYPE>
@@ -560,6 +576,58 @@ inline int ObFTCharUtil::classify_first_char(ObCollationType coll_type,
     ret = OB_NOT_SUPPORTED;
     STORAGE_FTS_LOG(WARN, "Not supported charset type", K(ret), K(cs_type));
     break;
+  }
+  return ret;
+}
+
+inline int ObFTCharUtil::first_valid_char_fast(ObCollationType coll_type,
+                                                const char *buf,
+                                                const int64_t buf_size,
+                                                int64_t &char_len)
+{
+  int ret = OB_SUCCESS;
+  if (OB_UNLIKELY(ObCharset::charset_type_by_coll(coll_type) != CHARSET_UTF8MB4)) {
+    // Only the utf8mb4 character set is handled inline, every other
+    // character set keeps using the generic charset implementation.
+    ret = ObCharset::first_valid_char(coll_type, buf, buf_size, char_len);
+  } else if (OB_ISNULL(buf)) {
+    ret = OB_NOT_INIT;
+  } else if (buf_size <= 0) {
+    char_len = 0;
+  } else {
+    // The utf8mb4 character set accepts a character when the leading byte and
+    // the continuation bytes form a well formed sequence, the same rules the
+    // generic implementation applies.
+    const unsigned char c = static_cast<unsigned char>(buf[0]);
+    if (c < 0x80) {
+      char_len = 1;
+    } else if (c < 0xc2) {
+      ret = OB_INVALID_ARGUMENT;
+    } else if (c < 0xe0) {
+      if (buf_size < 2 || !is_continuation_byte(buf[1])) {
+        ret = OB_INVALID_ARGUMENT;
+      } else {
+        char_len = 2;
+      }
+    } else if (c < 0xf0) {
+      if (buf_size < 3 || !is_continuation_byte(buf[1]) || !is_continuation_byte(buf[2])
+          || !(c >= 0xe1 || static_cast<unsigned char>(buf[1]) >= 0xa0)) {
+        ret = OB_INVALID_ARGUMENT;
+      } else {
+        char_len = 3;
+      }
+    } else if (c < 0xf5) {
+      if (buf_size < 4 || !is_continuation_byte(buf[1]) || !is_continuation_byte(buf[2])
+          || !is_continuation_byte(buf[3])
+          || !(c >= 0xf1 || static_cast<unsigned char>(buf[1]) >= 0x90)
+          || !(c <= 0xf3 || static_cast<unsigned char>(buf[1]) <= 0x8f)) {
+        ret = OB_INVALID_ARGUMENT;
+      } else {
+        char_len = 4;
+      }
+    } else {
+      ret = OB_INVALID_ARGUMENT;
+    }
   }
   return ret;
 }

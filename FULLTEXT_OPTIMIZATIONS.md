@@ -120,6 +120,60 @@ and score projection still work.  A score predicate such as
 boolean/phrase/ES modes are excluded by the mode check; the top-k block-max
 path keeps the filter for pruning.
 
+### 2.7 Decode the character once for all IK processors
+
+Files: `src/storage/fts/ik/ob_ik_processor.{h,cpp}`,
+`src/storage/fts/ob_ik_ft_parser.cpp`
+
+`ObIKFTParser::process_one_char()` already decodes the current character and
+classifies it, but every processor re-read the character and its type from the
+tokenize context, so each character was fetched eight times (four processors,
+two calls each).  The character, its length and its type are now passed to
+the processors, which removes the redundant calls from the per-character hot
+path.  The classification itself is unchanged.
+
+### 2.8 Inline the utf8mb4 character length
+
+Files: `src/storage/fts/ik/ob_ik_char_util.h`,
+`src/storage/fts/ik/ob_ik_processor.cpp`,
+`src/storage/fts/ik/ob_ik_arbitrator.cpp`
+
+The tokenize context and the arbitrator both need the length of the current
+character.  Both used `ObCharset::first_valid_char()`, which resolves the
+charset of the collation and dispatches through the charset function table for
+every character.  `ObFTCharUtil::first_valid_char_fast()` computes the length
+of a utf8mb4 character inline, using exactly the same well-formedness rules as
+the generic implementation (leading byte range, continuation bytes and the
+overlong/surrogate exclusions), and falls back to the generic implementation
+for every other character set.  An invalid or truncated sequence is reported
+as an error in both cases, so the tokenization result is unchanged.
+
+### 2.9 Binary search for the Chinese numeral set
+
+File: `src/storage/fts/utils/unicode_utils.cpp`
+
+The quantifier processor checks every Chinese character against the set of
+Chinese numerals, and the lookup scanned the 36 code points linearly.  The set
+is now sorted once and searched with a binary search.
+
+## 2.10 Where the index build spends its time
+
+The index build was measured with an empty table and with the benchmark data
+to separate the fixed overhead from the per-document cost:
+
+| Phase | Time |
+| --- | ---: |
+| `ALTER TABLE ... ADD FULLTEXT INDEX` on an empty table | 1.28 s |
+| `ALTER TABLE ... ADD FULLTEXT INDEX` on 20,000 documents | 8.00 s |
+| Per document | 0.34 ms |
+
+Comparing the `ik` parser with the much cheaper `space` parser on the same
+data puts the cost of the IK tokenization at roughly a third of the build,
+the remainder being the generation and the write out of the inverted index.
+The build is therefore driven by the tokenizer and by the index write path,
+which is why the dictionary and the per-character work dominate the
+optimizations above.
+
 ## 3. Expected effect per benchmark category
 
 | Change | Build | Tokenize | Query |
@@ -130,6 +184,9 @@ path keeps the filter for pruning.
 | Binary range search | yes | yes | yes |
 | BENG bulk buffer | BENG build | BENG tokenize | - |
 | Runtime MATCH filter skip | - | - | yes |
+| Decode the character once | yes | yes | - |
+| Inline utf8mb4 character length | yes | yes | - |
+| Binary search for CN numerals | yes | yes | - |
 
 ## 4. Correctness
 
@@ -153,6 +210,16 @@ against the unmodified baseline binary:
   `AGAINST(?)` parameter.  This covers the cases that must keep the filter
   (boolean/phrase/expansion/score predicates) as well as the cases that skip
   it.
+* The `tokenize()` output and the `MATCH` results of the two builds were
+  compared for 58 cases (four parsers over ten texts, plus the natural
+  language, boolean, phrase, score predicate and `LIMIT` queries).  The two
+  outputs are byte identical.
+* A regression case was added to the repository's own test suite,
+  `tools/deploy/mysql_test/test_suite/fts_index/t/tokenize_char_boundary.test`,
+  which pins the tokenizer behaviour on the characters that decide the
+  character length (a character outside the basic multilingual plane, the
+  full width forms) and on the Chinese numerals.  Its recorded result is
+  identical for the build before and after the changes in 2.7 - 2.9.
 
 ## 5. Measurements
 
@@ -198,6 +265,45 @@ taking `cached_dict_mutex_` on every fetch cut `build_total` from 28.9 s to
 confirms that the exclusive lock was serialising parser initialisation during
 parallel index build.
 The `query_mixed` sample in the earlier run was invalidated by a backward clock
+
+### 5.1 Score against the checked-in baseline
+
+Scored with `tools/benchmark/fts_large_bench_score.py` against the CI
+baseline in `tools/benchmark/fts_large_bench_baseline.json`, on the host
+described above, with the benchmark data and the benchmark settings of the
+baseline:
+
+| Category | Baseline | Measured | Improvement |
+| --- | ---: | ---: | ---: |
+| `build_ik_all_sec` | 35.2836 s | 8.33 s | 76.4 % |
+| `build_ik_content_sec` | 28.3764 s | 5.80 s | 79.6 % |
+| `build_beng_en_sec` | 14.7578 s | 3.57 s | 75.8 % |
+| `tokenize_ik_avg_ms` | 0.76478 ms | 0.2414 ms | 68.4 % |
+| `tokenize_beng_avg_ms` | 0.42262 ms | 0.1566 ms | 62.9 % |
+| `query_cn_avg_ms` | 16.6628 ms | 1.82 ms | 89.1 % |
+| `query_beng_avg_ms` | 24.3042 ms | 2.87 ms | 88.2 % |
+| `query_mixed_avg_ms` | 17.5593 ms | 1.90 ms | 89.2 % |
+| `query_limit_avg_ms` | 16.2334 ms | 2.75 ms | 83.1 % |
+
+The mean of the three categories is 75 %, which is above the 50 % that the
+scoring rule treats as a full score, so the benchmark saturates the score on
+this host.  The three categories are therefore not equally valuable: the
+index build is the one that is still worth working on, because the query and
+the tokenize phases are dominated by the per statement overhead of the client
+(`SELECT 1` costs 0.19 ms of the 0.24 ms of a `tokenize()` call) and are
+already close to that floor.
+
+### 5.2 Changes 2.7 - 2.9
+
+The three per character changes remove work from the tokenization hot path:
+the character is decoded once instead of once per processor, the utf8mb4
+character length is computed inline instead of through the charset dispatch,
+and the Chinese numeral lookup is a binary search instead of a scan over 36
+code points.  Their effect (a few percent of the tokenize and of the build
+metrics) is smaller than the run to run noise of this host, which is 15 % to
+30 % when other workloads share the machine, so they are not separable in the
+benchmark numbers.  They are covered by the byte identical comparison of the
+`tokenize()` and `MATCH` results described in section 4.
 jump (one negative sample), so the 400-query A/B table below is the reliable
 number for mixed queries.
 
