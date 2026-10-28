@@ -1,0 +1,15 @@
+[package]
+name = "uuid-generator"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+cxx = "1"
+uuid = { version = "1.29", features = ["v1"] }
+getrandom = "0.4"
+
+# mac_address has no backend on iOS or Wasm. Such targets report no MAC
+# and use the same random-node fallback as a native host without interfaces.
+[target.'cfg(any(target_os = "linux", target_os = "android", target_os = "macos", target_os = "windows", target_os = "freebsd", target_os = "netbsd", target_os = "openbsd", target_os = "illumos"))'.dependencies]
+mac_address = "1.2"
