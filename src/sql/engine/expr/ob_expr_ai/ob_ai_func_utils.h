@@ -377,11 +377,21 @@ public:
   ObAIFuncPromptObjectUtils() {}
   virtual ~ObAIFuncPromptObjectUtils() {}
   static bool is_valid_prompt_object(ObJsonObject* prompt_object);
+  // replace every placeholder of the template with the matching argument.
+  // a string argument is replaced by its content, any other json argument is
+  // replaced by its json text.
+  static int replace_all_args_in_template(ObIAllocator &allocator, ObJsonObject* prompt_object, ObString& replaced_prompt_str);
   static int replace_all_str_args_in_template(ObIAllocator &allocator, ObJsonObject* prompt_object, ObString& replaced_prompt_str);
   static int construct_prompt_object(ObIAllocator &allocator, ObString &template_str, ObJsonArray *args_array, ObJsonObject *&prompt_object);
   static constexpr char prompt_template_key[20] = "template";
   static constexpr char prompt_args_key[20] = "args";
 private:
+  // parse the placeholder which starts at template_ptr[start_pos]. found is
+  // set to true when a well formed placeholder such as {0} was found, in that
+  // case arg_index holds the index of the argument and next_pos the position
+  // right behind the placeholder.
+  static int parse_placeholder(const char *template_ptr, int64_t template_len, int64_t start_pos,
+                                int64_t &arg_index, int64_t &next_pos, bool &found);
   DISALLOW_COPY_AND_ASSIGN(ObAIFuncPromptObjectUtils);
 };
 
