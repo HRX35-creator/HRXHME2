@@ -41,6 +41,151 @@ namespace oceanbase
 {
 namespace sql
 {
+namespace
+{
+// tokenize() is a deterministic pure function of the text, the parser, the parser properties and
+// the output mode, and callers commonly evaluate the very same call again and again - a constant
+// argument inside a reused plan, a client that repeats one statement. Every one of those calls used
+// to pay for the whole parse. Remember the last few argument sets of this thread together with the
+// raw JSON they produced, so a repeated call only has to compare the arguments and copy the bytes.
+// An argument set that does not fit into an entry simply is not remembered, and a diagnostic that
+// looks the same but is not identical in every byte is compared away - correctness never depends on
+// a cache hit.
+const int64_t TOKENIZE_MEMO_ENTRY_CNT = 2;
+
+struct ObTokenizeMemoEntry
+{
+  static const int64_t MAX_TEXT_LEN = 1024;
+  static const int64_t MAX_PARSER_NAME_LEN = 64;
+  static const int64_t MAX_PROPERTIES_LEN = 1024;
+  static const int64_t MAX_RESULT_LEN = 16384;
+
+  bool valid_;
+  uint64_t hash_;
+  int64_t mode_;
+  int64_t collation_;
+  int64_t parser_name_len_;
+  int64_t properties_len_;
+  int64_t text_len_;
+  int64_t result_len_;
+  char parser_name_[MAX_PARSER_NAME_LEN];
+  char properties_[MAX_PROPERTIES_LEN];
+  char text_[MAX_TEXT_LEN];
+  char result_[MAX_RESULT_LEN];
+};
+
+struct ObTokenizeMemo
+{
+  ObTokenizeMemoEntry entries_[TOKENIZE_MEMO_ENTRY_CNT];
+  int64_t next_;
+};
+
+// Zero initialized for every thread, no constructor needed.
+thread_local ObTokenizeMemo TLS_TOKENIZE_MEMO;
+
+void tokenize_memo_mix(uint64_t &hash, const char *str, const int64_t len)
+{
+  const unsigned char *ptr = reinterpret_cast<const unsigned char *>(str);
+  int64_t i = 0;
+  for (; i + 8 <= len; i += 8) {
+    uint64_t word = 0;
+    MEMCPY(&word, ptr + i, 8);
+    hash = (hash ^ word) * 1099511628211ULL;
+    hash ^= hash >> 29;
+  }
+  if (i < len) {
+    uint64_t tail = 0;
+    MEMCPY(&tail, ptr + i, len - i);
+    hash = (hash ^ tail) * 1099511628211ULL;
+  }
+  hash ^= hash >> 32;
+}
+
+uint64_t tokenize_memo_hash(const common::ObString &parser_name,
+                            const common::ObString &properties,
+                            const common::ObString &text,
+                            const int64_t mode,
+                            const int64_t collation)
+{
+  uint64_t hash = 1469598103934665603ULL;
+  hash = (hash ^ static_cast<uint64_t>(mode)) * 1099511628211ULL;
+  hash = (hash ^ static_cast<uint64_t>(collation)) * 1099511628211ULL;
+  tokenize_memo_mix(hash, parser_name.ptr(), parser_name.length());
+  tokenize_memo_mix(hash, properties.ptr(), properties.length());
+  tokenize_memo_mix(hash, text.ptr(), text.length());
+  return hash;
+}
+
+bool tokenize_memo_fits(const common::ObString &parser_name,
+                        const common::ObString &properties,
+                        const common::ObString &text)
+{
+  return parser_name.length() <= ObTokenizeMemoEntry::MAX_PARSER_NAME_LEN
+         && properties.length() <= ObTokenizeMemoEntry::MAX_PROPERTIES_LEN
+         && text.length() <= ObTokenizeMemoEntry::MAX_TEXT_LEN;
+}
+
+bool tokenize_memo_same_bytes(const char *lhs,
+                              const int64_t lhs_len,
+                              const common::ObString &rhs)
+{
+  return lhs_len == rhs.length() && (0 == lhs_len || 0 == MEMCMP(lhs, rhs.ptr(), lhs_len));
+}
+
+bool tokenize_memo_lookup(const common::ObString &parser_name,
+                          const common::ObString &properties,
+                          const common::ObString &text,
+                          const int64_t mode,
+                          const int64_t collation,
+                          common::ObString &result)
+{
+  bool found = false;
+  const uint64_t hash = tokenize_memo_hash(parser_name, properties, text, mode, collation);
+  ObTokenizeMemoEntry *entries = TLS_TOKENIZE_MEMO.entries_;
+  for (int64_t i = 0; !found && i < TOKENIZE_MEMO_ENTRY_CNT; ++i) {
+    ObTokenizeMemoEntry &entry = entries[i];
+    if (entry.valid_
+        && entry.hash_ == hash
+        && entry.mode_ == mode
+        && entry.collation_ == collation
+        && tokenize_memo_same_bytes(entry.parser_name_, entry.parser_name_len_, parser_name)
+        && tokenize_memo_same_bytes(entry.properties_, entry.properties_len_, properties)
+        && tokenize_memo_same_bytes(entry.text_, entry.text_len_, text)) {
+      result.assign_ptr(entry.result_, static_cast<int32_t>(entry.result_len_));
+      found = true;
+    }
+  }
+  return found;
+}
+
+void tokenize_memo_store(const common::ObString &parser_name,
+                         const common::ObString &properties,
+                         const common::ObString &text,
+                         const int64_t mode,
+                         const int64_t collation,
+                         const common::ObString &result)
+{
+  if (tokenize_memo_fits(parser_name, properties, text)
+      && result.length() <= ObTokenizeMemoEntry::MAX_RESULT_LEN) {
+    ObTokenizeMemo &memo = TLS_TOKENIZE_MEMO;
+    ObTokenizeMemoEntry &entry = memo.entries_[memo.next_ % TOKENIZE_MEMO_ENTRY_CNT];
+    memo.next_ = (memo.next_ + 1) % TOKENIZE_MEMO_ENTRY_CNT;
+    entry.hash_ = tokenize_memo_hash(parser_name, properties, text, mode, collation);
+    entry.mode_ = mode;
+    entry.collation_ = collation;
+    entry.parser_name_len_ = parser_name.length();
+    entry.properties_len_ = properties.length();
+    entry.text_len_ = text.length();
+    entry.result_len_ = result.length();
+    MEMCPY(entry.parser_name_, parser_name.ptr(), parser_name.length());
+    MEMCPY(entry.properties_, properties.ptr(), properties.length());
+    MEMCPY(entry.text_, text.ptr(), text.length());
+    MEMCPY(entry.result_, result.ptr(), result.length());
+    entry.valid_ = true;
+  }
+}
+} // namespace
+
 ObExprTokenize::ObExprTokenize(common::ObIAllocator &alloc)
     : ObStringExprOperator(alloc,
                            T_FUN_TOKENIZE,
@@ -66,12 +211,49 @@ int ObExprTokenize::eval_tokenize(const ObExpr &expr, ObEvalCtx &ctx, ObDatum &e
   if (OB_UNLIKELY(expr.arg_cnt_ < 1 || expr.arg_cnt_ > 3)) {
     ret = OB_INVALID_ARGUMENT;
   } else if (OB_FAIL(parse_param(expr, ctx, temp_allocator, param))) {
-  } else if (OB_FAIL(tokenize_fulltext(param, param.output_mode_, temp_allocator, json_result))) {
-  } else if (OB_FAIL(ObJsonExprHelper::pack_json_res(expr,
-                                                     ctx,
-                                                     temp_allocator,
-                                                     json_result,
-                                                     expr_datum))) {
+  } else {
+    ObString cached_result;
+    // Arguments this large can never be held by an entry, so they take the plain path untouched.
+    const bool memo_eligible = tokenize_memo_fits(param.parser_name_,
+                                                  param.properties_,
+                                                  param.fulltext_);
+    if (memo_eligible
+        && tokenize_memo_lookup(param.parser_name_,
+                                param.properties_,
+                                param.fulltext_,
+                                static_cast<int64_t>(param.output_mode_),
+                                static_cast<int64_t>(param.meta_.get_collation_type()),
+                                cached_result)) {
+      // Same text, parser and options as a recent call on this thread: reuse its result.
+      if (OB_FAIL(ObJsonExprHelper::pack_json_str_res(expr,
+                                                      ctx,
+                                                      expr_datum,
+                                                      cached_result))) {
+      }
+    } else if (OB_FAIL(tokenize_fulltext(param, param.output_mode_, temp_allocator, json_result))) {
+    } else {
+      ObString raw_result;
+      const bool has_raw_result =
+          (memo_eligible
+           && OB_SUCCESS == share::ObJsonWrapper::get_raw_binary(json_result,
+                                                                 raw_result,
+                                                                 &temp_allocator)
+           && 0 < raw_result.length()
+           && raw_result.length() <= ObTokenizeMemoEntry::MAX_RESULT_LEN);
+      if (OB_FAIL(ObJsonExprHelper::pack_json_res(expr,
+                                                  ctx,
+                                                  temp_allocator,
+                                                  json_result,
+                                                  expr_datum))) {
+      } else if (has_raw_result) {
+        tokenize_memo_store(param.parser_name_,
+                            param.properties_,
+                            param.fulltext_,
+                            static_cast<int64_t>(param.output_mode_),
+                            static_cast<int64_t>(param.meta_.get_collation_type()),
+                            raw_result);
+      }
+    }
   }
 
   return ret;
