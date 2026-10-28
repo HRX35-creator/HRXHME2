@@ -472,10 +472,11 @@ int ObExprAIRerank::compact_json_array_by_key(ObIAllocator &allocator, ObJsonArr
   } else {
     int64_t count1 = array1->element_count();
     int64_t count2 = array2->element_count();
-    int64_t min_count = count1 < count2 ? count1 : count2;
     int64_t i = 0;
     int64_t j = 0;
-    while (i < min_count && j < min_count && OB_SUCC(ret)) {
+    // Merge the whole pair of arrays, stopping at the minimum length would leave
+    // the remaining elements of the longer array unmerged and out of order.
+    while (i < count1 && j < count2 && OB_SUCC(ret)) {
       ObJsonNode *node1 = array1->get_value(i);
       ObJsonNode *node2 = array2->get_value(j);
       if (OB_ISNULL(node1) || OB_ISNULL(node2)
