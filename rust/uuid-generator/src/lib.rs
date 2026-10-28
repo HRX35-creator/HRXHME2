@@ -13,7 +13,7 @@
 // limitations under the License.
 
 //! UUID v1 generation with one process-wide node ID and clock sequence.
-//! Every platform prefers an available MAC and falls back to a random node.
+//! Every platform uses a random node without reading network-interface addresses.
 
 mod bridge;
 
@@ -39,8 +39,11 @@ struct Generator {
 
 impl Generator {
     fn new() -> Result<Self> {
-        let node = select_node(mac_address(), random_bytes)?;
-        // Seed independently of the node, including when a real MAC is used.
+        let mut node = [0; 6];
+        random_bytes(&mut node)?;
+        // RFC 9562 section 6.10: distinguish random node IDs from real MACs.
+        node[0] |= 1;
+        // Seed the clock sequence independently of the node.
         let mut seed = [0; 2];
         random_bytes(&mut seed)?;
         Ok(Self {
@@ -66,43 +69,4 @@ impl Generator {
 
 fn random_bytes(output: &mut [u8]) -> Result<()> {
     getrandom::fill(output).map_err(|_| Code::Entropy)
-}
-
-fn valid_mac(node: &[u8; 6]) -> bool {
-    // Reject loopback/unspecified, multicast/broadcast, and Android's shared
-    // privacy placeholder. Locally administered unicast MACs remain valid.
-    node != &[0; 6] && node[0] & 1 == 0 && node != &[2, 0, 0, 0, 0, 0]
-}
-
-fn select_node(
-    mac: Option<[u8; 6]>,
-    fill: impl FnOnce(&mut [u8]) -> Result<()>,
-) -> Result<[u8; 6]> {
-    if let Some(node) = mac.filter(valid_mac) {
-        return Ok(node);
-    }
-    let mut node = [0; 6];
-    fill(&mut node)?;
-    // RFC 9562 section 6.10: distinguish random node IDs from real MACs.
-    node[0] |= 1;
-    Ok(node)
-}
-
-fn mac_address() -> Option<[u8; 6]> {
-    cfg_if::cfg_if! {
-        if #[cfg(any(
-            target_os = "linux",
-            target_os = "android",
-            target_os = "macos",
-            target_os = "windows"
-        ))] {
-            // Enumeration failures (including sandbox permissions) mean no usable MAC.
-            mac_address::MacAddressIterator::new()
-                .ok()?
-                .map(|mac| mac.bytes())
-                .find(valid_mac)
-        } else {
-            None
-        }
-    }
 }

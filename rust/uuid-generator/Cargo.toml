@@ -5,12 +5,6 @@ edition = "2021"
 publish = false
 
 [dependencies]
-cfg-if = "1"
 cxx = "1"
 uuid = { version = "1.29", features = ["v1"] }
 getrandom = "0.4"
-
-# Enable MAC enumeration on supported native platforms. Other targets use
-# the same random-node fallback as a native host without usable interfaces.
-[target.'cfg(any(target_os = "linux", target_os = "android", target_os = "macos", target_os = "windows"))'.dependencies]
-mac_address = "1.2"
