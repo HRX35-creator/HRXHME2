@@ -27,6 +27,8 @@
 #else
 #include <sys/ioctl.h>
 #include <net/if.h>
+#include <fcntl.h>
+#include <unistd.h>
 #ifdef __APPLE__
 #include <ifaddrs.h>
 #include <net/if_dl.h>
@@ -208,14 +210,16 @@ int ObUUIDNode::init()
     ret = OB_ERR_UNEXPECTED;
     LOG_ERROR("socket failed", K(ret), K(errno));
   } else {
+    bool mac_addr_found = false;
     ifc.ifc_len = sizeof(buf);
     ifc.ifc_buf = buf;
     if (ioctl(sock, SIOCGIFCONF, &ifc) < 0) {
-      ret = OB_ERR_UNEXPECTED;
+      // Restricted environments may deny interface enumeration. Do not fail
+      // startup here; fall back to a random node ID below.
+      LOG_WARN("ioctl failed, SIOCGIFCONF", K(errno));
     } else {
       ifreq *it = ifc.ifc_req;
       ifreq *end = it + (ifc.ifc_len / sizeof(ifreq));
-      bool mac_addr_found = false;
       for (; it != end && OB_SUCC(ret); ++it) {
         if (OB_ISNULL(it) || OB_ISNULL(it->ifr_name) || OB_ISNULL(ifr.ifr_name)) {
           continue;
@@ -236,12 +240,28 @@ int ObUUIDNode::init()
           }
         }
       }//end for
-      if (OB_FAIL(ret)) {
-      } else if (!mac_addr_found) {
-        ret = OB_ERR_UNEXPECTED;
+    }
+    if (OB_FAIL(ret)) {
+    } else if (!mac_addr_found) {
+      // RFC 4122 section 4.5: when a MAC address is unavailable (e.g. a
+      // restricted sandbox that denies interface enumeration or
+      // SIOCGIFHWADDR), use random bytes with the multicast bit set as the
+      // node ID so that UUID initialization can still complete.
+      int urandom_fd = open("/dev/urandom", O_RDONLY);
+      if (urandom_fd >= 0 && read(urandom_fd, mac_addr_, 6) == 6) {
+        mac_addr_[0] |= 0x01;  // set multicast bit
+        mac_addr_found = true;
+        LOG_WARN("no usable MAC address found, using random UUID node ID");
       } else {
-        is_inited_ = true;
+        ret = OB_ERR_UNEXPECTED;
+        LOG_WARN("failed to read random bytes for UUID node ID", K(ret), K(errno));
       }
+      if (urandom_fd >= 0) {
+        close(urandom_fd);
+      }
+    }
+    if (OB_SUCC(ret) && mac_addr_found) {
+      is_inited_ = true;
     }
     close(sock);
   }
