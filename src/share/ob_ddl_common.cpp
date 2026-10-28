@@ -16,8 +16,11 @@
 
 #define USING_LOG_PREFIX SHARE
 
+#include <cstdint>
+#include <cstring>
 #include "config_bridge.h"
 #include "lib/compress/ob_compress_util.h"
+#include "lib/string/ob_sql_string.h"
 #include "ob_ddl_common.h"
 #include "common/datum/ob_datum.h"  // ObDatum complete type(previously hidden behind the block_sstable_struct include chain)
 #include "share/ob_rpc_struct.h"
@@ -37,6 +40,102 @@ using namespace oceanbase::share;
 using namespace oceanbase::common;
 using namespace oceanbase::share::schema;
 using namespace oceanbase::blocksstable;
+
+namespace
+{
+
+// Return the length of an identifier after escaping it, i.e. the identifier
+// length plus one extra byte for every backtick (backticks are doubled).
+// A NULL or empty identifier has no escaped bytes.
+static int64_t get_escaped_identifier_length(const char *ptr, const int64_t len)
+{
+  int64_t escaped_len = 0;
+  if (NULL != ptr && len > 0) {
+    escaped_len = len;
+    for (int64_t i = 0; i < len; ++i) {
+      if ('`' == ptr[i]) {
+        ++escaped_len;
+      }
+    }
+  }
+  return escaped_len;
+}
+
+// Copy `len` bytes from `src` to `dst`, writing every backtick twice.
+// `dst` must provide get_escaped_identifier_length(src, len) writable bytes.
+static void escape_identifier_to_buf(const char *src, const int64_t len, char *dst)
+{
+  if (NULL != src && NULL != dst && len > 0) {
+    int64_t pos = 0;
+    for (int64_t i = 0; i < len; ++i) {
+      dst[pos++] = src[i];
+      if ('`' == src[i]) {
+        dst[pos++] = '`';
+      }
+    }
+  }
+}
+
+// Append `prefix + identifier` to `sql_string` as a backtick quoted identifier,
+// doubling every backtick inside the identifier so that the result can be
+// embedded in SQL text safely. An empty or NULL identifier yields an empty
+// quoted name. `prefix` is not escaped on purpose, callers pass a constant
+// such as "__SHADOW_".
+//
+// The escaped content is appended in chunks: runs of plain bytes are appended
+// with one call each, so a long identifier is not appended byte by byte.
+static int append_quoted_identifier(
+    ObSqlString &sql_string,
+    const ObString &identifier,
+    const char *prefix = NULL)
+{
+  int ret = OB_SUCCESS;
+  const char *ptr = identifier.ptr();
+  const int64_t len = identifier.length();
+  const int64_t escaped_len = get_escaped_identifier_length(ptr, len);
+  int64_t prefix_len = 0;
+  if (NULL != prefix) {
+    prefix_len = static_cast<int64_t>(strlen(prefix));
+  }
+  // Reserve the whole result first, otherwise appending chunk by chunk may
+  // reallocate the internal buffer repeatedly.
+  if (OB_FAIL(sql_string.reserve(sql_string.length() + escaped_len + 2 + prefix_len))) {
+    LOG_WARN("failed to reserve memory for quoted identifier", K(ret), K(escaped_len), K(prefix_len));
+  } else if (OB_FAIL(sql_string.append("`"))) {
+    LOG_WARN("failed to append quoted identifier", K(ret));
+  } else if (prefix_len > 0 && OB_FAIL(sql_string.append(prefix, prefix_len))) {
+    LOG_WARN("failed to append identifier prefix", K(ret));
+  } else if (escaped_len > 0) {
+    int64_t start = 0;
+    while (OB_SUCC(ret) && start < len) {
+      const char *escape_pos = static_cast<const char *>(
+          memchr(ptr + start, '`', static_cast<size_t>(len - start)));
+      const int64_t chunk_len = NULL == escape_pos
+          ? len - start
+          : static_cast<int64_t>(escape_pos - (ptr + start));
+      if (chunk_len > 0 && OB_FAIL(sql_string.append(ptr + start, chunk_len))) {
+        LOG_WARN("failed to append identifier content", K(ret));
+      } else if (NULL != escape_pos) {
+        // Use the byte level escape routine so the doubled backtick always has
+        // the same representation as escape_identifier_to_buf() produces.
+        char escaped_character[2];
+        escape_identifier_to_buf(escape_pos, 1, escaped_character);
+        if (OB_FAIL(sql_string.append(escaped_character, static_cast<int64_t>(sizeof(escaped_character))))) {
+          LOG_WARN("failed to append escaped quote character", K(ret));
+        }
+      }
+      if (OB_SUCC(ret)) {
+        start += chunk_len + (NULL == escape_pos ? 0 : 1);
+      }
+    }
+  }
+  if (OB_SUCC(ret) && OB_FAIL(sql_string.append("`"))) {
+    LOG_WARN("failed to append quoted identifier", K(ret));
+  }
+  return ret;
+}
+
+} // namespace
 
 ObDDLTaskSerializeField::ObDDLTaskSerializeField()
 {
@@ -548,7 +647,6 @@ int ObDDLUtil::generate_column_name_str(
     ObSqlString &sql_string)
 {
   int ret = OB_SUCCESS;
-  const char *split_char = "`";
   // append comma
   if (with_comma) {
     if (OB_FAIL(sql_string.append_fmt(", "))) {
@@ -558,9 +656,11 @@ int ObDDLUtil::generate_column_name_str(
   if (OB_SUCC(ret) && with_origin_name) {
     if (column_name_info.is_enum_set_need_cast_) {
       // Enum and set values are cast to unsigned before being appended to a macro block.
-      if (OB_FAIL(sql_string.append_fmt("cast(%s%.*s%s as unsigned)", split_char, column_name_info.column_name_.length(), column_name_info.column_name_.ptr(), split_char))) {
+      if (OB_FAIL(sql_string.append("cast("))) {
+      } else if (OB_FAIL(append_quoted_identifier(sql_string, column_name_info.column_name_))) {
+      } else if (OB_FAIL(sql_string.append(" as unsigned)"))) {
       }
-    } else if (OB_FAIL(sql_string.append_fmt("%s%.*s%s", split_char, column_name_info.column_name_.length(), column_name_info.column_name_.ptr(), split_char))) {
+    } else if (OB_FAIL(append_quoted_identifier(sql_string, column_name_info.column_name_))) {
     }
   }
   // append AS
@@ -570,8 +670,9 @@ int ObDDLUtil::generate_column_name_str(
   }
   // append alias column name
   if (OB_SUCC(ret) && with_alias_name) {
-    if (OB_FAIL(sql_string.append_fmt("%s%s%.*s%s", split_char, column_name_info.is_shadow_column_ ? "__SHADOW_" : "",
-        column_name_info.column_name_.length(), column_name_info.column_name_.ptr(), split_char))) {
+    if (OB_FAIL(append_quoted_identifier(sql_string,
+        column_name_info.column_name_,
+        column_name_info.is_shadow_column_ ? "__SHADOW_" : NULL))) {
     }
   }
   return ret;
