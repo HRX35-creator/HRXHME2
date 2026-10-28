@@ -58,7 +58,10 @@ int ObDDLExecutorUtil::wait_ddl_finish(const int64_t task_id,
     const bool is_support_cancel)
 {
   int ret = OB_SUCCESS;
-  const int64_t retry_interval = 100 * 1000;
+  // Poll quickly at first so that a short DDL returns soon after it finishes, then back off to
+  // the usual interval so that a long DDL does not query the error message table more often.
+  const int64_t max_retry_interval = 100 * 1000;
+  int64_t retry_interval = 5 * 1000;
   ObAddr unused_addr;
   bool is_table_exist = false;
   int64_t unused_user_msg_len = 0;
@@ -117,6 +120,7 @@ int ObDDLExecutorUtil::wait_ddl_finish(const int64_t task_id,
           FORWARD_USER_ERROR(ret, "DDL execution status is undecided, please check later if it finishes successfully or not.");
         } else {
           ob_usleep(retry_interval);
+          retry_interval = MIN(retry_interval * 2, max_retry_interval);
         }
       }
     }

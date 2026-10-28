@@ -344,6 +344,10 @@ public:
 
   int add_stored_row(const ObChunkDatumStore::StoredRow &input_row);
 
+  // need_dump() compares against the current memory bound, which the next added row would first
+  // try to raise. Report whether a dump is still needed after raising it the same way.
+  int recheck_need_dump(bool &sort_need_dump);
+
   virtual int sort();
 
   virtual int get_next_row(const common::ObIArray<ObExpr*> &exprs)
@@ -565,8 +569,11 @@ public:
       void insertion_sort(int64_t l, int64_t r,
                             int64_t common_prefix,
                             int64_t cache_offset);
+      // Positions inside the sort are always within [0, count): ObIArrayWrap::at() checks the
+      // index in an out-of-line call, which dominated the radix partition loops.
+      inline AQSItem &aqs_item(int64_t idx) { return sort_rows_.get_data()[idx]; }
       inline void swap(int64_t l, int64_t r) {
-        std::swap(sort_rows_[r], sort_rows_[l]);
+        std::swap(aqs_item(r), aqs_item(l));
       }
       inline int compare_vals(int64_t l, int64_t r, int64_t &differ_at,
                               int64_t common_prefix, int64_t cache_offset);
