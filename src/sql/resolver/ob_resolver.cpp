@@ -77,6 +77,7 @@
 #include "tcl/ob_savepoint_resolver.h"
 #include "sql/resolver/cmd/ob_variable_set_resolver.h"
 #include "sql/resolver/cmd/ob_show_resolver.h"
+#include "sql/resolver/dml/ob_select_resolver.h"
 #include "sql/resolver/cmd/ob_diff_table_resolver.h"
 #include "sql/resolver/cmd/ob_merge_table_resolver.h"
 #include "sql/resolver/cmd/ob_kill_resolver.h"
@@ -109,6 +110,53 @@ ObResolver::ObResolver(ObResolverParams &params)
 
 ObResolver::~ObResolver()
 {
+}
+
+namespace
+{
+// True when the subtree mentions a file table function.
+bool has_file_table_expr(const ParseNode *node)
+{
+  bool found = false;
+  if (OB_NOT_NULL(node)) {
+    if (T_FILE_TABLE_EXPRESSION == node->type_) {
+      found = true;
+    } else {
+      for (int32_t i = 0; !found && i < node->num_child_; ++i) {
+        found = has_file_table_expr(node->children_[i]);
+      }
+    }
+  }
+  return found;
+}
+} // anonymous namespace
+
+// DESCRIBE over a file table function reports the inferred columns of the file
+// rather than a plan, so it is resolved as the query itself. `stmt` is left
+// untouched for every other statement, which keeps the EXPLAIN path intact.
+int ObResolver::resolve_describe_select(const ParseNode *parse_tree, ObStmt *&stmt)
+{
+  int ret = OB_SUCCESS;
+  const int64_t explain_child_stmt = 4;
+  if (OB_ISNULL(parse_tree) || T_EXPLAIN != parse_tree->type_
+      || 5 != parse_tree->num_child_ || !(parse_tree->param_num_ > 0)) {
+    // Not DESCRIBE: the caller falls back to the EXPLAIN resolver.
+  } else if (OB_ISNULL(parse_tree->children_[explain_child_stmt])
+             || T_SELECT != parse_tree->children_[explain_child_stmt]->type_
+             || !has_file_table_expr(parse_tree->children_[explain_child_stmt])) {
+    // DESCRIBE of an ordinary query keeps the EXPLAIN behaviour.
+  } else {
+    ObStmt *child_stmt = NULL;
+    // Tells the file table resolver to report the inferred schema.
+    params_.is_describe_select_ = true;
+    if (OB_FAIL(stmt_resolver_func<ObSelectResolver>(
+                  params_, *parse_tree->children_[explain_child_stmt], child_stmt))) {
+    } else {
+      stmt = child_stmt;
+    }
+    params_.is_describe_select_ = false;
+  }
+  return ret;
 }
 
 template <typename ResolverType>
@@ -473,7 +521,11 @@ int ObResolver::resolve(IsPrepared if_prepared, const ParseNode &parse_tree, ObS
         break;
       }
       case T_EXPLAIN: {
-        REGISTER_STMT_RESOLVER(Explain);
+        if (OB_FAIL(resolve_describe_select(real_parse_tree, stmt))) {
+        } else if (OB_NOT_NULL(stmt)) {
+        } else {
+          REGISTER_STMT_RESOLVER(Explain);
+        }
         break;
       }
       case T_ALTER_SYSTEM_SET: {

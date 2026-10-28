@@ -51,7 +51,11 @@
     malloc_terminal_node(display_node, result->malloc_pool_, display_type); \
   } \
   malloc_non_terminal_node(explain_stmt, result->malloc_pool_, T_EXPLAIN, 5, \
-                           type_node, display_node, into_table, set_statement_id, stmt);
+                           type_node, display_node, into_table, set_statement_id, stmt); \
+  if (NULL != no_use && T_INT == (no_use)->type_) { \
+    /* param_num_ is unused for EXPLAIN; it carries the DESCRIBE keyword. */ \
+    explain_stmt->param_num_ = 1; \
+  }
 %}
 
 %destructor {destroy_tree($$);}<node>
@@ -289,7 +293,8 @@ END_P SET_VAR DELIMITER
         FOUND FORK FREEZE FREQUENCY FUNCTION FOLLOWING FLASHBACK FULL FRAGMENTATION FROZEN FILE_ID FILTER
         FIELD_OPTIONALLY_ENCLOSED_BY FIELD_DELIMITER FIELD_ENCLOSED_BY FILE_EXTENSION
 
-        GENERAL GEOMETRY GEOMCOLLECTION GEOMETRYCOLLECTION GET_FORMAT GLOBAL GRANTS GROUP_CONCAT GROUPING
+        GENERAL GEOMETRY GEOMCOLLECTION GEOMETRYCOLLECTION GET_FORMAT GLOBAL GRANTS GROUP_CONCAT GROUPING GLOB
+        READ_CSV READ_JSON READ_PARQUET
         GLOBAL_ALIAS
 
         HASH HEAP HELP HISTOGRAM HOUR HIDDEN HYBRID HYBRID_HIST HYBRID_SEARCH
@@ -498,6 +503,7 @@ END_P SET_VAR DELIMITER
 %type <node> skip_index_type opt_skip_index_type_list
 %type <node> vec_index_params vec_index_param vec_index_param_value opt_with_vector_index_parameters
 %type <node> json_table_expr unnest_expr mock_jt_on_error_on_empty jt_column_list json_table_column_def
+%type <node> file_table_expr file_table_arg_list file_table_arg
 %type <node> json_table_ordinality_column_def json_table_exists_column_def json_table_value_column_def json_table_nested_column_def
 %type <node> opt_value_on_empty_or_error_or_mismatch opt_on_mismatch
 %type <node> table_values_clause table_values_clause_with_order_by_and_limit values_row_list row_value
@@ -11258,6 +11264,78 @@ relation_factor %prec LOWER_PARENS
 {
   malloc_non_terminal_node($$, result->malloc_pool_, T_TABLE_COLLECTION_EXPRESSION, 2, $3, $6);
 }
+| file_table_expr
+{
+  $$ = $1;
+}
+;
+
+file_table_expr:
+READ_CSV '(' file_table_arg_list ')' relation_name
+{
+  // relation_name already yields an identifier node; reuse it as the alias.
+  ParseNode *alias_node = $5;
+  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_EXPRESSION, 3, $3, alias_node, NULL);
+  $$->value_ = 0; // read_csv
+}
+| READ_CSV '(' file_table_arg_list ')'
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_EXPRESSION, 3, $3, NULL, NULL);
+  $$->value_ = 0; // read_csv
+}
+| READ_JSON '(' file_table_arg_list ')' relation_name
+{
+  ParseNode *alias_node = $5;
+  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_EXPRESSION, 3, $3, alias_node, NULL);
+  $$->value_ = 1; // read_json
+}
+| READ_JSON '(' file_table_arg_list ')'
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_EXPRESSION, 3, $3, NULL, NULL);
+  $$->value_ = 1; // read_json
+}
+| READ_PARQUET '(' file_table_arg_list ')' relation_name
+{
+  ParseNode *alias_node = $5;
+  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_EXPRESSION, 3, $3, alias_node, NULL);
+  $$->value_ = 2; // read_parquet
+}
+| READ_PARQUET '(' file_table_arg_list ')'
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_EXPRESSION, 3, $3, NULL, NULL);
+  $$->value_ = 2; // read_parquet
+}
+| GLOB '(' file_table_arg_list ')' relation_name
+{
+  ParseNode *alias_node = $5;
+  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_EXPRESSION, 3, $3, alias_node, NULL);
+  $$->value_ = 3; // glob
+}
+| GLOB '(' file_table_arg_list ')'
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_EXPRESSION, 3, $3, NULL, NULL);
+  $$->value_ = 3; // glob
+}
+;
+
+file_table_arg_list:
+file_table_arg
+{
+  $$ = $1;
+}
+| file_table_arg_list ',' file_table_arg
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_LINK_NODE, 2, $1, $3);
+}
+;
+
+// `expr` rather than `simple_expr` so that named options such as
+// `header = true` parse as a comparison instead of a bare expression.
+file_table_arg:
+expr
+{
+  $$ = $1;
+}
 ;
 
 dml_table_name:
@@ -12306,8 +12384,20 @@ explain_or_desc relation_factor opt_desc_column_option
 
 explain_or_desc:
 EXPLAIN {$$ = NULL;}
-| DESCRIBE {$$ = NULL;}
-| DESC  {$$ = NULL;}
+| DESCRIBE
+{
+  // DESCRIBE over a query lists that query's columns instead of its plan, so
+  // the resolver has to know which keyword introduced the statement.
+  malloc_terminal_node($$, result->malloc_pool_, T_INT);
+  $$->value_ = 1;
+  $$->is_hidden_const_ = 1;
+}
+| DESC
+{
+  malloc_terminal_node($$, result->malloc_pool_, T_INT);
+  $$->value_ = 1;
+  $$->is_hidden_const_ = 1;
+}
 ;
 
 explainable_stmt:

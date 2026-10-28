@@ -45,6 +45,20 @@ enum ObFileColumnType
 const char *ob_file_column_type_name(const ObFileColumnType type);
 common::ObObjType ob_file_column_to_obj_type(const ObFileColumnType type);
 
+// What a file table function reads. GLOB is not a file format: it enumerates
+// matching paths instead of decoding one file.
+enum ObFileFormat
+{
+  OB_FILE_FORMAT_CSV = 0,
+  OB_FILE_FORMAT_JSON,
+  OB_FILE_FORMAT_PARQUET,
+  OB_FILE_FORMAT_GLOB,
+  OB_FILE_FORMAT_MAX
+};
+
+// Human readable name of a format, matching the function name used in SQL.
+const char *ob_file_format_name(const ObFileFormat format);
+
 // One inferred column of a file.
 struct ObFileColumn
 {
