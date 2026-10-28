@@ -210,19 +210,6 @@ int ObTextDaaTIter::get_next_rows(const int64_t capacity, int64_t &count)
       || real_capacity > buffered_relevances_.count())) {
     return OB_INVALID_ARGUMENT;
   }
-  const int64_t dim_count = dim_iters_->count();
-  if (OB_UNLIKELY(dim_count > iter_domain_ids_.count()
-      || nullptr == iter_domain_ids_.get_data()
-      || (real_capacity > 0 && (nullptr == buffered_domain_ids_.get_data()
-                               || nullptr == buffered_relevances_.get_data())))) {
-    return OB_ERR_UNEXPECTED;
-  }
-  // These fixed arrays are allocated during iterator initialization and do not
-  // resize while a batch is processed. Validate their bounds once per batch
-  // rather than repeating the fixed-array access checks for each posting.
-  const ObDatum **domain_ids = iter_domain_ids_.get_data();
-  ObDocIdExt *output_ids = buffered_domain_ids_.get_data();
-  double *output_relevances = buffered_relevances_.get_data();
   const bool integer_ids = iter_param_->id_proj_expr_->datum_meta_.type_ == common::ObUInt64Type;
   const bool binary_ids = iter_param_->id_proj_expr_->datum_meta_.type_ == common::ObVarcharType
       && iter_param_->id_proj_expr_->datum_meta_.cs_type_ == common::CS_TYPE_BINARY;
@@ -237,8 +224,8 @@ int ObTextDaaTIter::get_next_rows(const int64_t capacity, int64_t &count)
       ret = refill_postings();
       need_refill = false;
     }
-    for (int64_t i = 0; OB_SUCC(ret) && i < dim_count; ++i) {
-      const ObDatum *id = domain_ids[i];
+    for (int64_t i = 0; OB_SUCC(ret) && i < dim_iters_->count(); ++i) {
+      const ObDatum *id = iter_domain_ids_[i];
       if (nullptr != id) {
         int64_t cmp = 1;
         if (nullptr == first) {
@@ -274,19 +261,19 @@ int ObTextDaaTIter::get_next_rows(const int64_t capacity, int64_t &count)
         // so copy the value object rather than deep-copying its generic datum
         // through the row-wise cache API for every result.
         const PostingCursor &winner = cursors_[first_item.iter_idx_];
-        output_ids[count] = winner.ids_[winner.pos_];
-        output_relevances[count] = static_cast<double>(matched);
+        buffered_domain_ids_[count] = winner.ids_[winner.pos_];
+        buffered_relevances_[count] = static_cast<double>(matched);
         ++count;
         ++input_row_cnt_;
         ++output_row_cnt_;
       }
       // Refill on the next merge round, after output IDs have been copied.
-      for (int64_t i = 0; i < dim_count; ++i) {
+      for (int64_t i = 0; i < dim_iters_->count(); ++i) {
         if (matching_dims & (uint32_t(1) << i)) {
           PostingCursor &cursor = cursors_[i];
           ++cursor.pos_;
           if (cursor.pos_ < cursor.count_) {
-            domain_ids[i] = &cursor.ids_[cursor.pos_].get_datum();
+            iter_domain_ids_[i] = &cursor.ids_[cursor.pos_].get_datum();
           } else {
             need_refill = true;
           }
