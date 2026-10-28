@@ -2115,16 +2115,6 @@ id	field	type	length	precision	nullable
 18	freeze_cnt	5	0	20	0
 19	memstore_used	5	0	20	0
 20	memstore_limit	5	0	20	0
-table oceanbase.__all_virtual_concurrency_object_pool column_count 7 table_id 11019
-select column_id id, column_name field, data_type type, data_length length, data_precision `precision`, nullable from __all_column where table_id=11019 order by column_id;
-id	field	type	length	precision	nullable
-16	free_list_name	22	1024	-1	0
-17	allocated	5	0	20	0
-18	in_use	5	0	20	0
-19	count	5	0	20	0
-20	type_size	5	0	20	0
-21	chunk_count	5	0	20	0
-22	chunk_byte_size	5	0	20	0
 table oceanbase.__all_virtual_disk_stat column_count 6 table_id 11023
 select column_id id, column_name field, data_type type, data_length length, data_precision `precision`, nullable from __all_column where table_id=11023 order by column_id;
 id	field	type	length	precision	nullable

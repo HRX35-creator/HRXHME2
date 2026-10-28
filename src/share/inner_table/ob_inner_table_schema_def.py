@@ -2979,24 +2979,7 @@ def_table_schema(
   ('memstore_limit', 'int')
   ],  )
 
-def_table_schema(
-  owner = 'fengshuo.fs',
-  table_name     = '__all_virtual_concurrency_object_pool',
-  table_id       = '11019',
-  table_type = 'VIRTUAL_TABLE',
-  gm_columns     = [],
-  rowkey_columns = [
-  ],
-
-  normal_columns = [
-  ('free_list_name', 'varchar:OB_MAX_SYS_PARAM_VALUE_LENGTH'),
-  ('allocated', 'int'),
-  ('in_use', 'int'),
-  ('count', 'int'),
-  ('type_size', 'int'),
-  ('chunk_count', 'int'),
-  ('chunk_byte_size', 'int')
-  ],  )
+# 11019: __all_virtual_concurrency_object_pool # removed
 
 # 11020: __all_virtual_sesstat # removed
 

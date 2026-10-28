@@ -40,7 +40,6 @@
 #include "observer/virtual_table/ob_information_global_status_table.h"
 #include "observer/virtual_table/ob_information_session_status_table.h"
 #include "observer/virtual_table/ob_information_kvcache_table.h"
-#include "observer/virtual_table/ob_all_concurrency_object_pool.h"
 #include "observer/virtual_table/ob_mysql_user_table.h"
 #include "observer/virtual_table/ob_mysql_db_table.h"
 #include "observer/virtual_table/ob_mysql_proc_table.h"
@@ -984,13 +983,6 @@ int ObVTIterCreator::create_vt_iter(ObVTableScanParam &params,
             } else {
               cache_table->set_addr(addr_);
               vt_iter = static_cast<ObVirtualTableIterator *>(cache_table);
-            }
-            break;
-          }
-          case OB_ALL_VIRTUAL_CONCURRENCY_OBJECT_POOL_TID: {
-            ObAllConcurrencyObjectPool *object_pool = NULL;
-            if (OB_SUCC(NEW_VIRTUAL_TABLE(ObAllConcurrencyObjectPool, object_pool))) {
-              vt_iter = static_cast<ObVirtualTableIterator *>(object_pool);
             }
             break;
           }

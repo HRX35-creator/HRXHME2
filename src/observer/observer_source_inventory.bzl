@@ -171,7 +171,6 @@ OBSERVER_UNITY_GROUPS = [
         name = "ob_server_virtual_table_0",
         language = "c++",
         srcs = [
-            "src/observer/virtual_table/ob_all_concurrency_object_pool.cpp",
             "src/observer/virtual_table/ob_all_data_type_class_table.cpp",
             "src/observer/virtual_table/ob_all_data_type_table.cpp",
             "src/observer/virtual_table/ob_all_disk_stat.cpp",
