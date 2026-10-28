@@ -170,6 +170,134 @@ int ObExprAIEmbed::cg_expr(ObExprCGCtx &expr_cg_ctx,
 
   if (OB_SUCC(ret)) {
     rt_expr.eval_func_ = ObExprAIEmbed::eval_ai_embed;
+    rt_expr.eval_batch_func_ = ObExprAIEmbed::eval_ai_embed_batch;
+  }
+  return ret;
+}
+
+int ObExprAIEmbed::eval_ai_embed_batch(const ObExpr &expr, ObEvalCtx &ctx,
+                                       const ObBitVector &skip, const int64_t batch_size)
+{
+  INIT_SUCC(ret);
+  ObDatumVector res_datums = expr.locate_expr_datumvector(ctx);
+  ObBitVector &eval_flags = expr.get_evaluated_flags(ctx);
+  ObEvalCtx::TempAllocGuard tmp_alloc_g(ctx);
+  MultimodeAlloctor temp_allocator(tmp_alloc_g.get_allocator());
+  lib::ObMallocHookAttrGuard malloc_guard(lib::ObMemAttr(N_AI_EMBED));
+
+  // Evaluate all argument batches first.
+  for (int64_t i = 0; OB_SUCC(ret) && i < expr.arg_cnt_; i++) {
+    if (OB_FAIL(expr.args_[i]->eval_batch(ctx, skip, batch_size))) {
+    }
+  }
+  if (OB_FAIL(ret)) {
+    return ret;
+  }
+
+  ObDatumVector model_datums = expr.args_[MODEL_IDX]->locate_expr_datumvector(ctx);
+  ObDatumVector content_datums = expr.args_[CONTENT_IDX]->locate_expr_datumvector(ctx);
+  ObDatumVector dim_datums;
+  if (expr.arg_cnt_ == 3) {
+    dim_datums = expr.args_[DIM_IDX]->locate_expr_datumvector(ctx);
+  }
+
+  query::ObIAiEndpointResolver *endpoint_resolver =
+      ::oceanbase::share::server_service<::oceanbase::query::ObIAiEndpointResolver>();
+  if (OB_ISNULL(endpoint_resolver)) {
+    return OB_ERR_UNEXPECTED;
+  }
+
+  // Collect the rows that actually need a model call, remembering the mapping
+  // from request position back to the original row so out-of-order handling,
+  // NULL propagation, filtering and LIMIT all stay correct.
+  ObArray<ObString> contents;
+  ObArray<int64_t> row_of_request;
+  ObString model_id;
+  int64_t dim = 0;
+  bool model_seen = false;
+  bool dim_seen = false;
+
+  for (int64_t j = 0; OB_SUCC(ret) && j < batch_size; ++j) {
+    if (skip.at(j) || eval_flags.at(j)) {
+      continue;
+    }
+    ObDatum *model_d = model_datums.at(j);
+    ObDatum *content_d = content_datums.at(j);
+    if (OB_ISNULL(model_d) || model_d->is_null() || OB_ISNULL(content_d) || content_d->is_null()) {
+      // NULL model or content propagates NULL without issuing any request.
+      res_datums.at(j)->set_null();
+      eval_flags.set(j);
+      continue;
+    }
+    if (!model_seen) {
+      model_id = model_d->get_string();
+      model_seen = true;
+      if (model_id.empty()) {
+        ret = OB_INVALID_ARGUMENT;
+        LOG_USER_ERROR(OB_INVALID_ARGUMENT, "ai_embed, model id is empty");
+      }
+    }
+    if (OB_FAIL(ret)) {
+    } else if (expr.arg_cnt_ == 3 && !dim_seen) {
+      ObDatum *dim_d = dim_datums.at(j);
+      if (OB_NOT_NULL(dim_d) && !dim_d->is_null()) {
+        dim = dim_d->get_int();
+        if (dim <= 0) {
+          ret = OB_INVALID_ARGUMENT;
+          LOG_USER_ERROR(OB_INVALID_ARGUMENT, "ai_embed, dimension parameter must be a positive integer");
+        }
+      }
+      dim_seen = true;
+    }
+    if (OB_FAIL(ret)) {
+    } else {
+      ObString content = content_d->get_string();
+      if (content.empty()) {
+        res_datums.at(j)->set_null();
+        eval_flags.set(j);
+      } else if (OB_FAIL(contents.push_back(content))) {
+      } else if (OB_FAIL(row_of_request.push_back(j))) {
+      }
+    }
+  }
+
+  if (OB_FAIL(ret) || contents.empty()) {
+    return ret;
+  }
+
+  // Build the optional dimension config.
+  ObJsonObject *config = nullptr;
+  if (dim > 0) {
+    ObJsonInt *dim_json = nullptr;
+    if (OB_FAIL(ObAIFuncJsonUtils::get_json_object(temp_allocator, config))) {
+    } else if (OB_FAIL(ObAIFuncJsonUtils::get_json_int(temp_allocator, dim, dim_json))) {
+    } else if (OB_FAIL(config->add("dimensions", dim_json))) {
+    }
+  }
+
+  ObAIFuncExprInfo *info = nullptr;
+  share::ObAiModelEndpointInfo resolved_endpoint;
+  const share::ObAiModelEndpointInfo *endpoint_info = &resolved_endpoint;
+  ObArray<ObString> results;
+  if (OB_FAIL(ret)) {
+  } else if (OB_FAIL(ObAIFuncUtils::get_ai_func_info(temp_allocator, model_id, info))) {
+  } else if (OB_FAIL(endpoint_resolver->resolve_by_model_name(model_id, temp_allocator, resolved_endpoint))) {
+  } else {
+    // One request carries all collected inputs; the provider restores request
+    // order via the per-element index, so results[i] matches contents[i].
+    ObAIFuncModel model(temp_allocator, *info, *endpoint_info);
+    if (OB_FAIL(model.call_dense_embedding_vector_v2(contents, config, results))) {
+    } else if (results.count() != contents.count()) {
+      ret = OB_ERR_UNEXPECTED;
+    } else {
+      for (int64_t k = 0; OB_SUCC(ret) && k < results.count(); k++) {
+        int64_t row = row_of_request.at(k);
+        if (OB_FAIL(ObAIFuncUtils::set_string_result(expr, ctx, *res_datums.at(row), results.at(k)))) {
+        } else {
+          eval_flags.set(row);
+        }
+      }
+    }
   }
   return ret;
 }
