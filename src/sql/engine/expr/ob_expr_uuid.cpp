@@ -35,6 +35,8 @@
 #include <linux/if_packet.h>
 #include <fcntl.h>
 #include <unistd.h>
+#else
+#include <sys/random.h>
 #endif
 #endif
 #include "sql/engine/expr/ob_expr_uuid.h"
@@ -79,6 +81,42 @@ ObUUIDNode::ObUUIDNode()
 {
   is_inited_ = false;
   (void)init();
+}
+
+/*
+ * Fill node with a synthetic UUID node from the OS CSPRNG.
+ *
+ * RFC 9562 section 6.10: a node that is not derived from a MAC address must
+ * have the multicast bit (the least significant bit of the first octet) set,
+ * so it can never collide with a real MAC address. The node is cached so that
+ * every UUID generator in the process shares the same node; it is only
+ * published after the entropy source succeeded.
+ */
+int ObUUIDNode::init_random_node(unsigned char *node)
+{
+  int ret = OB_SUCCESS;
+  static ObLatch lock;
+  static unsigned char cached_node[6];
+  static bool cached = false;
+  ObLatchWGuard guard(lock, ObLatchIds::DEFAULT_MUTEX);
+  if (OB_ISNULL(node)) {
+    ret = OB_ERR_UNEXPECTED;
+    LOG_WARN("unexpected null node", K(ret));
+  } else {
+    if (!cached) {
+      if (0 != getentropy(cached_node, sizeof(cached_node))) {
+        ret = OB_ERR_UNEXPECTED;
+        LOG_WARN("failed to read entropy for the uuid node", K(ret), K(errno));
+      } else {
+        cached_node[0] |= 0x01;  // set multicast bit, see RFC 9562 6.10
+        cached = true;
+      }
+    }
+    if (OB_SUCC(ret)) {
+      MEMCPY(node, cached_node, sizeof(cached_node));
+    }
+  }
+  return ret;
 }
 
 
@@ -199,25 +237,29 @@ int ObUUIDNode::init()
     }
   }
 #else
-  // Linux: Use ioctl to get MAC address
+  // Linux: Use ioctl to get MAC address. Interface discovery may be forbidden
+  // or may expose no usable MAC address in restricted environments (containers,
+  // sandboxes); fall back to a random node so the server can still start.
+  bool mac_addr_found = false;
+  int discovery_errno = 0;
   struct ifreq ifr;
   struct ifconf ifc;
   char buf[1024];
   int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
   if (sock == -1) {
-    ret = OB_ERR_UNEXPECTED;
-    LOG_ERROR("socket failed", K(ret), K(errno));
+    discovery_errno = errno;
+    LOG_WARN("socket failed, will use a random uuid node", K(errno));
   } else {
     ifc.ifc_len = sizeof(buf);
     ifc.ifc_buf = buf;
     if (ioctl(sock, SIOCGIFCONF, &ifc) < 0) {
-      ret = OB_ERR_UNEXPECTED;
+      discovery_errno = errno;
+      LOG_WARN("ioctl failed, SIOCGIFCONF, will use a random uuid node", K(errno));
     } else {
       ifreq *it = ifc.ifc_req;
       ifreq *end = it + (ifc.ifc_len / sizeof(ifreq));
-      bool mac_addr_found = false;
-      for (; it != end && OB_SUCC(ret); ++it) {
-        if (OB_ISNULL(it) || OB_ISNULL(it->ifr_name) || OB_ISNULL(ifr.ifr_name)) {
+      for (; it != end && !mac_addr_found; ++it) {
+        if (OB_ISNULL(it) || OB_ISNULL(it->ifr_name)) {
           continue;
         } else {
           strncpy(ifr.ifr_name, it->ifr_name, IFNAMSIZ - 1);
@@ -226,24 +268,27 @@ int ObUUIDNode::init()
               if (ioctl(sock, SIOCGIFHWADDR, &ifr) == 0) {
                 MEMCPY(mac_addr_, ifr.ifr_hwaddr.sa_data, 6);
                 mac_addr_found = true;
-                break;
               } else {
+                discovery_errno = errno;
                 LOG_WARN("ioctl failed, SIOCGIFHWADDR", K(errno), K(it->ifr_name));
               }
             }
           } else {
+            discovery_errno = errno;
             LOG_WARN("ioctl failed, SIOCGIFFLAGS", K(errno), K(it->ifr_name));
           }
         }
       }//end for
-      if (OB_FAIL(ret)) {
-      } else if (!mac_addr_found) {
-        ret = OB_ERR_UNEXPECTED;
-      } else {
-        is_inited_ = true;
-      }
     }
     close(sock);
+  }
+  if (mac_addr_found) {
+    is_inited_ = true;
+  } else if (OB_FAIL(init_random_node(mac_addr_))) {
+    LOG_WARN("failed to generate a random uuid node", K(ret), K(discovery_errno));
+  } else {
+    is_inited_ = true;
+    LOG_WARN("no usable MAC address, using a random uuid node", K(discovery_errno));
   }
 #endif
   return ret;

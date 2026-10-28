@@ -38,6 +38,7 @@ struct ObUUIDNode
 {
   ObUUIDNode();
   int init();
+  static int init_random_node(unsigned char *node);
   unsigned char mac_addr_[6];
   bool is_inited_;
 };
