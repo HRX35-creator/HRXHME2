@@ -21,6 +21,10 @@
 
 namespace oceanbase
 {
+namespace common
+{
+class ObAddr;
+}
 namespace share
 {
 
@@ -46,7 +50,9 @@ int generate_telemetry_uuid(const char *machine_id,
                             char *uuid,
                             const int64_t uuid_len);
 
-int report_telemetry(const char *reporter, const char *event_name);
+int report_telemetry(const char *reporter,
+                     const char *event_name,
+                     const common::ObAddr &self_addr);
 
 } // namespace share
 } // namespace oceanbase
