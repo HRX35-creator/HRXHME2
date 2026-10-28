@@ -215,6 +215,14 @@ int ObSortOp::process_sort()
       } else {
         sort_row_count_++;
         OZ(sort_impl_.add_row(MY_SPEC.all_exprs_, need_dump));
+        if (OB_SUCC(ret) && need_dump && MY_SPEC.prescan_enabled_) {
+          // only fall back to prescan when the sort really dumps, not when more memory is granted
+          bool dumped = false;
+          if (OB_FAIL(sort_impl_.try_extend_mem_or_dump(dumped))) {
+          } else if (!dumped) {
+            need_dump = false;
+          }
+        }
         sort_impl_.collect_memory_dump_info(op_monitor_info_);
         if (need_dump && MY_SPEC.prescan_enabled_) {
           break;
@@ -255,6 +263,14 @@ int ObSortOp::process_sort_batch()
               - input_brs->skip_->accumulate_bit_cnt(input_brs->size_);
           OZ(sort_impl_.add_batch(MY_SPEC.all_exprs_, *input_brs->skip_,
                                   input_brs->size_, need_dump));
+          if (OB_SUCC(ret) && need_dump && MY_SPEC.prescan_enabled_) {
+            // only fall back to prescan when the sort really dumps, not when more memory is granted
+            bool dumped = false;
+            if (OB_FAIL(sort_impl_.try_extend_mem_or_dump(dumped))) {
+            } else if (!dumped) {
+              need_dump = false;
+            }
+          }
           sort_impl_.collect_memory_dump_info(op_monitor_info_);
         }
         if (input_brs->end_ || (need_dump && MY_SPEC.prescan_enabled_)) {

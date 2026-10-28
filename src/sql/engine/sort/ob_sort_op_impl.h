@@ -344,6 +344,11 @@ public:
 
   int add_stored_row(const ObChunkDatumStore::StoredRow &input_row);
 
+  // need_dump() only says the current memory bound is exceeded. Do the check before_add_row()
+  // would do for the next row: extend the bound if possible, dump only otherwise.
+  // %dumped is true when rows are really dumped.
+  int try_extend_mem_or_dump(bool &dumped);
+
   virtual int sort();
 
   virtual int get_next_row(const common::ObIArray<ObExpr*> &exprs)

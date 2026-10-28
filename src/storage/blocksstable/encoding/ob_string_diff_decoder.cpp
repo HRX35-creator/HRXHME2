@@ -165,10 +165,13 @@ int ObStringDiffDecoder::batch_decode(
     if (OB_FAIL(ret)) {
     } else if (OB_ISNULL(buf = static_cast<char *>(ctx.allocator_->alloc(buf_size * row_cap)))) {
       ret = OB_ALLOCATE_MEMORY_FAILED;
-    } else {
-      for (int64_t i = 0; i < row_cap; ++i) {
-        header_->copy_string(ObStringDiffHeader::LeftToRight(), std::logical_not<uint8_t>(),
-            header_->common_data(), buf + i * buf_size);
+    } else if (row_cap > 0) {
+      // the common part is the same for every row: assemble it once, then copy the whole template,
+      // diff positions are overwritten below
+      header_->copy_string(ObStringDiffHeader::LeftToRight(), std::logical_not<uint8_t>(),
+          header_->common_data(), buf);
+      for (int64_t i = 1; i < row_cap; ++i) {
+        MEMCPY(buf + i * buf_size, buf, string_size);
       }
     }
 

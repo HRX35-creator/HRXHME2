@@ -398,6 +398,21 @@ int ObFTRangeDict::match_with_hit(const ObString &single_word,
   return last_hit.dict_->match_with_hit(single_word, last_hit, hit);
 }
 
+// Same order as ObCharset::strcmp with CS_TYPE_UTF8MB4_BIN (ob_strnncoll_mb_bin) on
+// ObFTSingleWord::get_word(): utf8 byte order is code point order, so memcmp then length.
+static OB_INLINE int utf8mb4_bin_cmp(const ObFTSingleWord &l, const ObString &r)
+{
+  // a single char is at most a few bytes, a byte loop beats a memcmp call (same unsigned order)
+  const int64_t min_len = MIN(static_cast<int64_t>(l.word_len), r.length());
+  const unsigned char *lp = reinterpret_cast<const unsigned char *>(l.word);
+  const unsigned char *rp = reinterpret_cast<const unsigned char *>(r.ptr());
+  int cmp = 0;
+  for (int64_t i = 0; 0 == cmp && i < min_len; ++i) {
+    cmp = static_cast<int>(lp[i]) - static_cast<int>(rp[i]);
+  }
+  return 0 != cmp ? cmp : static_cast<int>(l.word_len - r.length());
+}
+
 int ObFTRangeDict::find_first_char_range(const ObString &single_word, ObIFTDict *&dict) const
 {
   int ret = OB_SUCCESS;
@@ -416,14 +431,9 @@ int ObFTRangeDict::find_first_char_range(const ObString &single_word, ObIFTDict 
       found = true;
     }
   } else for (int i = 0; OB_SUCC(ret) && !found && i < range_dicts_.size(); ++i) {
-    if (ObCharset::strcmp(ObCollationType::CS_TYPE_UTF8MB4_BIN,
-                          range_dicts_[i].start_.get_word(),
-                          single_word)
-            <= 0
-        && ObCharset::strcmp(ObCollationType::CS_TYPE_UTF8MB4_BIN,
-                             range_dicts_[i].end_.get_word(),
-                             single_word)
-               >= 0) {
+    const ObFTRange &range = range_dicts_[i];
+    if (utf8mb4_bin_cmp(range.start_, single_word) <= 0
+        && utf8mb4_bin_cmp(range.end_, single_word) >= 0) {
       dict = range_dicts_[i].dict_;
       found = true;
     }

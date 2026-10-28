@@ -387,7 +387,36 @@ struct ObDatumStrCmp : public ObDefined<SupportedCollection<CS_TYPE>::defined_>
 {
   inline static int cmp(const ObDatum &l, const ObDatum &r, int &cmp_ret)
   {
-    return ObDatumStrCmpImpl::cmp(l, r, cmp_ret, CS_TYPE, WITH_END_SPACE);
+    int ret = OB_SUCCESS;
+    const bool ptr_valid = (nullptr != l.ptr_ || 0 == l.len_) && (nullptr != r.ptr_ || 0 == r.len_);
+    if (OB_UNLIKELY(!ptr_valid)) {
+      ret = ObDatumStrCmpImpl::cmp(l, r, cmp_ret, CS_TYPE, WITH_END_SPACE);
+    } else if (CS_TYPE_BINARY == CS_TYPE) {
+      // same as ob_strnncollsp_binary: raw bytes, then length, end space ignored
+      const uint32_t min_len = MIN(l.len_, r.len_);
+      const int mem_ret = 0 == min_len ? 0 : MEMCMP(l.ptr_, r.ptr_, min_len);
+      if (0 != mem_ret) {
+        cmp_ret = mem_ret > 0 ? 1 : -1;
+      } else {
+        cmp_ret = l.len_ > r.len_ ? 1 : (l.len_ < r.len_ ? -1 : 0);
+      }
+    } else if (l.len_ == r.len_ && (l.ptr_ == r.ptr_ || 0 == l.len_ || 0 == MEMCMP(l.ptr_, r.ptr_, l.len_))) {
+      // identical bytes are equal under every collation, skip the per-char weight decoding
+      cmp_ret = 0;
+    } else {
+      // pointers are checked above and the collation is fixed, so call the collation directly
+      // instead of ObCharset::strcmpsp re-validating arguments on every compare
+      const ObCharsetInfo *cs = ObCharset::get_charset(CS_TYPE);
+      if (OB_LIKELY(nullptr != cs && nullptr != cs->coll)) {
+        const int res = cs->coll->strnncollsp(cs,
+            reinterpret_cast<const unsigned char *>(l.ptr_), l.len_,
+            reinterpret_cast<const unsigned char *>(r.ptr_), r.len_, WITH_END_SPACE);
+        cmp_ret = res > 0 ? 1 : (res < 0 ? -1 : 0);
+      } else {
+        ret = ObDatumStrCmpImpl::cmp(l, r, cmp_ret, CS_TYPE, WITH_END_SPACE);
+      }
+    }
+    return ret;
   }
 };
 

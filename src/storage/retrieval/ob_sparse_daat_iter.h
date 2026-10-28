@@ -54,6 +54,8 @@ private:
   }
 private:
   common::ObDatumCmpFuncType cmp_func_;
+  // varbinary doc id: compare inline with the same order as the null-first binary string cmp_func_
+  bool is_binary_id_;
   // TODO: if memory lifetime of docid datum is guaranteed by dim_iters, we can use pointer to datum directly
   //       and avoid deep copy into merge heap here
   const ObFixedArray<const ObDatum *, ObIAllocator> *iter_ids_;
@@ -93,6 +95,7 @@ protected:
   virtual int cache_result(int64_t &count, const ObDatum &id_datum, const double relevance);
   virtual int project_results(const int64_t count);
   int init_merge_heap(const int64_t count);
+  bool is_bool_relevance_filter() const;
 protected:
   ObIAllocator *iter_allocator_;
   ObSparseRetrievalMergeParam *iter_param_;
@@ -106,6 +109,8 @@ protected:
   ObFixedArray<int64_t, ObIAllocator> next_round_iter_idxes_;
   int64_t next_round_cnt_;
   void (*set_datum_func_)(ObDatum &, const ObDocIdExt &);
+  // filter is exactly BOOL(relevance), decided without evaluating the expr per row
+  bool bool_relevance_filter_;
 private:
   DISALLOW_COPY_AND_ASSIGN(ObSRDaaTIterImpl);
 };

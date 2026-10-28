@@ -173,12 +173,31 @@ bool ObUnicodeBlockUtils::is_unicode_cn_number(ob_wc_t unicode)
       OB_IK_GET_NUMBER_UNICODE("億"), OB_IK_GET_NUMBER_UNICODE("兆"),
       OB_IK_GET_NUMBER_UNICODE("卅"), OB_IK_GET_NUMBER_UNICODE("廿"),
   };
-  for (int i = 0; i < sizeof(cn_number_array) / sizeof(cn_number_array[0]); i++) {
-    if (unicode == cn_number_array[i]) {
-      return true;
+  static const int64_t cn_number_cnt = sizeof(cn_number_array) / sizeof(cn_number_array[0]);
+  // called for every char by the ik tokenizer: test a bmp bitmap instead of scanning the array
+  constexpr int64_t BMP_SIZE = 0x10000;
+  struct CnNumberBitmap
+  {
+    uint64_t bits_[BMP_SIZE / 64];
+    CnNumberBitmap(const ob_wc_t *arr, const int64_t cnt) : bits_()
+    {
+      for (int64_t i = 0; i < cnt; ++i) {
+        if (arr[i] < BMP_SIZE) {
+          bits_[arr[i] / 64] |= (1ULL << (arr[i] % 64));
+        }
+      }
+    }
+  };
+  static const CnNumberBitmap bitmap(cn_number_array, cn_number_cnt);
+  bool found = false;
+  if (unicode < BMP_SIZE) {
+    found = 0 != (bitmap.bits_[unicode / 64] & (1ULL << (unicode % 64)));
+  } else {
+    for (int64_t i = 0; !found && i < cn_number_cnt; i++) {
+      found = (unicode == cn_number_array[i]);
     }
   }
-  return false;
+  return found;
 }
 
 } //  namespace storage

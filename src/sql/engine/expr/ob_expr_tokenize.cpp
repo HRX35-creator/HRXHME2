@@ -39,6 +39,56 @@ namespace oceanbase
 {
 namespace sql
 {
+namespace
+{
+// Normalizing the parser name and parser properties parses and rebuilds json on every call,
+// while the result only depends on the raw arguments. Keep the last result per thread.
+struct TokenizeParamCache
+{
+  static constexpr int64_t MAX_PROPS_LEN = 1024;
+  int64_t raw_name_len_ = -1;
+  char raw_name_[storage::OB_FT_PARSER_NAME_LENGTH];
+  int64_t name_len_ = -1;
+  char name_[storage::OB_FT_PARSER_NAME_LENGTH];
+  int64_t raw_props_len_ = -1;
+  char raw_props_[MAX_PROPS_LEN];
+  int64_t props_len_ = -1;
+  char props_[MAX_PROPS_LEN];
+};
+
+thread_local TokenizeParamCache tokenize_param_cache;
+
+bool cache_equal(const ObString &str, const char *buf, const int64_t len)
+{
+  return len >= 0 && len == str.length() && (0 == len || 0 == MEMCMP(buf, str.ptr(), len));
+}
+
+void cache_store(const ObString &str, char *buf, const int64_t cap, int64_t &len)
+{
+  if (str.length() < cap) {
+    MEMCPY(buf, str.ptr(), str.length());
+    len = str.length();
+  } else {
+    len = -1;
+  }
+}
+
+int cache_copy_out(ObIAllocator &allocator, const char *buf, const int64_t len, const int64_t buf_size,
+                   ObString &out)
+{
+  int ret = OB_SUCCESS;
+  char *ptr = nullptr;
+  if (OB_ISNULL(ptr = static_cast<char *>(allocator.alloc(buf_size)))) {
+    ret = OB_ALLOCATE_MEMORY_FAILED;
+  } else {
+    MEMCPY(ptr, buf, len);
+    ptr[len] = '\0';
+    out.assign_ptr(ptr, static_cast<int32_t>(len));
+  }
+  return ret;
+}
+} // namespace
+
 ObExprTokenize::ObExprTokenize(common::ObIAllocator &alloc)
     : ObStringExprOperator(alloc,
                            T_FUN_TOKENIZE,
@@ -212,7 +262,24 @@ int ObExprTokenize::parse_param(const ObExpr &expr,
   } else if (OB_FAIL(parse_fulltext(expr, ctx, param))) {
   } else if (OB_FAIL(parse_parser_name(expr, ctx, param))) {
   } else if (OB_FAIL(parse_parser_properties(expr, ctx, temp_allocator, param))) {
-  } else if (OB_FAIL(param.reform_parser_properties(param.properties_))) {
+  } else {
+    TokenizeParamCache &cache = tokenize_param_cache;
+    const ObString raw_props = param.properties_;
+    if (cache_equal(param.parser_name_, cache.name_, cache.name_len_)
+        && cache_equal(raw_props, cache.raw_props_, cache.raw_props_len_)
+        && cache.props_len_ >= 0) {
+      ret = cache_copy_out(param.allocator_, cache.props_, cache.props_len_, cache.props_len_ + 1,
+                           param.properties_);
+    } else if (OB_FAIL(param.reform_parser_properties(raw_props))) {
+    } else {
+      cache_store(raw_props, cache.raw_props_, TokenizeParamCache::MAX_PROPS_LEN, cache.raw_props_len_);
+      cache_store(param.properties_, cache.props_, TokenizeParamCache::MAX_PROPS_LEN, cache.props_len_);
+      if (cache.raw_props_len_ < 0 || cache.props_len_ < 0) {
+        cache.props_len_ = -1;
+      }
+    }
+  }
+  if (OB_FAIL(ret)) {
   } else if (OB_FAIL(param.try_load_dictionary_for_ik())) {
   }
   return ret;
@@ -331,9 +398,21 @@ int ObExprTokenize::parse_parser_name(const ObExpr &expr, ObEvalCtx &ctx, Tokeni
     }
   }
 
+  TokenizeParamCache &cache = tokenize_param_cache;
   if (OB_FAIL(ret)) {
     // already logged
+  } else if (cache_equal(raw_parser_name, cache.raw_name_, cache.raw_name_len_) && cache.name_len_ >= 0) {
+    ret = cache_copy_out(param.allocator_, cache.name_, cache.name_len_,
+                         storage::OB_FT_PARSER_NAME_LENGTH, param.parser_name_);
   } else if (OB_FAIL(construct_ft_parser_inner_name(raw_parser_name, param))) {
+  } else {
+    // cached properties belong to the previous parser name
+    cache.props_len_ = -1;
+    cache_store(raw_parser_name, cache.raw_name_, storage::OB_FT_PARSER_NAME_LENGTH, cache.raw_name_len_);
+    cache_store(param.parser_name_, cache.name_, storage::OB_FT_PARSER_NAME_LENGTH, cache.name_len_);
+    if (cache.raw_name_len_ < 0 || cache.name_len_ < 0) {
+      cache.name_len_ = -1;
+    }
   }
 
   return ret;

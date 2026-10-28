@@ -1,0 +1,254 @@
+drop database if exists fts_hot_path;
+create database fts_hot_path;
+use fts_hot_path;
+set ob_query_timeout = 10000000000;
+result_format: 4
+select tokenize('中华人民共和国人民大会堂是著名地标', 'ik');
++-------------------------------------------------------------------------+
+| tokenize('中华人民共和国人民大会堂是著名地标', 'ik')                    |
++-------------------------------------------------------------------------+
+| ["著名", "人民大会堂", "地标", "是", "中华人民共和国"]                  |
++-------------------------------------------------------------------------+
+select tokenize('中华人民共和国人民大会堂是著名地标', 'ik', '[{"additional_args":[{"ik_mode":"max_word"}]}]');
++--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| tokenize('中华人民共和国人民大会堂是著名地标', 'ik', '[{"additional_args":[{"ik_mode":"max_word"}]}]')                                                                                                                               |
++--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| ["大会", "著名", "人民大会堂", "大会堂", "共和国", "人民大会", "人民共和国", "中华人民", "共和", "地标", "是", "会堂", "中华", "中华人民共和国", "名地", "国人", "华人", "人民"]                                                     |
++--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+select tokenize('中华人民共和国人民大会堂是著名地标', 'ik');
++-------------------------------------------------------------------------+
+| tokenize('中华人民共和国人民大会堂是著名地标', 'ik')                    |
++-------------------------------------------------------------------------+
+| ["著名", "人民大会堂", "地标", "是", "中华人民共和国"]                  |
++-------------------------------------------------------------------------+
+select tokenize('The quick brown fox jumps over the lazy dog', 'beng', '[{"additional_args":[{"min_token_size":4}]}]');
++-----------------------------------------------------------------------------------------------------------------+
+| tokenize('The quick brown fox jumps over the lazy dog', 'beng', '[{"additional_args":[{"min_token_size":4}]}]') |
++-----------------------------------------------------------------------------------------------------------------+
+| ["lazy", "over", "quick", "brown", "jumps"]                                                                     |
++-----------------------------------------------------------------------------------------------------------------+
+select tokenize('The quick brown fox jumps over the lazy dog', 'beng');
++-----------------------------------------------------------------+
+| tokenize('The quick brown fox jumps over the lazy dog', 'beng') |
++-----------------------------------------------------------------+
+| ["lazy", "over", "quick", "dog", "brown", "fox", "jumps"]       |
++-----------------------------------------------------------------+
+select tokenize('The quick brown fox jumps over the lazy dog', ' beng ');
++-------------------------------------------------------------------+
+| tokenize('The quick brown fox jumps over the lazy dog', ' beng ') |
++-------------------------------------------------------------------+
+| ["lazy", "over", "quick", "dog", "brown", "fox", "jumps"]         |
++-------------------------------------------------------------------+
+select tokenize('The quick brown fox jumps over the lazy dog', 'space');
++------------------------------------------------------------------+
+| tokenize('The quick brown fox jumps over the lazy dog', 'space') |
++------------------------------------------------------------------+
+| ["lazy", "over", "quick", "dog", "brown", "fox", "jumps"]        |
++------------------------------------------------------------------+
+select tokenize('The quick brown fox jumps over the lazy dog', 'ngram', '[{"additional_args":[{"ngram_token_size":3}]}]');
++--------------------------------------------------------------------------------------------------------------------+
+| tokenize('The quick brown fox jumps over the lazy dog', 'ngram', '[{"additional_args":[{"ngram_token_size":3}]}]') |
++--------------------------------------------------------------------------------------------------------------------+
+| ["qui", "ver", "ump", "row", "jum", "bro", "laz", "azy", "dog", "own", "mps", "ick", "ove", "fox", "uic", "the"]   |
++--------------------------------------------------------------------------------------------------------------------+
+select tokenize('The quick brown fox jumps over the lazy dog', 'ngram');
++--------------------------------------------------------------------------------------------------------------------------------------------------+
+| tokenize('The quick brown fox jumps over the lazy dog', 'ngram')                                                                                 |
++--------------------------------------------------------------------------------------------------------------------------------------------------+
+| ["th", "ox", "fo", "ju", "he", "ov", "ow", "ck", "ve", "ps", "wn", "ic", "zy", "er", "mp", "og", "br", "ui", "la", "um", "az", "ro", "qu", "do"] |
++--------------------------------------------------------------------------------------------------------------------------------------------------+
+select tokenize('The quick brown fox jumps', 'beng', '[{"output":"all"}]');
++----------------------------------------------------------------------------------+
+| tokenize('The quick brown fox jumps', 'beng', '[{"output":"all"}]')              |
++----------------------------------------------------------------------------------+
+| {"tokens": [{"quick": 1}, {"brown": 1}, {"fox": 1}, {"jumps": 1}], "doc_len": 4} |
++----------------------------------------------------------------------------------+
+
+select tokenize('abc', 'nosuchparser');
+ERROR HY000: Function nosuchparser is not defined
+select tokenize('abc', 'beng', '[{"additional_args":[{"min_token_size":"x"}]}]');
+ERROR HY000: Incorrect arguments to the min_token_size must be in [1, 16]
+select tokenize('abc def', 'beng');
++-----------------------------+
+| tokenize('abc def', 'beng') |
++-----------------------------+
+| ["def", "abc"]              |
++-----------------------------+
+
+select tokenize('数据库 数据库 数据库 全文索引 全文索引', 'ik', '[{"output":"all"}]');
++-------------------------------------------------------------------------------------------------+
+| tokenize('数据库 数据库 数据库 全文索引 全文索引', 'ik', '[{"output":"all"}]')                  |
++-------------------------------------------------------------------------------------------------+
+| {"tokens": [{"数据库": 3}, {"全文索引": 2}], "doc_len": 5}                                      |
++-------------------------------------------------------------------------------------------------+
+select tokenize('Database DATABASE database the THE The an AND of OF Of', 'beng', '[{"output":"all"}]');
++--------------------------------------------------------------------------------------------------+
+| tokenize('Database DATABASE database the THE The an AND of OF Of', 'beng', '[{"output":"all"}]') |
++--------------------------------------------------------------------------------------------------+
+| {"tokens": [{"database": 3}, {"and": 1}], "doc_len": 4}                                          |
++--------------------------------------------------------------------------------------------------+
+select tokenize('Ünïcödé ÀÉÎÕÜ straße STRASSE resume résumé', 'beng', '[{"output":"all"}]');
++--------------------------------------------------------------------------------------------------------------------+
+| tokenize('Ünïcödé ÀÉÎÕÜ straße STRASSE resume résumé', 'beng', '[{"output":"all"}]')                               |
++--------------------------------------------------------------------------------------------------------------------+
+| {"tokens": [{"straße": 1}, {"àéîõü": 1}, {"strasse": 1}, {"résumé": 2}, {"ünïcödé": 1}], "doc_len": 6}             |
++--------------------------------------------------------------------------------------------------------------------+
+
+select tokenize('三千五百个苹果和2024年10月27日的１２３个ＡＢＣ，Hello-World foo_bar 😀 𠀀𠀁', 'ik');
++---------------------------------------------------------------------------------------------------------------------------------+
+| tokenize('三千五百个苹果和2024年10月27日的１２３个ＡＢＣ，Hello-World foo_bar 😀 𠀀𠀁', 'ik')                                         |
++---------------------------------------------------------------------------------------------------------------------------------+
+| ["三千五百个", "10月", "和", "苹果", "ａｂｃ", "hello-world", "27日", "的", "１２３个", "foo_bar", "2024年"]                    |
++---------------------------------------------------------------------------------------------------------------------------------+
+select tokenize('倒排索引与检索系统设计，搜索引擎召回率调优笔记，日志系统内存池化设计', 'ik');
++------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| tokenize('倒排索引与检索系统设计，搜索引擎召回率调优笔记，日志系统内存池化设计', 'ik')                                                                     |
++------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| ["检索系统", "倒排", "笔记", "池", "索引", "率", "调", "与", "化", "召回", "优", "设计", "系统", "搜索引擎", "内存", "日志"]                               |
++------------------------------------------------------------------------------------------------------------------------------------------------------------+
+select tokenize('', 'ik');
++--------------------+
+| tokenize('', 'ik') |
++--------------------+
+| []                 |
++--------------------+
+select tokenize(NULL, 'beng');
++------------------------+
+| tokenize(NULL, 'beng') |
++------------------------+
+| []                     |
++------------------------+
+
+create table docs (
+  id bigint primary key,
+  title varchar(256) not null,
+  content text not null,
+  fulltext index fti_ik (title, content) with parser ik,
+  fulltext index fti_beng (content) with parser beng
+);
+insert into docs values (1, '全文索引', 'Database database DATABASE résumé resume');
+insert into docs values (2, '全文索引 分词器', 'Full-text search, full TEXT search');
+insert into docs values (3, '倒排索引', 'Inverted index build performance');
+insert into docs values (4, '分词器热路径', 'tokenizer hot path, TOKENIZER Hot Path');
+insert into docs values (5, '数据库性能', 'database performance audit');
+insert into docs values (6, '停用词', 'the and of an a');
+insert into docs values (7, '全文索引 全文索引 全文索引', 'zzz');
+insert into docs values (8, 'OceanBase 稳定', 'OceanBase is a stable database');
+create table docs2 like docs;
+insert into docs2 select * from docs;
+alter table docs2 drop index fti_ik;
+alter table docs2 drop index fti_beng;
+alter table docs2 add fulltext index fti_ik (title, content) with parser ik;
+alter table docs2 add fulltext index fti_beng (content) with parser beng;
+
+select id from docs where match(title, content) against('全文索引') order by id;
++----+
+| id |
++----+
+|  1 |
+|  2 |
+|  7 |
++----+
+select id from docs2 where match(title, content) against('全文索引') order by id;
++----+
+| id |
++----+
+|  1 |
+|  2 |
+|  7 |
++----+
+select id from docs where match(content) against('database') order by id;
++----+
+| id |
++----+
+|  1 |
+|  5 |
+|  8 |
++----+
+select id from docs2 where match(content) against('DATABASE') order by id;
++----+
+| id |
++----+
+|  1 |
+|  5 |
+|  8 |
++----+
+select id from docs2 where match(content) against('resume') order by id;
++----+
+| id |
++----+
+|  1 |
++----+
+select id from docs2 where match(content) against('Résumé') order by id;
++----+
+| id |
++----+
+|  1 |
++----+
+select count(*) from docs2 where match(content) against('tokenizer hot path');
++----------+
+| count(*) |
++----------+
+|        1 |
++----------+
+select count(*) from docs2 where match(content) against('the and of');
++----------+
+| count(*) |
++----------+
+|        1 |
++----------+
+select count(*) from docs2 where match(content) against('zzzznotaword');
++----------+
+| count(*) |
++----------+
+|        0 |
++----------+
+select count(*) from docs2 where match(title, content) against('OceanBase 稳定 database');
++----------+
+| count(*) |
++----------+
+|        3 |
++----------+
+select count(*) from (select id from docs2 where match(title, content) against('全文索引 分词器') limit 2) t;
++----------+
+| count(*) |
++----------+
+|        2 |
++----------+
+select id from docs2 where match(title, content) against('全文索引 分词器') and id > 1 order by id;
++----+
+| id |
++----+
+|  2 |
+|  4 |
+|  7 |
++----+
+select id from docs2 where match(content) against('+database -audit' in boolean mode) order by id;
++----+
+| id |
++----+
+|  1 |
+|  8 |
++----+
+select id, round(match(title, content) against('全文索引 分词器'), 6) as s from docs2
+  where match(title, content) against('全文索引 分词器') order by s desc, id;
++----+----------+
+| id | s        |
++----+----------+
+|  2 | 1.604400 |
+|  4 | 0.996268 |
+|  7 | 0.815055 |
+|  1 | 0.515216 |
++----+----------+
+select id, round(match(title, content) against('全文索引 分词器'), 6) as s from docs
+  where match(title, content) against('全文索引 分词器') order by s desc, id;
++----+----------+
+| id | s        |
++----+----------+
+|  2 | 1.604400 |
+|  4 | 0.996268 |
+|  7 | 0.815055 |
+|  1 | 0.515216 |
++----+----------+
+
+drop database fts_hot_path;

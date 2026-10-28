@@ -1,0 +1,87 @@
+# owner: ll3me
+# owner group: storage
+# description: regression for fulltext hot path changes: tokenize param reuse, word grouping,
+#              stopword lookup, ik dict range lookup, sort key compare, BOOL(relevance) pushdown filter.
+
+--disable_warnings
+drop database if exists fts_hot_path;
+create database fts_hot_path;
+use fts_hot_path;
+set ob_query_timeout = 10000000000;
+--enable_warnings
+
+--result_format 4
+
+# tokenize: parser name and properties change between calls on the same session
+select tokenize('中华人民共和国人民大会堂是著名地标', 'ik');
+select tokenize('中华人民共和国人民大会堂是著名地标', 'ik', '[{"additional_args":[{"ik_mode":"max_word"}]}]');
+select tokenize('中华人民共和国人民大会堂是著名地标', 'ik');
+select tokenize('The quick brown fox jumps over the lazy dog', 'beng', '[{"additional_args":[{"min_token_size":4}]}]');
+select tokenize('The quick brown fox jumps over the lazy dog', 'beng');
+select tokenize('The quick brown fox jumps over the lazy dog', ' beng ');
+select tokenize('The quick brown fox jumps over the lazy dog', 'space');
+select tokenize('The quick brown fox jumps over the lazy dog', 'ngram', '[{"additional_args":[{"ngram_token_size":3}]}]');
+select tokenize('The quick brown fox jumps over the lazy dog', 'ngram');
+select tokenize('The quick brown fox jumps', 'beng', '[{"output":"all"}]');
+
+# errors are not remembered, the next valid call still works
+--error 1128
+select tokenize('abc', 'nosuchparser');
+--error 1210
+select tokenize('abc', 'beng', '[{"additional_args":[{"min_token_size":"x"}]}]');
+select tokenize('abc def', 'beng');
+
+# word grouping and stopwords: repeated words, mixed case, accents
+select tokenize('数据库 数据库 数据库 全文索引 全文索引', 'ik', '[{"output":"all"}]');
+select tokenize('Database DATABASE database the THE The an AND of OF Of', 'beng', '[{"output":"all"}]');
+select tokenize('Ünïcödé ÀÉÎÕÜ straße STRASSE resume résumé', 'beng', '[{"output":"all"}]');
+
+# ik dict ranges: cjk, quantifiers, full width, letters, surrogates
+select tokenize('三千五百个苹果和2024年10月27日的１２３个ＡＢＣ，Hello-World foo_bar 😀 𠀀𠀁', 'ik');
+select tokenize('倒排索引与检索系统设计，搜索引擎召回率调优笔记，日志系统内存池化设计', 'ik');
+select tokenize('', 'ik');
+select tokenize(NULL, 'beng');
+
+# index build: many duplicated words, case and accent variants sort into the same groups
+create table docs (
+  id bigint primary key,
+  title varchar(256) not null,
+  content text not null,
+  fulltext index fti_ik (title, content) with parser ik,
+  fulltext index fti_beng (content) with parser beng
+);
+insert into docs values (1, '全文索引', 'Database database DATABASE résumé resume');
+insert into docs values (2, '全文索引 分词器', 'Full-text search, full TEXT search');
+insert into docs values (3, '倒排索引', 'Inverted index build performance');
+insert into docs values (4, '分词器热路径', 'tokenizer hot path, TOKENIZER Hot Path');
+insert into docs values (5, '数据库性能', 'database performance audit');
+insert into docs values (6, '停用词', 'the and of an a');
+insert into docs values (7, '全文索引 全文索引 全文索引', 'zzz');
+insert into docs values (8, 'OceanBase 稳定', 'OceanBase is a stable database');
+create table docs2 like docs;
+insert into docs2 select * from docs;
+alter table docs2 drop index fti_ik;
+alter table docs2 drop index fti_beng;
+alter table docs2 add fulltext index fti_ik (title, content) with parser ik;
+alter table docs2 add fulltext index fti_beng (content) with parser beng;
+
+# MATCH with the pushed down BOOL(relevance) filter, on indexes built at create and afterwards
+select id from docs where match(title, content) against('全文索引') order by id;
+select id from docs2 where match(title, content) against('全文索引') order by id;
+select id from docs where match(content) against('database') order by id;
+select id from docs2 where match(content) against('DATABASE') order by id;
+select id from docs2 where match(content) against('resume') order by id;
+select id from docs2 where match(content) against('Résumé') order by id;
+select count(*) from docs2 where match(content) against('tokenizer hot path');
+select count(*) from docs2 where match(content) against('the and of');
+select count(*) from docs2 where match(content) against('zzzznotaword');
+select count(*) from docs2 where match(title, content) against('OceanBase 稳定 database');
+select count(*) from (select id from docs2 where match(title, content) against('全文索引 分词器') limit 2) t;
+select id from docs2 where match(title, content) against('全文索引 分词器') and id > 1 order by id;
+select id from docs2 where match(content) against('+database -audit' in boolean mode) order by id;
+select id, round(match(title, content) against('全文索引 分词器'), 6) as s from docs2
+  where match(title, content) against('全文索引 分词器') order by s desc, id;
+select id, round(match(title, content) against('全文索引 分词器'), 6) as s from docs
+  where match(title, content) against('全文索引 分词器') order by s desc, id;
+
+drop database fts_hot_path;

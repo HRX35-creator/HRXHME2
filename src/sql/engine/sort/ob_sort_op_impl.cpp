@@ -1070,6 +1070,27 @@ int ObSortOpImpl::preprocess_dump(bool &dumped)
   return ret;
 }
 
+int ObSortOpImpl::try_extend_mem_or_dump(bool &dumped)
+{
+  int ret = OB_SUCCESS;
+  dumped = false;
+  if (!is_inited()) {
+    ret = OB_NOT_INIT;
+  } else if (rows_->empty() || !config::enable_sql_operator_dump()) {
+    // before_add_row() never dumps in this case either
+  } else if (rows_->count() >= MAX_ROW_CNT) {
+    if (OB_FAIL(do_dump())) {
+    } else {
+      dumped = true;
+    }
+  } else if (need_dump()) {
+    if (OB_FAIL(preprocess_dump(dumped))) {
+    } else if (dumped && OB_FAIL(do_dump())) {
+    }
+  }
+  return ret;
+}
+
 int ObSortOpImpl::before_add_row()
 {
   int ret = OB_SUCCESS;
