@@ -1,0 +1,18 @@
+# Regression: a column name that contains a backtick must be escaped when the
+# generated vector index DDL refers to that column.
+#
+# The generated default value expression of the vector index type column used
+# to embed the raw column name:
+#   SELECT VEC_TYPE(`v`x`) FROM DUAL
+# which is a syntax error, so creating the vector index failed with
+# ER_PARSE_ERROR (1064). The column name has to be escaped instead:
+#   SELECT VEC_TYPE(`v``x`) FROM DUAL
+
+SET ob_query_timeout = 20000000;
+SET ob_trx_timeout = 60000000;
+CREATE DATABASE `seekdb_backtick_identifier`;
+USE `seekdb_backtick_identifier`;
+CREATE TABLE `t_backtick` (`id` INT PRIMARY KEY, `v``x` VECTOR(3),
+VECTOR INDEX `idx`(`v``x`) WITH (distance=l2,type=hnsw,lib=vsag));
+INSERT INTO `t_backtick` VALUES (1,'[1,0,0]'),(2,'[0,1,0]'),(3,'[0,0,1]');
+SELECT `id` FROM `t_backtick` ORDER BY `id`;

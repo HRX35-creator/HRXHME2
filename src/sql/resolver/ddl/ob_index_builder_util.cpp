@@ -16,6 +16,7 @@
 
 #define USING_LOG_PREFIX SHARE
 #include "ob_index_builder_util.h"
+#include "share/ob_share_util.h"
 #include "sql/resolver/ddl/ob_fts_index_builder_util.h"
 #include "sql/resolver/ddl/ob_vec_index_builder_util.h"
 
@@ -801,6 +802,8 @@ int ObIndexBuilderUtil::generate_prefix_column(
   ObColumnSchemaV2 prefix_column;
   char col_name_buf[OB_MAX_COLUMN_NAMES_LENGTH] = {'\0'};
   SMART_VAR(char[OB_MAX_DEFAULT_VALUE_LENGTH], expr_def) {
+    ObArenaAllocator tmp_alloc;
+    ObString escaped_column_name;
     MEMSET(expr_def, 0, sizeof(expr_def));
     int64_t name_pos = 0;
     int64_t def_pos = 0;
@@ -827,8 +830,15 @@ int ObIndexBuilderUtil::generate_prefix_column(
               sort_item.column_name_.length(), sort_item.column_name_.ptr());
         }
       }
-    } else if (OB_FAIL(databuff_printf(expr_def, OB_MAX_DEFAULT_VALUE_LENGTH, def_pos, "SUBSTR(`%s`, 1, %d)",
-                                       old_column->get_column_name(), sort_item.prefix_len_))) {
+    } else if (OB_FAIL(share::ObShareUtil::escape_identifier(
+         tmp_alloc,
+         ObString::make_string(old_column->get_column_name()),
+         escaped_column_name))) {
+    } else if (OB_FAIL(databuff_printf(expr_def, OB_MAX_DEFAULT_VALUE_LENGTH, def_pos,
+                                       "SUBSTR(`%.*s`, 1, %d)",
+                                       static_cast<int>(escaped_column_name.length()),
+                                       escaped_column_name.ptr(),
+                                       sort_item.prefix_len_))) {
     } else {
       ObObj default_value;
       default_value.set_varchar(expr_def, static_cast<int32_t>(def_pos));

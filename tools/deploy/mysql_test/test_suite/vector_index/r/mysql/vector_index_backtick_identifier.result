@@ -1,0 +1,12 @@
+SET ob_query_timeout = 20000000;
+SET ob_trx_timeout = 60000000;
+CREATE DATABASE `seekdb_backtick_identifier`;
+USE `seekdb_backtick_identifier`;
+CREATE TABLE `t_backtick` (`id` INT PRIMARY KEY, `v``x` VECTOR(3),
+VECTOR INDEX `idx`(`v``x`) WITH (distance=l2,type=hnsw,lib=vsag));
+INSERT INTO `t_backtick` VALUES (1,'[1,0,0]'),(2,'[0,1,0]'),(3,'[0,0,1]');
+SELECT `id` FROM `t_backtick` ORDER BY `id`;
+id
+1
+2
+3
