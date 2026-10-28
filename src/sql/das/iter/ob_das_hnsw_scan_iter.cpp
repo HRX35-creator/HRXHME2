@@ -698,12 +698,13 @@ bool ObDASHNSWScanIter::is_parallel_with_block_granule()
   return expected_worker_cnt > 1 && is_block_granule_type;
 }
 
-int ObDASHNSWScanIter::check_iter_filter_need_retry()
+int ObDASHNSWScanIter::check_iter_filter_need_retry(bool is_search_end)
 {
   int ret = OB_SUCCESS;
-  double iter_selectivity = double(adaptive_ctx_.iter_res_row_cnt_) /  double(adaptive_ctx_.iter_filter_row_cnt_);
-  double output_row_cnt = iter_selectivity * adaptive_ctx_.row_count_;
-  if (adaptive_ctx_.iter_times_ > 2) {
+  if (adaptive_ctx_.iter_filter_row_cnt_ > 0
+      && (adaptive_ctx_.iter_times_ > 2 || is_search_end)) {
+    double iter_selectivity = double(adaptive_ctx_.iter_res_row_cnt_) / double(adaptive_ctx_.iter_filter_row_cnt_);
+    double output_row_cnt = iter_selectivity * adaptive_ctx_.row_count_;
     if (adaptive_ctx_.is_primary_index_) {
       ret = (output_row_cnt <= ObVecIdxExtraInfo::MAX_HNSW_PRE_ROW_CNT_WITH_ROWKEY
             && iter_selectivity < ObVecIdxExtraInfo::DEFAULT_PRE_RATE_FILTER_WITH_ROWKEY) ?
@@ -741,24 +742,27 @@ int ObDASHNSWScanIter::reset_filter_path()
   int ret = OB_SUCCESS;
   ObPhysicalPlanCtx *plan_ctx = GET_PHY_PLAN_CTX(*exec_ctx_);
   ObPlanStat* plan_stat = nullptr;
-  if (OB_ISNULL(plan_ctx->get_phy_plan())) {
-    // remote scan, phy plan is null, do nothing, just use try path in ctdef
-  } else if (OB_FALSE_IT(plan_stat = const_cast<ObPlanStat*>(&(plan_ctx->get_phy_plan()->stat_)))) {
-  } else if (vec_idx_try_path_ == ObVecIdxAdaTryPath::VEC_INDEX_PRE_FILTER) {
+  if (OB_NOT_NULL(plan_ctx->get_phy_plan())) {
+    plan_stat = const_cast<ObPlanStat*>(&(plan_ctx->get_phy_plan()->stat_));
+  }
+  // Remote scans have no local plan-cache feedback, but must still switch paths
+  // and discard the partial ANN result before retrying.
+  if (vec_idx_try_path_ == ObVecIdxAdaTryPath::VEC_INDEX_PRE_FILTER) {
     if (is_ipivf()) {
       vec_idx_try_path_ = ObVecIdxAdaTryPath::VEC_INDEX_POST_FILTER;
     } else {
       vec_idx_try_path_ = ObVecIdxAdaTryPath::VEC_INDEX_ITERATIVE_FILTER;
     }
   } else if (vec_idx_try_path_ == ObVecIdxAdaTryPath::VEC_INDEX_ITERATIVE_FILTER) {
-    double iter_selectivity = double(adaptive_ctx_.iter_res_row_cnt_) / double(adaptive_ctx_.iter_filter_row_cnt_);
-    adaptive_ctx_.selectivity_ = iter_selectivity;
+    if (adaptive_ctx_.iter_filter_row_cnt_ > 0) {
+      adaptive_ctx_.selectivity_ = double(adaptive_ctx_.iter_res_row_cnt_) / double(adaptive_ctx_.iter_filter_row_cnt_);
+    }
     vec_idx_try_path_ = ObVecIdxAdaTryPath::VEC_INDEX_PRE_FILTER;
   }
 
-  if (OB_FAIL(ret) || OB_ISNULL(plan_stat)) {
-  } else if (OB_FAIL(updata_vec_exec_ctx(plan_stat))) {
-  } else {
+  if (OB_NOT_NULL(plan_stat) && OB_FAIL(updata_vec_exec_ctx(plan_stat))) {
+  }
+  if (OB_SUCC(ret)) {
     query_cond_.reset();
     go_brute_force_ = false;
     can_retry_ = false;
@@ -2585,23 +2589,36 @@ int ObDASHNSWScanIter::post_query_vid_with_filter(
                         unfiltered_extra_info.is_null() ? nullptr : unfiltered_extra_info[i]))) {
         }
       } // end for
+      int total_after_add = adaptor_vid_iter_->get_total();
+      int added_cnt = total_after_add - total_before_add;
+      const bool scan_limit_reached = iter_scan_total_num > hnsw_max_iter_scan_nums
+                                     && hnsw_max_iter_scan_nums > 0;
+      if (OB_SUCC(ret)) {
+        // Count the final, possibly short ANN batch as well. Otherwise an
+        // exhausted search can bypass the adaptive fallback with too few rows.
+        adaptive_ctx_.iter_res_row_cnt_ += added_cnt;
+        adaptive_ctx_.iter_filter_row_cnt_ += unfiltered_vid_cnt;
+      }
       if (OB_FAIL(ret)) {
       } else if (tmp_adaptor_vid_iter_->get_total() < query_cond_.query_limit_
-      || (iter_scan_total_num > hnsw_max_iter_scan_nums && hnsw_max_iter_scan_nums > 0)) {
-        // res is already less than limit, no need to find again
+                 || scan_limit_reached) {
         query_cond_.query_limit_ = 0;
+        // No further ANN batch is available. A selective filter may still have
+        // matches outside the approximate candidate set. Retry pre-filtering
+        // rather than silently ending an underfilled adaptive search. Preserve
+        // the explicit scan budget and the fixed sparse-vector strategy.
+        if (can_retry_ && !is_ipivf() && !scan_limit_reached
+            && !adaptor_vid_iter_->get_enough()
+            && OB_FAIL(check_iter_filter_need_retry(true))) {
+        }
         LOG_TRACE("iteractive filter log:", K(tmp_adaptor_vid_iter_->get_total()), K(query_cond_.query_limit_), K(total_before_add), K(adaptor_vid_iter_->get_total()));
       } else if (is_ipivf()) {
         // for sparse vector index, iter filter is not supported
         query_cond_.query_limit_ = 0;
       } else {
         int64_t need_cnt_next = adaptor_vid_iter_->get_alloc_size() - adaptor_vid_iter_->get_total();
-        int total_after_add = adaptor_vid_iter_->get_total();
-        int added_cnt  = total_after_add - total_before_add;
         float old_limit = static_cast<float>(query_cond_.query_limit_);
         float old_ef = static_cast<float>(query_cond_.ef_search_);
-        adaptive_ctx_.iter_res_row_cnt_ += added_cnt;
-        adaptive_ctx_.iter_filter_row_cnt_ += unfiltered_vid_cnt;
         if (can_retry_ && OB_FAIL(check_iter_filter_need_retry())) {
         } else if (need_cnt_next > 0) {
           float need_ratio = static_cast<float>(need_cnt_next) / static_cast<float>(added_cnt);

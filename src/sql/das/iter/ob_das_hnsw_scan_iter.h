@@ -350,6 +350,8 @@ protected:
   virtual int inner_get_next_rows(int64_t &count, int64_t capacity) override;
 
 private:
+  friend class HnswFilterFallbackTest;
+
   int reuse_pre_filter_by_type();
   int build_rowkey_vid_range();
   int init_rel_map(ObPluginVectorIndexAdaptor* adaptor);
@@ -475,7 +477,7 @@ private:
                                                                  && vec_aux_ctdef_->relevance_col_cnt_ == 0;}
   bool is_parallel_with_block_granule();
   bool check_need_force_switch_run_path();
-  int check_iter_filter_need_retry();
+  int check_iter_filter_need_retry(bool is_search_end = false);
   int check_pre_filter_need_retry();
   int reset_filter_path();
   int updata_vec_exec_ctx(ObPlanStat* plan_stat);

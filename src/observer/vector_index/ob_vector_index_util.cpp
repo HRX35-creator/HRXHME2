@@ -5880,8 +5880,17 @@ int ObVectorIndexUtil::set_adaptive_try_path(ObVecIdxExtraInfo& vc_info, const b
       }
     }
   } else if (vc_info.adaptive_try_path_ == ObVecIdxAdaTryPath::VEC_PATH_UNCHOSEN) {
-    if (output_row_count <= ObVecIdxExtraInfo::MAX_HNSW_BRUTE_FORCE_SIZE) {
+    if (vc_info.row_count_ <= 0) {
+      // Index-merge paths do not supply a base-table cardinality here.
       vc_info.adaptive_try_path_ = ObVecIdxAdaTryPath::VEC_INDEX_PRE_FILTER;
+    } else if (is_primary_idx && !vc_info.can_extract_range_
+               && output_row_count <= ObVecIdxExtraInfo::MAX_HNSW_BRUTE_FORCE_SIZE) {
+      // A small result estimate does not make a full base-table scan cheap.
+      // Missing column statistics can make an all-match residual predicate look
+      // selective. Try ANN first instead of using the brute-force budget to
+      // justify a full scan. The adaptive iterator can still retry pre-filtering
+      // if too few ANN candidates pass the predicate.
+      vc_info.adaptive_try_path_ = ObVecIdxAdaTryPath::VEC_INDEX_ITERATIVE_FILTER;
     } else if (is_primary_idx) {
       vc_info.adaptive_try_path_ = (output_row_count < ObVecIdxExtraInfo::MAX_HNSW_PRE_ROW_CNT_WITH_ROWKEY
                                     && vc_info.selectivity_ <= ObVecIdxExtraInfo::DEFAULT_PRE_RATE_FILTER_WITH_ROWKEY) ?
