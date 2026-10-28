@@ -171,7 +171,7 @@ int ObLobLocatorHelper::fill_lob_locator_v2(ObDatumRow &row,
   } else {
     for (int64_t i = 0; OB_SUCC(ret) && i < row.count_; ++i) {
       blocksstable::ObStorageDatum &datum = row.storage_datums_[i];
-      ObObjMeta datum_meta = out_cols_param->at(i)->get_meta_type();
+      SqlTypeMeta datum_meta = out_cols_param->at(i)->get_meta_type();
       ObLobLocatorV2 locator;
       if (datum_meta.is_lob_storage()) {
         if (datum.is_null() || datum.is_nop()) {
@@ -205,7 +205,7 @@ int ObLobLocatorHelper::fill_lob_locator_v2(common::ObDatum &datum,
     ret = OB_NOT_INIT;
     STORAGE_LOG(WARN, "ObLobLocatorHelper is not init", K(ret), K(*this));
   } else {
-    const ObObjMeta &datum_meta = col_param.get_meta_type();
+    const SqlTypeMeta &datum_meta = col_param.get_meta_type();
     ObLobLocatorV2 locator;
     rowkey_str_.reset();
     if (!datum_meta.is_lob_storage() || datum.is_null()
