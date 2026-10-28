@@ -7,9 +7,18 @@ connection default;
 # 正确
 select ai_prompt('{0}+{1}={2} 吗？请回答true或false','1');
 
-# not support
---error 1235 
+# JSON arguments are kept as JSON values in the prompt object
 select ai_prompt('{0}+{1}={2} 吗？请回答true或false',json_object("a","1"));
+select ai_prompt('{0}|{1}',json_array("a", "b"),json_object("a", "1"));
+
+# repeated and invalid placeholders
+select ai_prompt('{0}-{0}-{1}', 'x', 'y');
+--error 1210
+select ai_prompt('{0}-{2}', 'x');
+--error 1210
+select ai_prompt('{x}', 'x');
+--error 1210
+select ai_prompt('{0', 'x');
 
 
 # 无参数
@@ -48,8 +57,7 @@ select ai_prompt(c) from t1;
 drop table t1;
 
 
-# 表达式不支持的类型 
-# test  text/blob
+# TEXT/LONGTEXT are supported; BLOB remains unsupported
 --disable_warnings
 drop table if exists t1;
 --enable_warnings
@@ -64,11 +72,9 @@ insert into t1 values(7, 'AA', 'bb', 'CC', 'dd');
 select ai_prompt(nr) from t1;
 --error 5083
 select ai_prompt(a) from t1;
---error 5083
 select ai_prompt(b) from t1;
 --error 5083
 select ai_prompt(c) from t1;
---error 5083
 select ai_prompt(d) from t1;
 
 drop table t1;
