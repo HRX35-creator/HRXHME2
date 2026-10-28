@@ -10980,8 +10980,8 @@
   "enable_file_sql": {
     "id": 10754,
     "name": "enable_file_sql",
-    "default_value": "0",
-    "base_value": "0",
+    "default_value": "False",
+    "base_value": "False",
     "data_type": "bool",
     "info": "enable reading local files (read_csv/read_json/read_parquet/glob) as tables in SQL",
     "flags": "SESSION | INFLUENCE_PLAN",
