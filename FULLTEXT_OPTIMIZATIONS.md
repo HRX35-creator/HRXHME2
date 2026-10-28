@@ -47,12 +47,14 @@ Files: `src/storage/fts/dict/ob_ft_dict_hub.{h,cpp}`,
 `ObFTDictHub::get_cached_dict()` builds each built-in dictionary once, keeps the
 pinned KV-cache handles and the `ObFTRangeDict` in a long-lived arena, and hands
 the same immutable object to every parser.  Building is guarded by a mutex so
-that concurrent first use still builds exactly once.  `ObIKFTParser` now only
-borrows these dictionaries and no longer owns/frees them.
+that concurrent first use still builds exactly once; the published pointer is
+read with an acquire load so the steady state takes no lock at all.  `ObIKFTParser`
+now only borrows these dictionaries and no longer owns/frees them.
 
 Before: per document, 3 dictionaries × (range-count KV lookups + wrapper
-allocations + vector construction).
-After: 3 pointer assignments, with a one-time build per process.
+allocations + vector construction), plus an exclusive lock on the hub for every
+fetch (which serialised parser initialisation across index-build threads).
+After: 3 acquire loads, with a one-time build per process.
 
 ### 2.2 Allocation-free token normalization
 
@@ -186,12 +188,18 @@ configuration):
 | query_beng_avg_ms | 4.8411 | 4.6593 | -3.8% |
 | query_mixed_avg_ms | 3.5731 | 3.3686 | -5.7% |
 
-Final run including the runtime filter skip (2.6), same host and configuration:
-`build_total` 28.906 s, `build_ik_all` 11.997 s, `tokenize_ik` 0.3912 ms,
-`query_cn` 2.9119 ms, `query_beng` 3.9413 ms, `query_limit` 3.5304 ms.
-The `query_mixed` sample in that run was invalidated by a backward clock jump
-(one negative sample), so the 400-query A/B table below is the reliable number
-for mixed queries.
+Final run including the runtime filter skip (2.6) and the lock-free dictionary
+fast path, same host and configuration: `build_total` 21.868 s,
+`build_ik_all` 9.735 s, `build_ik_content` 7.600 s, `tokenize_ik` 0.3086 ms,
+`query_cn` 1.9992 ms, `query_beng` 2.8765 ms, `query_limit` 3.0648 ms.
+Publishing the shared dictionaries with an atomic release store instead of
+taking `cached_dict_mutex_` on every fetch cut `build_total` from 28.9 s to
+21.9 s and `tokenize_ik` from 0.391 ms to 0.309 ms on the same host, which
+confirms that the exclusive lock was serialising parser initialisation during
+parallel index build.
+The `query_mixed` sample in the earlier run was invalidated by a backward clock
+jump (one negative sample), so the 400-query A/B table below is the reliable
+number for mixed queries.
 
 \* The optimized `tokenize_beng` value is at the SQL-loop noise floor on this
 host (the `SELECT 1` baseline in the same run was 0.3756 ms), so the BENG

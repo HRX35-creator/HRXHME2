@@ -58,7 +58,7 @@ int ObFTDictHub::destroy()
       cached.dict_ = nullptr;
     }
     cached.alloc_.reset();
-    cached.inited_ = false;
+    cached.inited_.store(false, std::memory_order_release);
   }
   return ret;
 }
@@ -134,18 +134,25 @@ int ObFTDictHub::get_cached_dict(const ObFTDictDesc &desc, ObIFTDict *&dict)
     ret = OB_NOT_SUPPORTED;
     LOG_WARN("unsupported dict type for shared cache", K(ret), K(desc.type_));
   } else {
-    lib::ObMutexGuard guard(cached_dict_mutex_);
     CachedDict &cached = cached_dicts_[slot];
-    if (OB_UNLIKELY(!is_inited_)) {
-      ret = OB_NOT_INIT;
-    } else if (!cached.inited_) {
-      if (OB_FAIL(build_cached_dict(desc, cached))) {
-      } else {
-        cached.inited_ = true;
-      }
-    }
-    if (OB_SUCC(ret)) {
+    // Fast path: dictionaries are immutable once published.  Index build runs
+    // parser initialisation on many threads, so this must not take the global
+    // mutex on every fetch.
+    if (OB_LIKELY(cached.inited_.load(std::memory_order_acquire))) {
       dict = cached.dict_;
+    } else {
+      lib::ObMutexGuard guard(cached_dict_mutex_);
+      if (OB_UNLIKELY(!is_inited_)) {
+        ret = OB_NOT_INIT;
+      } else if (!cached.inited_.load(std::memory_order_relaxed)) {
+        if (OB_FAIL(build_cached_dict(desc, cached))) {
+        } else {
+          cached.inited_.store(true, std::memory_order_release);
+        }
+      }
+      if (OB_SUCC(ret)) {
+        dict = cached.dict_;
+      }
     }
   }
   return ret;

@@ -23,6 +23,8 @@
 #include "lib/lock/ob_mutex.h"
 #include "storage/fts/dict/ob_ft_dict_def.h"
 
+#include <atomic>
+
 namespace oceanbase
 {
 namespace storage
@@ -128,7 +130,9 @@ private:
     common::ObArenaAllocator alloc_;
     ObFTCacheRangeContainer *container_;
     ObIFTDict *dict_;
-    bool inited_;
+    // Published with release semantics after the dictionary is fully built, so
+    // concurrent parser initialisation reads it without cached_dict_mutex_.
+    std::atomic<bool> inited_;
   };
 
   int get_dict_info(const ObFTDictInfoKey &key, ObFTDictInfo &info);
