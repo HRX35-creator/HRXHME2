@@ -117,6 +117,9 @@ inline bool jemalloc_enable_background_threads()
 {
 #if defined(ENABLE_SANITY)
   return jemalloc_sanity_enable_background_threads();
+#elif defined(OB_HAVE_BUNDLED_JEMALLOC) && defined(__APPLE__)
+  // Apple builds do not enable jemalloc background threads in the parent.
+  return true;
 #elif defined(OB_HAVE_BUNDLED_JEMALLOC)
   bool enabled = true;
   return 0 == je_mallctl("background_thread", nullptr, nullptr,
