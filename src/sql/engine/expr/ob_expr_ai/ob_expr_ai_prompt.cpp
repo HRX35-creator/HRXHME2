@@ -64,8 +64,7 @@ int ObExprAIPrompt::calc_result_typeN(ObExprResType &type,
       types_stack[i].set_calc_type(ObVarcharType);
       types_stack[i].set_calc_collation_type(CS_TYPE_UTF8MB4_BIN);
     } else if (ob_is_json(types_stack[i].get_type())) {
-      ret = OB_NOT_SUPPORTED;
-      LOG_USER_ERROR(OB_NOT_SUPPORTED, "json type is not supported");
+      types_stack[i].set_calc_type(ObJsonType);
     } else {
       ret = OB_ERR_INVALID_TYPE_FOR_OP;
     }
@@ -113,8 +112,18 @@ int ObExprAIPrompt::eval_ai_prompt(const ObExpr &expr, ObEvalCtx &ctx, ObDatum &
         } else if (OB_FAIL(args_array->append(arg_json_str))) {
         }
       } else if (ob_is_json(arg->datum_meta_.type_)) {
-        ret = OB_NOT_SUPPORTED;
-        LOG_USER_ERROR(OB_NOT_SUPPORTED, "json type is not supported");
+        ObIJsonBase *json_arg = nullptr;
+        bool is_null = false;
+        if (OB_FAIL(ObJsonExprHelper::get_json_doc(expr, ctx, tmp_allocator,
+                                                    static_cast<uint16_t>(i), json_arg,
+                                                    is_null, true))) {
+        } else if (is_null || OB_ISNULL(json_arg)) {
+          ret = OB_ERR_INVALID_TYPE_FOR_OP;
+        } else if (json_arg->json_type() != ObJsonNodeType::J_ARRAY
+                   && json_arg->json_type() != ObJsonNodeType::J_OBJECT) {
+          ret = OB_ERR_INVALID_TYPE_FOR_OP;
+        } else if (OB_FAIL(args_array->append(static_cast<ObJsonNode *>(json_arg)))) {
+        }
       } else if (datum->is_null()) {
         ret = OB_ERR_INVALID_TYPE_FOR_OP;
       }
