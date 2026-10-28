@@ -74,9 +74,6 @@ void ObStopWordChecker::destroy()
 int ObStopWordChecker::check_stopword(const ObFTWord &word, bool &is_stopword)
 {
   int ret = OB_SUCCESS;
-  
-  
-  common::ObArenaAllocator allocator(lib::ObMemAttr("ChkStopWord"));
   if (OB_UNLIKELY(!inited_)) {
     ret = OB_NOT_INIT;
   } else if (OB_UNLIKELY(word.empty())) {
@@ -84,13 +81,26 @@ int ObStopWordChecker::check_stopword(const ObFTWord &word, bool &is_stopword)
   } else {
     common::ObString cmp_str;
     // do nothing set out with in if type is the same.
-    if (OB_FAIL(common::ObCharset::charset_convert(
-                                       allocator,
-                                       word.get_word().get_string(),
-                                       word.get_collation_type(),
-                                       stopword_type_.get_collation_type(),
-                                       cmp_str))) {
+    const common::ObCollationType src_coll = word.get_collation_type();
+    const common::ObCollationType dst_coll = stopword_type_.get_collation_type();
+    if (common::ObCharset::is_valid_collation(src_coll)
+        && common::ObCharset::is_valid_collation(dst_coll)
+        && common::ObCharset::charset_type_by_coll(src_coll)
+               == common::ObCharset::charset_type_by_coll(dst_coll)) {
+      // the charsets are the same, the word can be looked up directly, no
+      // conversion and no temporary allocator is needed.
+      cmp_str = word.get_word().get_string();
     } else {
+      common::ObArenaAllocator allocator(lib::ObMemAttr("ChkStopWord"));
+      if (OB_FAIL(common::ObCharset::charset_convert(
+                     allocator,
+                     word.get_word().get_string(),
+                     src_coll,
+                     dst_coll,
+                     cmp_str))) {
+      }
+    }
+    if (OB_SUCC(ret)) {
       ObFTWord converted(cmp_str.length(), cmp_str.ptr(), stopword_type_);
       ret = stopword_set_.exist_refactored(converted);
       if (OB_HASH_NOT_EXIST == ret) {
