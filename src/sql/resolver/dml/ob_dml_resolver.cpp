@@ -42,6 +42,9 @@
 #include "sql/resolver/dcl/ob_dcl_resolver.h"
 #include "sql/resolver/ddl/ob_ddl_resolver.h"
 #include "sql/hybrid_search/ob_hybrid_search_executor.h"
+#include "sql/file_sql/ob_file_sql_scan_utils.h"
+
+#include <filesystem>
 
 namespace oceanbase
 {
@@ -3520,9 +3523,14 @@ int ObDMLResolver::create_function_scan_item(const TableFunctionCall &call, Tabl
   OZ (arguments->init_param_exprs(argc));
   for (int64_t i = 0; OB_SUCC(ret) && i < argc; ++i) {
     ObRawExpr *arg = nullptr;
+    const ParseNode *argument_node = call.arguments_->children_[i];
+    if (argument_node != nullptr && argument_node->type_ == T_OP_ASSIGN &&
+        argument_node->num_child_ == 2) {
+      argument_node = argument_node->children_[1];
+    }
     const bool old = params_.is_resolve_table_function_expr_;
     params_.is_resolve_table_function_expr_ = true;
-    ret = resolve_sql_expr(*call.arguments_->children_[i], arg);
+    ret = resolve_sql_expr(*argument_node, arg);
     params_.is_resolve_table_function_expr_ = old;
     OZ (arguments->add_param_expr(arg));
     OZ (arg->deduce_type(session_info_));
@@ -3600,6 +3608,68 @@ int ObDMLResolver::bind_generator_table_function(const TableFunctionCall &call, 
     OZ (ObRawExprUtils::try_add_cast_expr_above(params_.expr_factory_, session_info_, *arg, type, cast));
     if (OB_SUCC(ret)) { item->function_table_expr_->get_param_expr(0) = cast; }
     OZ (item->function_table_expr_->extract_info());
+  }
+  return ret;
+}
+
+int ObDMLResolver::bind_file_table_function(const TableFunctionCall &call, TableItem *&item)
+{
+  int ret = OB_SUCCESS;
+  if (call.arguments_ == nullptr || call.arguments_->num_child_ < 1 ||
+      call.arguments_->children_[0] == nullptr || call.arguments_->children_[0]->type_ != T_VARCHAR) {
+    ret = OB_INVALID_ARGUMENT;
+  } else {
+    const ParseNode *path_node = call.arguments_->children_[0];
+    for (int64_t i = 1; OB_SUCC(ret) && i < call.arguments_->num_child_; ++i) {
+      const ParseNode *option = call.arguments_->children_[i];
+      if (call.descriptor_->id_ == READ_CSV_FUNCTION_ID && option != nullptr && option->type_ != T_OP_ASSIGN) {
+        ret = OB_NOT_SUPPORTED;
+      }
+    }
+    if (OB_FAIL(ret)) { return ret; }
+    const std::filesystem::path candidate(std::string(path_node->str_value_, path_node->str_len_));
+    ObString secure_file_priv;
+    OZ (session_info_->get_secure_file_priv(secure_file_priv));
+    if (OB_SUCC(ret)) {
+      std::filesystem::path resolved;
+      const std::filesystem::path secure_root(std::string(secure_file_priv.ptr(), secure_file_priv.length()));
+      if (!file_sql::is_path_allowed(secure_root, candidate, &resolved)) {
+        ret = OB_ERR_NO_PRIVILEGE;
+      } else if (OB_FAIL(ObResolverUtils::check_secure_path(
+          secure_file_priv, ObString(resolved.string().size(), resolved.string().data())))) {
+      } else if (OB_FAIL(create_function_scan_item(call, item))) {
+      } else {
+        std::vector<file_sql::FileSqlColumn> columns;
+        file_sql::FileSqlError error;
+        bool ok = false;
+        file_sql::CsvReader csv;
+        file_sql::JsonlReader jsonl;
+        if (call.descriptor_->id_ == READ_CSV_FUNCTION_ID) {
+          ok = csv.open(resolved, true, ',', "", error) && csv.infer_schema(columns, error);
+        } else {
+          ok = jsonl.open(resolved, error) && jsonl.infer_schema(columns, error);
+        }
+        if (!ok) {
+          ret = OB_ERR_UNEXPECTED;
+        } else {
+          int64_t column_id = OB_APP_MIN_COLUMN_ID;
+          for (const auto &column : columns) {
+            ObDataType type;
+            switch (column.type) {
+              case file_sql::FileSqlType::BIGINT:
+              case file_sql::FileSqlType::BOOLEAN: type.set_int(); break;
+              case file_sql::FileSqlType::DOUBLE: type.set_double(); break;
+              case file_sql::FileSqlType::DATE: type.set_date(); break;
+              case file_sql::FileSqlType::DATETIME: type.set_datetime(); break;
+              default: type.set_varchar(); break;
+            }
+            ColumnItem *bound = nullptr;
+            OZ (resolve_function_table_column_item(*item, type.get_meta_type(), type.get_accuracy(),
+                ObString(column.name.size(), column.name.data()), column_id++, bound));
+          }
+        }
+      }
+    }
   }
   return ret;
 }
