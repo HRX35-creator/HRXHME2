@@ -19,5 +19,7 @@
   "no_cpu_fallback_proven": null,
   "formal_evidence_paths": [],
   "conclusion": null,
-  "validation_build_base_commit": "e6a26ec7c0f5adca3a4b07dfdc39a1b9bc53b925"
+  "validation_build_base_commit": "e6a26ec7c0f5adca3a4b07dfdc39a1b9bc53b925",
+  "measured_source_snapshot_commit": "111c02a7b510199e1d1a69c46a9c2c6ef9b0312c",
+  "current_source_role": "upstream compatibility only; measurements use revision108"
 }

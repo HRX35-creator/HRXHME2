@@ -8,9 +8,13 @@ build performance and query performance are reported separately.
 
 Public implementation base: 76f871eb5a84b664d487b03b3412ce50194135b5.
 provenance/public-base-audit108.json verifies that its three existing product
-files match the original validation baseline and all four resulting product
-files match tested revision 108 exactly. The original build provenance and
-source patch remain in provenance/. This branch is prepared for a separate
+files match the original validation baseline. Source snapshot
+111c02a7b510199e1d1a69c46a9c2c6ef9b0312c preserves all four tested revision 108
+product hashes. The following compatibility change adopts the upstream Rust
+header and bitmap snprintf fix; provenance/master-compatibility108.json records
+its separate source hash and clean merge check. The measured runtime remains
+revision 108. The original build provenance and source patch remain in
+provenance/. This branch is prepared for a separate
 public seekdb pull request; the formal comparison is pending.
 
 The measured CPU/GPU end-to-end comparison is pending. REPORT.md and results.json

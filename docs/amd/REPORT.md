@@ -3,6 +3,13 @@
 Status: PENDING FORMAL RESULTS. This file is a report skeleton. All performance
 and complete SQL recall fields remain empty until raw results are available.
 
+The measured runtime uses revision 108. Its exact product source is preserved
+in commit 111c02a7b510199e1d1a69c46a9c2c6ef9b0312c. A subsequent public-source
+compatibility change only adopts upstream's rust/config.h include and safe
+bitmap snprintf, and relocates the AMD hooks include. It does not change GPU
+logic or represent a newly measured runtime. See
+provenance/master-compatibility108.json for the source hashes and check scope.
+
 ## Implementation and baseline
 
 The same revision 108 seekdb binary compares lib=vsag with lib=cuvs on separate

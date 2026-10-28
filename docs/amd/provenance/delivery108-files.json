@@ -1,6 +1,6 @@
 {
   "base_commit": "76f871eb5a84b664d487b03b3412ce50194135b5",
-  "branch": "feat/amd-hipvs-hnsw-build108",
+  "measured_source_snapshot_commit": "111c02a7b510199e1d1a69c46a9c2c6ef9b0312c",
   "formal_results_pending": true,
   "manifest_excludes_itself": true,
   "files": [
@@ -16,13 +16,13 @@
     },
     {
       "path": "docs/amd/README.md",
-      "size": 2851,
-      "sha256": "3c24fc70ddaa66b0adfca365554c2a2760d0d5f109797e4f057e9cf385a18034"
+      "size": 3123,
+      "sha256": "f765c79e149b8c6d871248655680affb7546afbffad53e80f0e3e8eef7b01de6"
     },
     {
       "path": "docs/amd/REPORT.md",
-      "size": 3831,
-      "sha256": "e8f81d35ae94906517f25e136d866663fd85dd4f28fe93d76fe6155cda045ab7"
+      "size": 4269,
+      "sha256": "0056ffa7afc5b2f194bcf7f9fb5d1689b20c698f06eded8a3c0f2bd56fd185e9"
     },
     {
       "path": "docs/amd/SUBMISSION.md",
@@ -195,6 +195,11 @@
       "sha256": "30d6c2b83f0f27d66e3ef24d7941274438992732ae3509b13c20102f7f01eb6f"
     },
     {
+      "path": "docs/amd/provenance/master-compatibility108.json",
+      "size": 2193,
+      "sha256": "ac60dcd8ce0664a710f78413f7c3405ae2977cd3455ad5d526fb42d6275a01b4"
+    },
+    {
       "path": "docs/amd/provenance/official-requirements-snapshot.txt",
       "size": 15145,
       "sha256": "ea03136e6f3a402adb988ac66b2e258b26582a765f5a0a34319d619622b32034"
@@ -216,8 +221,8 @@
     },
     {
       "path": "docs/amd/results.json",
-      "size": 714,
-      "sha256": "d14a4f7759dd908994df842b06a8ce40b738db71168294cb370fc43237c800d6"
+      "size": 883,
+      "sha256": "c13b1ee3bd917c5d188ba1760d5fef6351fd4ba89d4b4f25d8e0803656e8e47b"
     },
     {
       "path": "src/oblib/lib/vector/ob_cuvs_hooks.h",
@@ -231,8 +236,8 @@
     },
     {
       "path": "src/observer/vector_index/ob_plugin_vector_index_adaptor.cpp",
-      "size": 201404,
-      "sha256": "f1269d50a8568f1684de34fc8a01de55e98d48131945bfba24d88d90bc1630b5"
+      "size": 201416,
+      "sha256": "e794ffbb44dcc8593751896d5c3b380ddbeae0bafdfff70ba0e5fec49ef04430"
     },
     {
       "path": "src/observer/vector_index/ob_vector_index_util.cpp",
