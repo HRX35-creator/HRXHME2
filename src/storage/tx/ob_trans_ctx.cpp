@@ -36,7 +36,7 @@ void ObTransCtx::get_ctx_guard(CtxLockGuard &guard, uint8_t mode)
 void ObTransCtx::print_tx_state()
 {
   // Callers may already own lock_. Acquiring it here can deadlock or run unlock callbacks.
-  TRANS_LOG(WARN, "transaction context state", KPC(this));
+  TRANS_LOG_RET(WARN, OB_SUCCESS, "transaction context state", KPC(this));
 }
 
 void ObTransCtx::before_unlock(CtxLockArg &arg)
