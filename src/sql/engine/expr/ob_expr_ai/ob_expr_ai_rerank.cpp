@@ -1,4 +1,4 @@
-/*
+﻿/*
  * Copyright (c) 2025 OceanBase.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -309,12 +309,12 @@ int ObExprAIRerank::sort_document_array_by_model_result(ObIAllocator &allocator,
         } else {
           int64_t index = (index_node->json_type() == ObJsonNodeType::J_INT)
               ? static_cast<ObJsonInt *>(index_node)->value()
-              : static_cast<int64_t>(static_cast<ObJsonUInt *>(index_node)->value());
+              : static_cast<int64_t>(static_cast<ObJsonUint *>(index_node)->value());
           double score = (score_node->json_type() == ObJsonNodeType::J_DOUBLE)
               ? static_cast<ObJsonDouble *>(score_node)->value()
               : static_cast<double>((score_node->json_type() == ObJsonNodeType::J_INT)
                   ? static_cast<ObJsonInt *>(score_node)->value()
-                  : static_cast<double>(static_cast<ObJsonUInt *>(score_node)->value())));
+                  : static_cast<double>(static_cast<ObJsonUint *>(score_node)->value())));
           if (index < 0 || index >= document_array->element_count()) {
             // the model returned an out-of-range index: reject instead of
             // dereferencing an unrelated slot
@@ -405,11 +405,11 @@ int ObExprAIRerank::batch_result_add_base(ObIAllocator &allocator, ObJsonArray *
       } else {
         int64_t id = (node->json_type() == ObJsonNodeType::J_INT)
             ? static_cast<ObJsonInt *>(node)->value() + start_idx
-            : static_cast<int64_t>(static_cast<ObJsonUInt *>(node)->value()) + start_idx;
+            : static_cast<int64_t>(static_cast<ObJsonUint *>(node)->value()) + start_idx;
         if (node->json_type() == ObJsonNodeType::J_INT) {
           static_cast<ObJsonInt *>(node)->set_value(id);
         } else {
-          static_cast<ObJsonUInt *>(node)->set_value(static_cast<uint64_t>(id));
+          static_cast<ObJsonUint *>(node)->set_value(static_cast<uint64_t>(id));
         }
       }
     }
@@ -445,7 +445,7 @@ int ObExprAIRerank::compact_json_array_by_key(ObIAllocator &allocator, ObJsonArr
             switch (n->json_type()) {
               case ObJsonNodeType::J_DOUBLE: return static_cast<ObJsonDouble *>(n)->value();
               case ObJsonNodeType::J_INT: return static_cast<double>(static_cast<ObJsonInt *>(n)->value());
-              case ObJsonNodeType::J_UINT: return static_cast<double>(static_cast<ObJsonUInt *>(n)->value());
+              case ObJsonNodeType::J_UINT: return static_cast<double>(static_cast<ObJsonUint *>(n)->value());
               default: return 0.0;
             }
           };
