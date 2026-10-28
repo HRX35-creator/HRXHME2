@@ -19,6 +19,9 @@
 #include "lib/charset/ob_charset_string_helper.h"
 #include "lib/utility/ob_macro_utils.h"
 
+#include <algorithm>
+#include <array>
+
 namespace oceanbase
 {
 namespace storage
@@ -173,12 +176,20 @@ bool ObUnicodeBlockUtils::is_unicode_cn_number(ob_wc_t unicode)
       OB_IK_GET_NUMBER_UNICODE("億"), OB_IK_GET_NUMBER_UNICODE("兆"),
       OB_IK_GET_NUMBER_UNICODE("卅"), OB_IK_GET_NUMBER_UNICODE("廿"),
   };
-  for (int i = 0; i < sizeof(cn_number_array) / sizeof(cn_number_array[0]); i++) {
-    if (unicode == cn_number_array[i]) {
-      return true;
+  // This lookup runs for every Chinese character of every document, so the
+  // code points are sorted once and searched with a binary search instead of
+  // being scanned linearly.
+  static const std::array<ob_wc_t, ARRAYSIZEOF(cn_number_array)> sorted_cn_number_array = []() {
+    std::array<ob_wc_t, ARRAYSIZEOF(cn_number_array)> arr = {};
+    for (int i = 0; i < ARRAYSIZEOF(cn_number_array); i++) {
+      arr[i] = cn_number_array[i];
     }
-  }
-  return false;
+    std::sort(arr.begin(), arr.end());
+    return arr;
+  }();
+  return std::binary_search(sorted_cn_number_array.begin(),
+                            sorted_cn_number_array.end(),
+                            unicode);
 }
 
 } //  namespace storage

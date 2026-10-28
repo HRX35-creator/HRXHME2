@@ -78,7 +78,7 @@ public:
 
   int init();
   void destroy();
-  int check_stopword(const ObFTWord &word, bool &is_stopword);
+  int check_stopword(const ObFTWord &word, bool &is_stopword, common::ObIAllocator &allocator);
 
 private:
   static const int64_t DEFAULT_STOPWORD_BUCKET_NUM = 37L;
@@ -102,7 +102,7 @@ public:
       const ObAddWordFlag &flag,
       common::ObIAllocator &allocator,
       ObFTWordMap &word_map);
-  ~ObAddWord() = default;
+  ~ObAddWord();
   int process_word(
       const char *word,
       const int64_t word_len,
@@ -126,6 +126,7 @@ private:
 private:
   ObObjMeta word_meta_;
   common::ObIAllocator &allocator_;
+  common::ObArenaAllocator stopword_allocator_;
   ObFTWordMap &word_map_;
   int64_t min_max_word_cnt_;
   int64_t non_stopword_cnt_;
