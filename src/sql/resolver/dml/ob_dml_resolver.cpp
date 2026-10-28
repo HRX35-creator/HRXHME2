@@ -93,10 +93,38 @@ int get_static_file_path(const ObRawExpr *expr, common::ObString &path)
   } else {
     const ObConstRawExpr *const_expr = static_cast<const ObConstRawExpr *>(expr);
     const common::ObObj &value = const_expr->get_value();
-    if (!value.is_string_type()) {
+    const common::ObObj &param = const_expr->get_param();
+    const common::ObObj &path_value = value.is_unknown() ? param : value;
+    if (!path_value.is_string_type()) {
       ret = common::OB_INVALID_ARGUMENT;
     } else {
-      path = value.get_string();
+      path = path_value.get_string();
+    }
+  }
+  return ret;
+}
+
+int materialize_static_file_path(ObRawExprFactory *expr_factory,
+                                 ObRawExpr *file_expr,
+                                 const common::ObString &path)
+{
+  int ret = common::OB_SUCCESS;
+  ObConstRawExpr *path_literal = nullptr;
+  ObString path_copy;
+  ObObjParam path_value;
+  if (OB_ISNULL(expr_factory) || OB_ISNULL(file_expr) ||
+      !file_expr->is_sys_func_expr() || file_expr->get_param_count() < 1) {
+    ret = common::OB_INVALID_ARGUMENT;
+  } else if (OB_FAIL(expr_factory->create_raw_expr(T_VARCHAR, path_literal))) {
+  } else if (OB_FAIL(ob_write_string(expr_factory->get_allocator(), path, path_copy))) {
+  } else {
+    path_value.set_varchar(path_copy);
+    path_value.set_collation_type(CS_TYPE_UTF8MB4_BIN);
+    path_value.set_param_meta();
+    path_literal->set_value(path_value);
+    path_literal->set_data_type(ObVarcharType);
+    if (OB_FAIL(static_cast<ObSysFunRawExpr *>(file_expr)->replace_param_expr(0, path_literal))) {
+    } else if (OB_FAIL(file_expr->extract_info())) {
     }
   }
   return ret;
@@ -4122,6 +4150,13 @@ int ObDMLResolver::resolve_function_table_item(const ParseNode &parse_tree,
           } else if (OB_FAIL(file_func_expr->set_param_exprs(func_params))) {
           } else {
             function_table_expr = file_func_expr;
+            ObString resolved_path;
+            if (OB_FAIL(get_static_file_path(path_expr, resolved_path))) {
+              LOG_USER_ERROR(OB_NOT_SUPPORTED, "file sql path must be a constant string");
+            } else if (OB_FAIL(materialize_static_file_path(expr_factory,
+                                                            file_func_expr,
+                                                            resolved_path))) {
+            }
           }
         }
       }
@@ -4206,6 +4241,9 @@ int ObDMLResolver::resolve_function_table_item(const ParseNode &parse_tree,
   if (OB_SUCC(ret)) {
     ObFileSqlFormat file_format = ObFileSqlFormat::CSV;
     if (is_file_sql_function(function_table_expr, file_format)) {
+      if (OB_NOT_NULL(params_.query_ctx_)) {
+        params_.query_ctx_->set_has_file_scan(true);
+      }
       if (function_table_expr->get_param_count() < 1) {
         ret = OB_INVALID_ARGUMENT;
         LOG_USER_ERROR(OB_INVALID_ARGUMENT, "file sql function requires a path argument");
@@ -4256,6 +4294,7 @@ int ObDMLResolver::resolve_function_table_item(const ParseNode &parse_tree,
             meta.set_type(file_col.type_);
             if (ob_is_string_tc(file_col.type_) || ob_is_text_tc(file_col.type_)) {
               meta.set_collation_type(CS_TYPE_UTF8MB4_BIN);
+              meta.set_collation_level(CS_LEVEL_IMPLICIT);
               accuracy.set_length(ObAccuracy::DDL_DEFAULT_ACCURACY[file_col.type_].get_length());
             } else {
               accuracy.set_accuracy(ObAccuracy::DDL_DEFAULT_ACCURACY[file_col.type_]);
@@ -7881,6 +7920,14 @@ int ObDMLResolver::resolve_function_table_column_item_sys_func(const TableItem &
   CK (OB_NOT_NULL(table_expr = table_item.function_table_expr_));
   if (OB_SUCC(ret) && is_file_sql_function(table_expr, file_format)) {
     // File SQL columns are resolved in resolve_function_table_item.
+    for (int64_t i = 0; OB_SUCC(ret) && i < stmt->get_column_size(); ++i) {
+      ColumnItem *column_item = stmt->get_column_item(i);
+      if (OB_ISNULL(column_item)) {
+        ret = OB_ERR_UNEXPECTED;
+      } else if (column_item->table_id_ == table_item.table_id_ &&
+                 OB_FAIL(col_items.push_back(*column_item))) {
+      }
+    }
     return ret;
   }
   OZ (table_expr->deduce_type(session_info_));
