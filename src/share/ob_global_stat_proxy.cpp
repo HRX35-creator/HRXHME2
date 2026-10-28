@@ -16,10 +16,11 @@
 
 #define USING_LOG_PREFIX SHARE
 
+#include "config_bridge.h"
 #include "share/ob_global_stat_proxy.h"
 #include "share/ob_dml_sql_splicer.h"
 #include "share/inner_table/ob_inner_table_schema_constants.h"
-#include "share/ob_share_util.h" // ObShareUtil::get_rs_default_timeout_ctx
+#include "share/ob_share_util.h"
 #include "common/ob_timeout_ctx.h" // ObTimeoutCtx
 
 namespace oceanbase
@@ -28,6 +29,21 @@ using namespace common;
 using namespace common::sqlclient;
 namespace share
 {
+namespace
+{
+int set_global_stat_timeout(ObTimeoutCtx &ctx)
+{
+  // Global-stat operations perform internal SQL, often several statements in
+  // one transaction. Preserve a longer RPC setting and the macOS I/O floor.
+  const int64_t sql_timeout = config::internal_sql_execute_timeout();
+  const int64_t rpc_timeout = config::rpc_timeout();
+  int64_t timeout = MAX(sql_timeout, rpc_timeout);
+#ifdef __APPLE__
+  timeout = MAX(timeout, 10000000LL);
+#endif
+  return ObShareUtil::set_default_timeout_ctx(ctx, timeout);
+}
+} // namespace
 
 int ObGlobalStatProxy::set_init_value(
     const int64_t core_schema_version,
@@ -537,7 +553,7 @@ int ObGlobalStatProxy::update(const ObGlobalStatItem::ItemList &list,
   ObTimeoutCtx ctx;
   if (!is_valid() || list.is_empty()) {
     ret = OB_INVALID_ARGUMENT;
-  } else if (OB_FAIL(ObShareUtil::get_rs_default_timeout_ctx(ctx))) {
+  } else if (OB_FAIL(set_global_stat_timeout(ctx))) {
   } else if (OB_FAIL(core_table_.load_for_update())) {
   } else {
     const ObGlobalStatItem *it = list.get_first();
@@ -574,7 +590,7 @@ int ObGlobalStatProxy::get(
   ObTimeoutCtx ctx;
   if (!is_valid() || list.is_empty()) {
     ret = OB_INVALID_ARGUMENT;
-  } else if (OB_FAIL(ObShareUtil::get_rs_default_timeout_ctx(ctx))) {
+  } else if (OB_FAIL(set_global_stat_timeout(ctx))) {
   } else if (!for_update && OB_FAIL(core_table_.load())) {
   } else if (for_update && OB_FAIL(core_table_.load_for_update())) {
   } else {
