@@ -25,6 +25,39 @@ namespace oceanbase
 namespace common 
 {
 
+namespace
+{
+
+// A dense embedding vector may only contain JSON numbers. Answers that carry
+// strings, nulls, booleans or nested arrays are rejected instead of being
+// written into the vector column.
+bool is_embedding_element_number(const ObJsonNodeType type)
+{
+  return type == ObJsonNodeType::J_INT
+      || type == ObJsonNodeType::J_UINT
+      || type == ObJsonNodeType::J_DOUBLE
+      || type == ObJsonNodeType::J_DECIMAL
+      || type == ObJsonNodeType::J_OFLOAT
+      || type == ObJsonNodeType::J_ODOUBLE
+      || type == ObJsonNodeType::J_ODECIMAL;
+}
+
+int validate_embedding_elements(ObJsonArray &vector)
+{
+  int ret = OB_SUCCESS;
+  const int64_t count = vector.element_count();
+  for (int64_t i = 0; OB_SUCC(ret) && i < count; ++i) {
+    ObJsonNode *element = vector.get_value(i);
+    if (OB_ISNULL(element) || !is_embedding_element_number(element->json_type())) {
+      ret = OB_INVALID_DATA;
+    }
+  }
+  return ret;
+}
+
+} // namespace
+
+
 int ObOpenAIUtils::get_header(common::ObIAllocator &allocator,
                               ObString &api_key,
                               common::ObArray<ObString> &headers) 
@@ -174,6 +207,11 @@ int ObOpenAIUtils::ObOpenAIComplete::parse_output(common::ObIAllocator &allocato
     } else if (OB_FAIL(j_tree->seek(j_path, j_path.path_node_cnt(), false, false, hit))) {
     } else if (hit.size() == 0) {
       ret = OB_INVALID_DATA;
+    } else if (hit[0]->json_type() != ObJsonNodeType::J_STRING ||
+               hit[0]->get_data_length() == 0) {
+      // An empty completion is reported as invalid data instead of being
+      // returned as an empty string.
+      ret = OB_INVALID_DATA;
     } else {
       result = hit[0];
     }
@@ -247,6 +285,10 @@ int ObOpenAIUtils::ObOpenAIEmbed::parse_output(common::ObIAllocator &allocator,
           ObJsonNode *index_node = embedding_obj->get_value("index");
           if (OB_ISNULL(embedding)) {
             ret = OB_INVALID_DATA;
+          } else if (embedding->json_type() != ObJsonNodeType::J_ARRAY ||
+                     static_cast<ObJsonArray *>(embedding)->element_count() == 0) {
+            ret = OB_INVALID_DATA;
+          } else if (OB_FAIL(validate_embedding_elements(*static_cast<ObJsonArray *>(embedding)))) {
           } else if (OB_FAIL(embeddings.push_back(embedding))) {
           } else if (OB_ISNULL(index_node) || index_node->json_type() != ObJsonNodeType::J_INT) {
             index_usable = false;
@@ -389,7 +431,10 @@ int ObOllamaUtils::ObOllamaComplete::parse_output(common::ObIAllocator &allocato
     if (OB_FAIL(j_path.parse_path())) {
     } else if (OB_FAIL(j_tree->seek(j_path, j_path.path_node_cnt(), false, false, hit))) {
     } else if (hit.size() == 0) {
-      ret = OB_ERR_UNEXPECTED;
+      ret = OB_INVALID_DATA;
+    } else if (hit[0]->json_type() != ObJsonNodeType::J_STRING ||
+               hit[0]->get_data_length() == 0) {
+      ret = OB_INVALID_DATA;
     } else {
       result = hit[0];
     }
@@ -448,7 +493,9 @@ int ObOllamaUtils::ObOllamaEmbed::parse_output(common::ObIAllocator &allocator,
     if (OB_FAIL(j_path.parse_path())) {
     } else if (OB_FAIL(j_tree->seek(j_path, j_path.path_node_cnt(), false, false, hit))) {
     } else if (hit.size() == 0) {
-      ret = OB_ERR_UNEXPECTED;
+      ret = OB_INVALID_DATA;
+    } else if (hit[0]->json_type() != ObJsonNodeType::J_ARRAY) {
+      ret = OB_INVALID_DATA;
     } else {
       result = hit[0];
     }
@@ -1537,17 +1584,22 @@ int ObAIFuncModel::call_dense_embedding_vector_v2(ObArray<ObString> &content, Ob
     ObJsonArray *result_array = static_cast<ObJsonArray *>(result_base);
     int64_t count = result_array->element_count();
     if (content.count() != count) {
-      ret = OB_ERR_UNEXPECTED;
+      // A provider that answers with a different number of vectors than inputs
+      // (for example duplicated indexes) cannot be mapped back to the rows.
+      ret = OB_INVALID_DATA;
     } else {
       for (int64_t i = 0; OB_SUCC(ret) && i < count; i++) {
         ObIJsonBase *j_base = result_array->get_value(i);
         if (OB_ISNULL(j_base)) {
-          ret = OB_ERR_UNEXPECTED;
+          ret = OB_INVALID_DATA;
         } else if (j_base->json_type() != ObJsonNodeType::J_ARRAY) {
+          ret = OB_INVALID_DATA;
+        } else if (static_cast<ObJsonArray *>(j_base)->element_count() == 0) {
           ret = OB_INVALID_DATA;
         } else if (dimension > 0 && static_cast<ObJsonArray *>(j_base)->element_count() != dimension) {
           ret = OB_INVALID_ARGUMENT;
           LOG_USER_ERROR(OB_INVALID_ARGUMENT, "ai_embed, result dimension is not equal to dimension");
+        } else if (OB_FAIL(validate_embedding_elements(*static_cast<ObJsonArray *>(j_base)))) {
         } else if (OB_FAIL(ObAIFuncJsonUtils::print_json_to_str(*allocator_, j_base, result_str))) {
         } else {
           results.push_back(result_str);
@@ -1663,7 +1715,9 @@ bool ObAIFuncPromptObjectUtils::is_valid_prompt_object(ObJsonObject *prompt_obje
     ObJsonArray *args_array = static_cast<ObJsonArray *>(args_node);
     for (int64_t i = 0; is_valid && i < args_array->element_count(); i++) {
       ObJsonNode *node = args_array->get_value(i);
-      if (OB_ISNULL(node)) {
+      // A SQL NULL argument is rejected before the prompt object is built, so a
+      // JSON null here means the caller built an invalid prompt by hand.
+      if (OB_ISNULL(node) || node->json_type() == ObJsonNodeType::J_NULL) {
         is_valid = false;
       }
     }
