@@ -1,0 +1,37 @@
+DROP TABLE IF EXISTS ddl_escaped_columns;
+DROP TABLE IF EXISTS ddl_escaped_enum_set;
+DROP TABLE IF EXISTS ddl_escaped_boundaries;
+CREATE TABLE ddl_escaped_columns (`key``id` INT PRIMARY KEY, `value````text` VARCHAR(12), replacement INT NOT NULL);
+INSERT INTO ddl_escaped_columns VALUES (1, 'first', 101), (2, 'second', 102);
+ALTER TABLE ddl_escaped_columns DROP PRIMARY KEY, ADD PRIMARY KEY (replacement);
+SELECT `key``id`, `value````text`, replacement FROM ddl_escaped_columns ORDER BY replacement;
+key`id	value``text	replacement
+1	first	101
+2	second	102
+CREATE INDEX idx_escaped_text ON ddl_escaped_columns (`value````text`);
+SELECT `key``id`, `value````text` FROM ddl_escaped_columns FORCE INDEX (idx_escaped_text) WHERE `value````text` = 'second';
+key`id	value``text
+2	second
+ALTER TABLE ddl_escaped_columns MODIFY COLUMN `value````text` VARCHAR(32);
+SELECT `key``id`, `value````text`, replacement FROM ddl_escaped_columns ORDER BY replacement;
+key`id	value``text	replacement
+1	first	101
+2	second	102
+DROP TABLE ddl_escaped_columns;
+CREATE TABLE ddl_escaped_enum_set (`row``id` INT PRIMARY KEY, `enum``value` ENUM('red', 'blue') NOT NULL, `set``value` SET('a', 'b') NOT NULL);
+INSERT INTO ddl_escaped_enum_set VALUES (1, 'red', 'a'), (2, 'blue', 'b');
+CREATE UNIQUE INDEX idx_escaped_enum ON ddl_escaped_enum_set (`enum``value`);
+CREATE UNIQUE INDEX idx_escaped_set ON ddl_escaped_enum_set (`set``value`);
+SELECT `row``id`, `enum``value`, `set``value` FROM ddl_escaped_enum_set ORDER BY `row``id`;
+row`id	enum`value	set`value
+1	red	a
+2	blue	b
+DROP TABLE ddl_escaped_enum_set;
+CREATE TABLE ddl_escaped_boundaries (id INT PRIMARY KEY, ```edge``` INT NOT NULL, `汉``字` VARCHAR(8));
+INSERT INTO ddl_escaped_boundaries VALUES (1, 7, 'retained');
+ALTER TABLE ddl_escaped_boundaries DROP PRIMARY KEY, ADD PRIMARY KEY (```edge```);
+CREATE INDEX idx_escaped_utf8 ON ddl_escaped_boundaries (`汉``字`);
+SELECT id, ```edge```, `汉``字` FROM ddl_escaped_boundaries;
+id	`edge`	汉`字
+1	7	retained
+DROP TABLE ddl_escaped_boundaries;
