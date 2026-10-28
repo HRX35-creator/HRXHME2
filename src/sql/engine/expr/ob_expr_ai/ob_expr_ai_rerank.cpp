@@ -216,16 +216,24 @@ int ObExprAIRerank::eval_ai_rerank_with_doc_key(const ObExpr &expr, ObEvalCtx &c
   ObJsonArray *result_array = nullptr;
   ObJsonArray *sorted_document_array = nullptr;
   if (OB_FAIL(get_doc_array_from_documents_array_with_key(allocator, document_array, doc_key, doc_array))) {
+    LOG_USER_ERROR(OB_ERR_UNEXPECTED, "dbg: get_doc_array failed");
   } else {
     ObAIFuncModel model(allocator, info, endpoint_info);
     if (OB_FAIL(model.call_rerank(query, doc_array, result_array))) {
+      LOG_USER_ERROR(OB_ERR_UNEXPECTED, "dbg: call_rerank failed");
+    } else if (OB_ISNULL(result_array)) {
+      LOG_USER_ERROR(OB_ERR_UNEXPECTED, "dbg: result_array null");
+      ret = OB_ERR_UNEXPECTED;
     } else if (OB_FAIL(sort_document_array_by_model_result(allocator, document_array, result_array, sorted_document_array))) {
-    } 
+      LOG_USER_ERROR(OB_ERR_UNEXPECTED, "dbg: sort_document_array failed");
+    }
   }
   if (OB_SUCC(ret)) {
     ObString raw_str;
     if (OB_FAIL(sorted_document_array->get_raw_binary(raw_str, &allocator))) {
+      LOG_USER_ERROR(OB_ERR_UNEXPECTED, "dbg: get_raw_binary failed");
     } else if (OB_FAIL(ObJsonExprHelper::pack_json_str_res(expr, ctx, res, raw_str))) {
+      LOG_USER_ERROR(OB_ERR_UNEXPECTED, "dbg: pack_json failed");
     }
   }
   return ret;
