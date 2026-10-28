@@ -3,6 +3,8 @@
 Example:
   python3 unittest/fts/run_ik_prefix_lifetime.py build_release
   python3 unittest/fts/run_ik_prefix_lifetime.py build_release --compare-ref 881991c
+  python3 unittest/fts/run_ik_prefix_lifetime.py build_release \
+    --test-source unittest/fts/test_word_frequency_semantics.cpp
 
 The optional comparison compiles the old CJK walker under a different class name
 and requires it to fail with poisoned retired nodes. It never starts a server.
@@ -20,8 +22,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('build_dir', type=Path)
     parser.add_argument('--compare-ref', help='Git revision with the pre-fix CJK walker')
+    parser.add_argument('--test-source', type=Path,
+                        help='Run another standalone FTS test with the same build libraries')
     args = parser.parse_args()
     repo = Path(__file__).resolve().parents[2]
+    if args.test_source and args.compare_ref:
+        parser.error('--compare-ref is only supported by the IK lifetime test')
+    test_source = (args.test_source.resolve() if args.test_source else
+                   repo / 'unittest/fts/test_ik_prefix_lifetime.cpp')
     build = args.build_dir.resolve()
     flags_file = build / 'src/storage/CMakeFiles/ob_storage.dir/flags.make'
     link_file = build / 'src/observer/CMakeFiles/seekdb.dir/link.txt'
@@ -53,7 +61,7 @@ def main():
             test_object = scratch / f'{name}.o'
             subprocess.run([compiler, *options,
                             *(['-DIK_PREFIX_TEST_LEGACY'] if legacy else []), '-c',
-                            str(repo / 'unittest/fts/test_ik_prefix_lifetime.cpp'),
+                            str(test_source),
                             '-o', str(test_object)], check=True)
             objects.append(str(test_object))
             link = [item for item in original_link if not item.endswith((

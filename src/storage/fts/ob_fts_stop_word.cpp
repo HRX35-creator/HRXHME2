@@ -273,14 +273,10 @@ int ObAddWord::groupby_word(const ObFTWord &word, const int64_t word_freq)
   } else if (!flag_.groupby_word()) {
     ret = word_map_.set_refactored(word, 1/*word count*/);
   } else {
-    // The map belongs to this document's synchronous parse. Repeated words can
-    // update the existing value without a second hash lookup.
-    int64_t *word_count = word_map_.get(word);
-    if (word_count != nullptr) {
-      *word_count += word_freq;
-    } else {
-      ret = word_map_.set_refactored(word, 1/*first occurrence*/);
-    }
+    // The map belongs to this document's synchronous parse. Insert new words
+    // and update repeated words with a single collation-aware hash lookup.
+    auto update_count = [word_freq](auto &pair) { pair.second += word_freq; };
+    ret = word_map_.set_or_update(word, 1/*first occurrence*/, update_count);
   }
   return ret;
 }
