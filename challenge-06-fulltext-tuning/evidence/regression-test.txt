@@ -1,0 +1,45 @@
+# tools/benchmark/fts_shared_dict_regression.sh
+# host: MINGW64_NT-10.0-26100 x86_64, 2026-10-28T13:39:00Z
+# server: seekdb 1.4.0.0 on 127.0.0.1:12881, binary built from 2026-competition HEAD
+# cmd: MYSQL=../tools/fts_mysql.sh bash tools/benchmark/fts_shared_dict_regression.sh
+
+===== run 1 =====
+ok: tokenize output is stable
+ok: tokenize output is stable (3rd call)
+ok: tokenize output is stable across parsers
+ok: smart and max_word keep different segmentation
+ok: smart tokenization unaffected by max_word index
+ok: MATCH(content) AGAINST('数据库') -> 2
+ok: MATCH(content) AGAINST('全文索引') -> 2
+ok: MATCH(content) AGAINST('分词器') -> 2
+ok: MATCH(content) AGAINST('人民大会堂') -> 1
+ok: MATCH on title column
+ok: unmatched word returns no row
+ok: 4 concurrent sessions x 20 calls produce identical tokens
+ok: tokenize output is stable after dict cache flush
+ok: MATCH works on a table created after the flush
+ok: all 50 documents are matched
+ok: tokenize keeps CJK words in a 50-document table
+regression: PASSED
+exit=0
+
+===== run 2 =====
+ok: tokenize output is stable
+ok: tokenize output is stable (3rd call)
+ok: tokenize output is stable across parsers
+ok: smart and max_word keep different segmentation
+ok: smart tokenization unaffected by max_word index
+ok: MATCH(content) AGAINST('数据库') -> 2
+ok: MATCH(content) AGAINST('全文索引') -> 2
+ok: MATCH(content) AGAINST('分词器') -> 2
+ok: MATCH(content) AGAINST('人民大会堂') -> 1
+ok: MATCH on title column
+ok: unmatched word returns no row
+ok: 4 concurrent sessions x 20 calls produce identical tokens
+ok: tokenize output is stable after dict cache flush
+ok: MATCH works on a table created after the flush
+ok: all 50 documents are matched
+ok: tokenize keeps CJK words in a 50-document table
+regression: PASSED
+exit=0
+
