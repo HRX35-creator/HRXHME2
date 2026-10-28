@@ -5,6 +5,7 @@ import contextlib
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -161,13 +162,32 @@ class MysqltestTest(unittest.TestCase):
         (client.parent.parent / "lib").mkdir(parents=True)
         (client.parent.parent / "lib64").mkdir()
         inherited = {"PATH": "/existing/bin", "LD_LIBRARY_PATH": "/existing/lib"}
+        # Patching sys.platform only selects the Linux loader variable; the
+        # separators used to build PATH and LD_LIBRARY_PATH come from
+        # os.pathsep, so pin it too to keep this test POSIX-only.
         with mock.patch.dict(runner.sdb.os.environ, inherited, clear=True), \
+                mock.patch.object(runner.sdb.os, "pathsep", ":"), \
                 mock.patch.object(runner.sdb.sys, "platform", "linux"):
             environment = runner.sdb.client_environment(client)
         self.assertEqual(environment["PATH"], str(client.parent) + ":/existing/bin")
         self.assertEqual(environment["LD_LIBRARY_PATH"], ":".join([
             str(client.parent.parent / "lib"), str(client.parent.parent / "lib64"),
             "/existing/lib",
+        ]))
+
+    def test_client_environment_joins_with_os_pathsep(self):
+        client = self.root / "client/bin/obclient"
+        (client.parent.parent / "lib").mkdir(parents=True)
+        inherited = {"PATH": "/existing/bin", "LD_LIBRARY_PATH": "/existing/lib"}
+        with mock.patch.dict(runner.sdb.os.environ, inherited, clear=True), \
+                mock.patch.object(runner.sdb.sys, "platform", "linux"):
+            environment = runner.sdb.client_environment(client)
+        separate = os.pathsep
+        self.assertEqual(environment["PATH"], separate.join([
+            str(client.parent), "/existing/bin",
+        ]))
+        self.assertEqual(environment["LD_LIBRARY_PATH"], separate.join([
+            str(client.parent.parent / "lib"), "/existing/lib",
         ]))
 
     def test_client_environment_uses_darwin_loader_path(self):
