@@ -1,0 +1,21 @@
+drop table if exists ddl_identifier_escape;
+create table ddl_identifier_escape (
+`p``k` int primary key,
+`e``num` enum('first','second'),
+`s``et` set('red','blue')
+);
+insert into ddl_identifier_escape values
+(1,'first','red'),(2,'second','red,blue');
+create unique index enum_index on ddl_identifier_escape(`e``num`);
+create unique index set_index on ddl_identifier_escape(`s``et`);
+select count(*) as enum_rows from ddl_identifier_escape force index(enum_index);
+enum_rows
+2
+select count(*) as set_rows from ddl_identifier_escape force index(set_index);
+set_rows
+2
+select `p``k`, `e``num`, `s``et` from ddl_identifier_escape order by `p``k`;
+p`k	e`num	s`et
+1	first	red
+2	second	red,blue
+drop table ddl_identifier_escape;
