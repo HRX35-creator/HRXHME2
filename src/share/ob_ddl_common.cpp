@@ -31,7 +31,6 @@
 #include "common/object/ob_object.h"
 #include "share/tablet/ob_tablet_table_operator.h"
 #include "share/storage/ob_tablet_local_checksum_table_storage.h"
-#include "sql/ob_sql_utils.h"
 
 using namespace oceanbase::share;
 using namespace oceanbase::common;
@@ -540,6 +539,60 @@ int ObDDLUtil::generate_column_name_str(
   return ret;
 }
 
+namespace {
+
+// Quote a column identifier so it can be placed between backtick delimiters by
+// doubling every embedded backtick. The escaping rule is a property of the
+// identifier syntax itself, so it is implemented here instead of reaching up to
+// the SQL layer, which already depends on share.
+int escape_column_identifier(
+    common::ObIAllocator &allocator,
+    const ObString &src,
+    ObString &dst)
+{
+  int ret = OB_SUCCESS;
+  const char escape_character = '`';
+  const ObString::obstr_size_t src_len = src.length();
+  ObString::obstr_size_t dst_len = src_len;
+  char *buf = NULL;
+
+  if (OB_ISNULL(src.ptr()) || OB_UNLIKELY(0 >= src_len)) {
+    dst.assign(NULL, 0);
+  } else if (NULL == src.find(escape_character)) {
+    dst = src;
+  } else {
+    for (int64_t i = 0; i < src_len; ++i) {
+      if (escape_character == src[i]) {
+        ++dst_len;
+      }
+    }
+    if (OB_ISNULL(buf = static_cast<char *>(allocator.alloc(dst_len + 1)))) {
+      ret = OB_ALLOCATE_MEMORY_FAILED;
+      LOG_WARN("fail to allocate memory for escaped identifier", K(ret), K(dst_len));
+    } else {
+      int64_t pos = 0;
+      for (int64_t i = 0; i < src_len; ++i) {
+        if (escape_character == src[i]) {
+          buf[pos++] = escape_character;
+          buf[pos++] = escape_character;
+        } else {
+          buf[pos++] = src[i];
+        }
+      }
+      if (OB_UNLIKELY(pos != dst_len)) {
+        ret = OB_ERR_UNEXPECTED;
+        LOG_WARN("unexpected escaped identifier length", K(ret), K(pos), K(dst_len));
+      } else {
+        buf[dst_len] = '\0';
+        dst.assign_ptr(buf, dst_len);
+      }
+    }
+  }
+  return ret;
+}
+
+}  // namespace
+
 int ObDDLUtil::generate_column_name_str(
     const ObColumnNameInfo &column_name_info,
     const bool with_origin_name,
@@ -552,7 +605,7 @@ int ObDDLUtil::generate_column_name_str(
   ObArenaAllocator allocator("ObDDLTmp");
   ObString escaped_column_name = column_name_info.column_name_;
   if ((with_origin_name || with_alias_name)
-      && OB_FAIL(sql::ObSQLUtils::generate_new_name_with_escape_character(
+      && OB_FAIL(escape_column_identifier(
           allocator, column_name_info.column_name_, escaped_column_name))) {
   }
   // append comma
