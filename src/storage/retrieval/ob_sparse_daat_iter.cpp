@@ -426,8 +426,8 @@ int ObSRDaaTIterImpl::project_results(const int64_t count)
       const ObDatumVector ids = id_proj_expr->locate_expr_datumvector(*eval_ctx);
       for (int64_t i = 0; i < count; ++i) {
         ids.at(i)->set_datum(buffered_domain_ids_[i].get_datum());
-        id_evaluated_flags.set(i);
       }
+      id_evaluated_flags.set_all(count);
       id_proj_expr->set_evaluated_projected(*eval_ctx);
     } else {
       for (int64_t i = 0; i < count; ++i) {
