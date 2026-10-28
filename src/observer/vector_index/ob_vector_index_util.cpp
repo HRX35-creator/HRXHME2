@@ -2333,11 +2333,7 @@ int ObVectorIndexUtil::check_extra_info_size(const ObTableSchema &tbl_schema,
         }
       } else {
         // Automatic extra info is disabled unless the index specifies a size.
-        const uint64_t default_extra_info_max_size = 0;
-        if (extra_info_actual_size > default_extra_info_max_size) {
-          LOG_INFO("extra_info_actual_size larger than default_extra_info_max_size", K(extra_info_actual_size), K(rowkey_size), K(default_extra_info_max_size));
-          extra_info_actual_size = 0;
-        }
+        extra_info_actual_size = 0;
       }
     }
   }
