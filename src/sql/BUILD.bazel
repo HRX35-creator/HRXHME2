@@ -211,6 +211,14 @@ cc_library(
 cc_library(
     name = "ai_expr_test_headers",
     testonly = True,
+    hdrs = [
+        "engine/expr/ob_expr_ai/ob_ai_func.h",
+        "engine/expr/ob_expr_ai/ob_ai_func_utils.h",
+        "engine/expr/ob_expr_ai/ob_expr_ai_complete.h",
+        "engine/expr/ob_expr_ai/ob_expr_ai_embed.h",
+        "engine/expr/ob_expr_ai/ob_expr_ai_prompt.h",
+        "engine/expr/ob_expr_ai/ob_expr_ai_rerank.h",
+    ],
     deps = [
         ":sql_runtime_interface",
         ":sql_runtime_internal_headers",

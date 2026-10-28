@@ -314,3 +314,9 @@ TEST_F(ObOpenAIUtilsTest, ollama_embed_output)
 
 } // namespace common
 } // namespace oceanbase
+
+int main(int argc, char **argv)
+{
+  ::testing::InitGoogleTest(&argc, argv);
+  return RUN_ALL_TESTS();
+}

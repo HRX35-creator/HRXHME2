@@ -291,3 +291,9 @@ TEST_F(ObExprAIPromptTest, construct_prompt_object)
 
 } // namespace common
 } // namespace oceanbase
+
+int main(int argc, char **argv)
+{
+  ::testing::InitGoogleTest(&argc, argv);
+  return RUN_ALL_TESTS();
+}
