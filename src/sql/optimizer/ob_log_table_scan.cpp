@@ -1318,13 +1318,26 @@ int ObLogTableScan::is_identity_operand(ObRawExpr *expr, bool is_and, bool &is_i
       OB_NOT_NULL(candidate->get_param_expr(0))) {
     candidate = candidate->get_param_expr(0);
   }
-  if (OB_NOT_NULL(candidate) && candidate->is_const_raw_expr()) {
-    bool is_true = false;
-    if (OB_FAIL(ObObjEvaluator::is_true(
-                static_cast<ObConstRawExpr *>(candidate)->get_value(), is_true))) {
-      LOG_WARN("failed to evaluate const expr", K(ret));
-    } else if ((is_and && is_true) || (!is_and && !is_true)) {
-      is_identity = true;
+  // A parameterized literal stays an ObConstRawExpr, but its value is the
+  // parameter slot instead of the bound value. Such operands can only be
+  // resolved at execution time, so leave them untouched here.
+  if (OB_NOT_NULL(candidate) &&
+      T_QUESTIONMARK == candidate->get_expr_type()) {
+    // do nothing
+  } else if (OB_NOT_NULL(candidate) && candidate->is_const_raw_expr()) {
+    const ObObj &value = static_cast<ObConstRawExpr *>(candidate)->get_value();
+    // Only plain boolean / integer constants are identities. Other constant
+    // types (e.g. a string that needs a diagnostic cast) are kept so that
+    // their warnings and errors still surface at execution time.
+    if (!value.is_null() && ob_is_integer_type(value.get_type())) {
+      bool is_true = false;
+      if (OB_FAIL(ObObjEvaluator::is_true(value, is_true))) {
+        // The constant cannot be evaluated as boolean, keep it.
+        LOG_TRACE("predicate operand is not a boolean constant", K(ret));
+        ret = OB_SUCCESS;
+      } else if ((is_and && is_true) || (!is_and && !is_true)) {
+        is_identity = true;
+      }
     }
   }
   return ret;
