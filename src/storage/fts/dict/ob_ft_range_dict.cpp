@@ -378,21 +378,55 @@ int ObFTRangeDict::match_with_hit(const ObString &single_word,
   return last_hit.dict_->match_with_hit(single_word, last_hit, hit);
 }
 
+uint64_t ObFTRangeDict::range_key(const ObString &word)
+{
+  // UTF8MB4_BIN's strnncoll compares unsigned bytes, then lengths. Pack up to
+  // MAX_MB_LEN bytes in big-endian order and retain the length below them so
+  // prefixes ending in NUL compare correctly too. No unaligned/overwide loads.
+  static_assert(ObCharset::MAX_MB_LEN <= 7, "range key must fit in uint64_t");
+  uint64_t key = 0;
+  for (int64_t i = 0; i < word.length(); ++i) {
+    key = (key << 8) | static_cast<unsigned char>(word.ptr()[i]);
+  }
+  key <<= 8 * (ObCharset::MAX_MB_LEN - word.length());
+  return (key << 3) | static_cast<uint64_t>(word.length());
+}
+
 int ObFTRangeDict::find_first_char_range(const ObString &single_word, ObIFTDict *&dict) const
 {
   int ret = OB_SUCCESS;
   bool found = false;
-  for (int i = 0; OB_SUCC(ret) && !found && i < range_dicts_.size(); ++i) {
-    if (ObCharset::strcmp(ObCollationType::CS_TYPE_UTF8MB4_BIN,
-                          range_dicts_[i].start_.get_word(),
-                          single_word)
-            <= 0
-        && ObCharset::strcmp(ObCollationType::CS_TYPE_UTF8MB4_BIN,
-                             range_dicts_[i].end_.get_word(),
-                             single_word)
-               >= 0) {
-      dict = range_dicts_[i].dict_;
+  if (range_index_valid_ && single_word.length() >= 0
+      && single_word.length() <= ObCharset::MAX_MB_LEN
+      && (0 == single_word.length() || nullptr != single_word.ptr())) {
+    const uint64_t key = range_key(single_word);
+    int64_t left = 0;
+    int64_t right = range_dicts_.size();
+    while (left < right) {
+      const int64_t mid = left + (right - left) / 2;
+      if (range_dicts_[mid].end_key_ < key) {
+        left = mid + 1;
+      } else {
+        right = mid;
+      }
+    }
+    if (left < range_dicts_.size() && range_dicts_[left].start_key_ <= key) {
+      dict = range_dicts_[left].dict_;
       found = true;
+    }
+  } else {
+    for (int i = 0; OB_SUCC(ret) && !found && i < range_dicts_.size(); ++i) {
+      if (ObCharset::strcmp(ObCollationType::CS_TYPE_UTF8MB4_BIN,
+                            range_dicts_[i].start_.get_word(),
+                            single_word)
+              <= 0
+          && ObCharset::strcmp(ObCollationType::CS_TYPE_UTF8MB4_BIN,
+                               range_dicts_[i].end_.get_word(),
+                               single_word)
+                 >= 0) {
+        dict = range_dicts_[i].dict_;
+        found = true;
+      }
     }
   }
   if (!found) {
@@ -418,6 +452,22 @@ int ObFTRangeDict::build_dict_from_cache(const ObFTCacheRangeContainer &range_co
       range.start_ = dat->start_word_;
       range.end_ = dat->end_word_;
       range.dict_ = dict;
+      range.start_key_ = 0;
+      range.end_key_ = 0;
+      // Keep the original first-match behavior if a container supplies ranges
+      // out of order or with overlaps; only disjoint sorted ranges use search.
+      if (range.start_.word_len > ObCharset::MAX_MB_LEN
+          || range.end_.word_len > ObCharset::MAX_MB_LEN) {
+        range_index_valid_ = false;
+      } else {
+        range.start_key_ = range_key(range.start_.get_word());
+        range.end_key_ = range_key(range.end_.get_word());
+        if (range.start_key_ > range.end_key_
+            || (range_dicts_.size() > 0
+                && range_dicts_[range_dicts_.size() - 1].end_key_ >= range.start_key_)) {
+          range_index_valid_ = false;
+        }
+      }
       if (OB_FAIL(range_dicts_.push_back(range))) {
       }
     }

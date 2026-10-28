@@ -1,0 +1,2 @@
+Passed 1829 full-result checks; sha256=a92f47b9c2a9cc6818e7ae09508f6a8df6ede7aceea0f74eca76197af7b33f4b
+Complete large-query results and existing TOKENIZE mysqltest passed; binary hashes recorded.

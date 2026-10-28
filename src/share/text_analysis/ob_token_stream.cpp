@@ -66,7 +66,8 @@ int ObTextTokenizer::open(const ObDatum &document, const ObCharsetInfo *cs)
 ObTextWhitespaceTokenizer::ObTextWhitespaceTokenizer()
   : ObTextTokenizer(),
     curr_token_ptr_(nullptr),
-    trav_pos_(0)
+    trav_pos_(0),
+    is_utf8mb4_(false)
 {
 }
 
@@ -74,6 +75,7 @@ void ObTextWhitespaceTokenizer::reset()
 {
   curr_token_ptr_ = nullptr;
   trav_pos_ = 0;
+  is_utf8mb4_ = false;
   ObTextTokenizer::reset();
 }
 
@@ -82,7 +84,17 @@ int ObTextWhitespaceTokenizer::inner_open(const ObDatum &document, const ObChars
   int ret = OB_SUCCESS;
   curr_token_ptr_ = nullptr;
   trav_pos_ = 0;
+  is_utf8mb4_ = CHARSET_UTF8MB4 == ObCharset::charset_type_by_coll(
+      static_cast<ObCollationType>(cs->number));
   return ret;
+}
+
+int64_t ObTextWhitespaceTokenizer::current_char_len(const char *doc, const uint32_t doc_len) const
+{
+  // Every ASCII byte is a complete UTF-8 character. Other bytes and charsets
+  // retain the original decoder, including invalid-input termination.
+  return is_utf8mb4_ && static_cast<unsigned char>(doc[trav_pos_]) < 0x80
+      ? 1 : ob_mbcharlen_ptr(cs_, doc + trav_pos_, doc + doc_len);
 }
 
 int ObTextWhitespaceTokenizer::get_next(ObDatum &next_token, int64_t &token_freq)
@@ -98,7 +110,7 @@ int ObTextWhitespaceTokenizer::get_next(ObDatum &next_token, int64_t &token_freq
     int64_t token_len = 0;
     // to next non-whitespace pos
     while (OB_SUCC(ret) && found_delimiter()) {
-      const int64_t c_len = ob_mbcharlen_ptr(cs_, doc + trav_pos_, doc + doc_len);
+      const int64_t c_len = current_char_len(doc, doc_len);
       trav_pos_ += c_len;
       if (trav_pos_ >= doc_len || 0 == c_len) {// if char is invalid, just skip the rest of document
         iter_end_ = true;
@@ -112,7 +124,7 @@ int ObTextWhitespaceTokenizer::get_next(ObDatum &next_token, int64_t &token_freq
 
     // to next whitespace pos
     while (OB_SUCC(ret) && !found_delimiter()) {
-      const int64_t c_len = ob_mbcharlen_ptr(cs_, doc + trav_pos_, doc + doc_len);
+      const int64_t c_len = current_char_len(doc, doc_len);
       trav_pos_ += c_len;
       token_len += c_len;
       if (trav_pos_ >= doc_len || 0 == c_len) {
@@ -220,18 +232,24 @@ int ObTokenStopWordNormalizer::filter_special_marks(const ObDatum &check_token, 
 
 ObBasicEnglishNormalizer::ObBasicEnglishNormalizer()
   : ObTokenNormalizer(),
-    norm_allocator_("TxtTokGrpFilter", OB_MALLOC_NORMAL_BLOCK_SIZE)
+    norm_allocator_("TxtTokGrpFilter", OB_MALLOC_NORMAL_BLOCK_SIZE),
+    norm_buf_(nullptr),
+    norm_buf_capacity_(0)
 {
 }
 
 void ObBasicEnglishNormalizer::reset()
 {
+  norm_buf_ = nullptr;
+  norm_buf_capacity_ = 0;
   norm_allocator_.reset();
   ObTokenNormalizer::reset();
 }
 
 void ObBasicEnglishNormalizer::reuse()
 {
+  norm_buf_ = nullptr;
+  norm_buf_capacity_ = 0;
   norm_allocator_.reuse();
   ObTokenNormalizer::reuse();
 }
@@ -244,7 +262,6 @@ int ObBasicEnglishNormalizer::get_next(ObDatum &next_token, int64_t &token_freq)
   } else {
     next_token.reset();
     token_freq = 0;
-    norm_allocator_.reuse();
     ObDatum tmp_datum;
     bool found_alnum = false;
     uint32_t norm_token_len = 0;
@@ -293,11 +310,30 @@ int ObBasicEnglishNormalizer::get_next(ObDatum &next_token, int64_t &token_freq)
     } else if (OB_UNLIKELY(!found_alnum)) {
       ret = OB_ERR_UNEXPECTED;
     } else {
-      ObString norm_alnum_token(norm_token_len, norm_token_ptr);
-      ObString norm_lower_token;
-      if (OB_FAIL(ObCharset::tolower(cs_, norm_alnum_token, norm_lower_token, norm_allocator_))) {
-      } else {
-        next_token.set_string(norm_lower_token);
+      // A stream token is consumed before the next get_next(). Retain one
+      // scratch buffer rather than resetting the arena and allocating for
+      // every word. Use the charset's original case conversion for all bytes.
+      const int64_t required = static_cast<int64_t>(norm_token_len) * cs_->casedn_multiply;
+      if (required > norm_buf_capacity_) {
+        norm_allocator_.reuse();
+        norm_buf_capacity_ = 0;
+        const int64_t capacity = MAX(required, 256L);
+        if (OB_ISNULL(norm_buf_ = static_cast<char *>(norm_allocator_.alloc(capacity)))) {
+          ret = OB_ALLOCATE_MEMORY_FAILED;
+        } else {
+          norm_buf_capacity_ = capacity;
+        }
+      }
+      if (OB_SUCC(ret)) {
+        // The one-byte-multiplier path of ObCharset::tolower converts in place.
+        const char *input = norm_token_ptr;
+        if (1 == cs_->casedn_multiply) {
+          MEMCPY(norm_buf_, norm_token_ptr, norm_token_len);
+          input = norm_buf_;
+        }
+        const size_t size = cs_->cset->casedn(cs_, const_cast<char *>(input),
+            norm_token_len, norm_buf_, required);
+        next_token.set_string(norm_buf_, static_cast<uint32_t>(size));
       }
     }
   }

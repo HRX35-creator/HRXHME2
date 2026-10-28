@@ -1,0 +1,11 @@
+{
+  "platform": "macOS-26.5.2-arm64-arm-64bit",
+  "parent": "b521f88d6",
+  "workspace": "a2f49ab23",
+  "hw.model": "Mac16,12",
+  "hw.memsize": "25769803776",
+  "hw.physicalcpu": "10",
+  "hw.logicalcpu": "10",
+  "before_sha256": "2f401db7687b0a298257fcc8c438e35468a59ecafd906b90ef1d1ea1faa11b33",
+  "after_sha256": "c6898ef9b226a3023e9daa4a404f9707f0afc38050b419809714588f1a987211"
+}
