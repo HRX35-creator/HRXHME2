@@ -28,45 +28,6 @@ static SERVER_CREATE_TIME: AtomicI64 = AtomicI64::new(0);
 static GENERATION: AtomicI64 = AtomicI64::new(0);
 static SERVER_ROLE_INFO: OnceLock<RwLock<String>> = OnceLock::new();
 
-// Retain old overrides on disk, but do not publish controls that no longer exist.
-// Keep this list explicit so unrelated unknown keys still fail validation.
-pub(crate) const RETIRED_PARAMETERS: &[&str] = &[
-    "_allow_skip_replay_redo_after_detete_tablet",
-    "_enable_dbms_job_package",
-    "_enable_hash_join_hasher",
-    "_enable_routine_call_param_defend",
-    "_enable_trace_tablet_leak",
-    "_enable_transaction_internal_routing",
-    "_enable_tree_based_io_scheduler",
-    "_follower_snapshot_read_retry_duration",
-    "_max_elr_dependent_trx_count",
-    "_max_px_workers_per_cpu",
-    "_memstore_limit_percentage",
-    "_multimodel_memory_trace_level",
-    "_ob_max_thread_num",
-    "_ob_ssl_invited_nodes",
-    "_px_bloom_filter_group_size",
-    "_px_message_compression",
-    "_send_bloom_filter_size",
-    "clog_io_isolation_mode",
-    "dead_socket_detection_timeout",
-    "diag_syslog_per_error_limit",
-    "enable_ddl",
-    "enable_rpc_authentication_bypass",
-    "memory_limit",
-    "ob_event_history_recycle_interval",
-    "ob_vector_memory_limit_percentage",
-    "rpc_client_authentication_method",
-    "rpc_server_authentication_method",
-    "schema_history_expire_time",
-    "schema_history_recycle_interval",
-    "shared_log_retention",
-    "strict_check_os_params",
-    "syslog_io_bandwidth_limit",
-    "tablet_meta_table_scan_batch_count",
-    "workers_per_cpu_quota",
-];
-
 pub fn server_create_time() -> i64 {
     SERVER_CREATE_TIME.load(Ordering::Acquire)
 }
@@ -534,8 +495,7 @@ pub fn update_internal_state(
 
 pub fn load_active(store: &kv::Store, startup: bool) -> Result<(), crate::Error> {
     let _guard = crate::lock_writers()?;
-    let mut entries = crate::load(store)?;
-    entries.retain(|entry| !RETIRED_PARAMETERS.contains(&entry.name.as_str()));
+    let entries = crate::load(store)?;
     for entry in &entries {
         validate_entry(entry)?;
     }

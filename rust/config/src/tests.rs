@@ -123,63 +123,6 @@ fn invalid_utf8_and_unknown_entries_block_startup_without_publication() {
 }
 
 #[test]
-fn retired_parameter_overrides_do_not_block_startup_or_reload() {
-    let _guard = CONFIG_TEST_LOCK.lock().unwrap();
-    let mut directory = TestDirectory::new();
-    reset_active_defaults(directory.store());
-    for name in crate::config::RETIRED_PARAMETERS {
-        assert!(!crate::config::parameter_exists(name), "{name}");
-        assert!(crate::config::bootstrap_set(name, "1").is_err(), "{name}");
-        assert!(
-            crate::config::update_parameter(directory.store(), name, Some("1")).is_err(),
-            "{name}"
-        );
-        assert!(
-            crate::config::update_parameter(directory.store(), name, None).is_err(),
-            "{name}"
-        );
-        // Representative values accepted by the former declarations.
-        let value = match *name {
-            "memory_limit" => "0M",
-            "dead_socket_detection_timeout" => "3s",
-            "schema_history_expire_time" | "ob_event_history_recycle_interval" => "7d",
-            "syslog_io_bandwidth_limit" => "5MB",
-            "diag_syslog_per_error_limit" => "200",
-            "workers_per_cpu_quota" => "10",
-            "tablet_meta_table_scan_batch_count" => "999",
-            "schema_history_recycle_interval" => "10m",
-            "_ob_ssl_invited_nodes" | "rpc_client_authentication_method" => "NONE",
-            "_px_bloom_filter_group_size" => "auto",
-            "rpc_server_authentication_method" => "ALL",
-            "_follower_snapshot_read_retry_duration" => "0ms",
-            "shared_log_retention" => "1d",
-            _ => "1",
-        };
-        raw_put(directory.store(), name, value.as_bytes());
-    }
-
-    for legacy_clog in [b"1", b"2"] {
-        raw_put(directory.store(), "clog_io_isolation_mode", legacy_clog);
-        for (startup, cpu_count) in [(true, 4_i64), (false, 8)] {
-            raw_put(
-                directory.store(),
-                "cpu_count",
-                cpu_count.to_string().as_bytes(),
-            );
-            let persisted = load(directory.store()).unwrap();
-            directory.reopen();
-            crate::config::load_active(directory.store(), startup).unwrap();
-            assert_eq!(crate::config::cpu_count(), cpu_count);
-            assert_eq!(load(directory.store()).unwrap(), persisted);
-            for name in crate::config::RETIRED_PARAMETERS {
-                assert!(crate::config::configured_value(name).is_none(), "{name}");
-                assert!(crate::config::effective_value(name).is_none(), "{name}");
-            }
-        }
-    }
-}
-
-#[test]
 fn startup_skips_write_policy_but_requires_storable_values() {
     let _guard = CONFIG_TEST_LOCK.lock().unwrap();
     let mut directory = TestDirectory::new();
