@@ -15,7 +15,9 @@
  */
 
 #define USING_LOG_PREFIX  SQL_ENG
-#ifdef _WIN32
+#ifdef __EMSCRIPTEN__
+#include <unistd.h>
+#elif defined(_WIN32)
 #include <winsock2.h>
 #include <windows.h>
 #ifndef CONST
@@ -23,16 +25,17 @@
 #endif
 #include <iphlpapi.h>
 #else
+#include <errno.h>
+#include <fcntl.h>
 #include <sys/ioctl.h>
 #include <net/if.h>
+#include <unistd.h>
 #ifdef __APPLE__
 #include <ifaddrs.h>
 #include <net/if_dl.h>
 #elif defined(__ANDROID__)
 #include <ifaddrs.h>
 #include <linux/if_packet.h>
-#include <fcntl.h>
-#include <unistd.h>
 #endif
 #endif
 #include "sql/engine/expr/ob_expr_uuid.h"
@@ -88,7 +91,19 @@ int ObUUIDNode::init()
 {
   int ret = OB_SUCCESS;
   is_inited_ = false;
-#ifdef _WIN32
+  MEMSET(mac_addr_, 0, sizeof(mac_addr_));
+#ifdef __EMSCRIPTEN__
+  // Browsers expose no hardware MAC. Use a random UUID node and mark it as
+  // non-MAC with the multicast bit, as on the Android fallback below.
+  // Emscripten getentropy uses the host cryptographic random source.
+  if (getentropy(mac_addr_, sizeof(mac_addr_)) != 0) {
+    ret = OB_ERR_UNEXPECTED;
+    LOG_WARN("failed to generate UUID node", K(ret), K(errno));
+  } else {
+    mac_addr_[0] |= 0x01;
+    is_inited_ = true;
+  }
+#elif defined(_WIN32)
   ULONG buf_len = 15000;
   PIP_ADAPTER_ADDRESSES addresses = NULL;
   bool mac_addr_found = false;
@@ -186,51 +201,104 @@ int ObUUIDNode::init()
     }
   }
 #else
-  // Linux: Use ioctl to get MAC address
-  struct ifreq ifr;
-  struct ifconf ifc;
-  char buf[1024];
-  int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
-  if (sock == -1) {
-    ret = OB_ERR_UNEXPECTED;
-    LOG_ERROR("socket failed", K(ret), K(errno));
-  } else {
-    ifc.ifc_len = sizeof(buf);
-    ifc.ifc_buf = buf;
-    if (ioctl(sock, SIOCGIFCONF, &ifc) < 0) {
-      ret = OB_ERR_UNEXPECTED;
+  // Linux: Use ioctl to get MAC address, falling back to a random node when
+  // interface discovery is unavailable (for example in restricted sandboxes).
+  {
+    struct ifreq ifr;
+    struct ifconf ifc;
+    char buf[1024];
+    bool mac_addr_found = false;
+    const char *failure_stage = "no usable MAC address";
+    int failure_errno = 0;
+    int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
+    if (sock == -1) {
+      failure_stage = "socket";
+      failure_errno = errno;
     } else {
-      ifreq *it = ifc.ifc_req;
-      ifreq *end = it + (ifc.ifc_len / sizeof(ifreq));
-      bool mac_addr_found = false;
-      for (; it != end && OB_SUCC(ret); ++it) {
-        if (OB_ISNULL(it) || OB_ISNULL(it->ifr_name) || OB_ISNULL(ifr.ifr_name)) {
-          continue;
-        } else {
+      ifc.ifc_len = sizeof(buf);
+      ifc.ifc_buf = buf;
+      if (ioctl(sock, SIOCGIFCONF, &ifc) < 0) {
+        failure_stage = "SIOCGIFCONF";
+        failure_errno = errno;
+      } else {
+        ifreq *it = ifc.ifc_req;
+        ifreq *end = it + (ifc.ifc_len / sizeof(ifreq));
+        for (; it != end && !mac_addr_found; ++it) {
+          MEMSET(&ifr, 0, sizeof(ifr));
           strncpy(ifr.ifr_name, it->ifr_name, IFNAMSIZ - 1);
-          if (ioctl(sock, SIOCGIFFLAGS, &ifr) == 0) {
-            if (!(ifr.ifr_flags & IFF_LOOPBACK)) {
-              if (ioctl(sock, SIOCGIFHWADDR, &ifr) == 0) {
+          if (ioctl(sock, SIOCGIFFLAGS, &ifr) < 0) {
+            failure_stage = "SIOCGIFFLAGS";
+            failure_errno = errno;
+          } else if (!(ifr.ifr_flags & IFF_LOOPBACK)) {
+            if (ioctl(sock, SIOCGIFHWADDR, &ifr) < 0) {
+              failure_stage = "SIOCGIFHWADDR";
+              failure_errno = errno;
+            } else {
+              bool all_zero = true;
+              bool all_ff = true;
+              for (int i = 0; i < 6; ++i) {
+                const unsigned char byte = static_cast<unsigned char>(ifr.ifr_hwaddr.sa_data[i]);
+                all_zero = all_zero && (0 == byte);
+                all_ff = all_ff && (0xff == byte);
+              }
+              if (!all_zero && !all_ff) {
                 MEMCPY(mac_addr_, ifr.ifr_hwaddr.sa_data, 6);
                 mac_addr_found = true;
-                break;
               } else {
-                LOG_WARN("ioctl failed, SIOCGIFHWADDR", K(errno), K(it->ifr_name));
+                failure_stage = "no usable MAC address";
+                failure_errno = 0;
               }
             }
+          }
+        }//end for
+      }
+      close(sock);
+    }
+    if (mac_addr_found) {
+      is_inited_ = true;
+    } else {
+      // MAC discovery is best effort. Use the OS CSPRNG so a restricted
+      // sandbox does not turn UUID initialization into a startup failure.
+      // /dev/urandom avoids raising the EL7/glibc 2.17 compatibility floor.
+      unsigned char random_node[6] = {0};
+      int flags = O_RDONLY;
+#ifdef O_CLOEXEC
+      flags |= O_CLOEXEC;
+#endif
+      int fd = open("/dev/urandom", flags);
+      int entropy_errno = 0;
+      size_t offset = 0;
+      if (fd < 0) {
+        entropy_errno = errno;
+      } else {
+        while (offset < sizeof(random_node)) {
+          ssize_t n = read(fd, random_node + offset, sizeof(random_node) - offset);
+          if (n > 0) {
+            offset += static_cast<size_t>(n);
+          } else if (n < 0 && EINTR == errno) {
+            continue;
           } else {
-            LOG_WARN("ioctl failed, SIOCGIFFLAGS", K(errno), K(it->ifr_name));
+            entropy_errno = (0 == n ? EIO : errno);
+            break;
           }
         }
-      }//end for
-      if (OB_FAIL(ret)) {
-      } else if (!mac_addr_found) {
-        ret = OB_ERR_UNEXPECTED;
-      } else {
+        // Preserve the read error across close().
+        close(fd);
+      }
+      if (sizeof(random_node) == offset) {
+        // RFC 9562 section 6.10: mark a synthetic node with the multicast bit.
+        random_node[0] |= 0x01;
+        MEMCPY(mac_addr_, random_node, sizeof(random_node));
         is_inited_ = true;
+        LOG_WARN("no usable MAC address, using random UUID node id",
+                 "failure_stage", failure_stage, K(failure_errno));
+      } else {
+        ret = OB_ERR_UNEXPECTED;
+        LOG_WARN("failed to initialize UUID node: entropy source unavailable",
+                 K(ret), "failure_stage", failure_stage,
+                 K(failure_errno), K(entropy_errno));
       }
     }
-    close(sock);
   }
 #endif
   return ret;
