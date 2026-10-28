@@ -594,10 +594,13 @@ int ObTransformerImpl::choose_rewrite_rules(ObDMLStmt *stmt, uint64_t &need_type
     // statement-local and semantics-preserving, so it is safe to enable it
     // independently. Without it an equivalent filter such as
     // P AND (P OR Q) ... reaches the adaptive scan in its expanded form and is
-    // evaluated for every candidate row.
+    // evaluated for every candidate row. Queries that also reference ENUM/SET
+    // columns keep the existing enum_set_enable_list restriction, which
+    // deliberately excludes SIMPLIFY_EXPR.
     if (func.contain_vec_index_approx_ &&
         !func.contain_geometry_values_ &&
-        !func.contain_fulltext_search_) {
+        !func.contain_fulltext_search_ &&
+        !func.contain_enum_set_values_) {
       uint64_t vec_approx_enable_list = 0;
       ObTransformRule::add_trans_type(vec_approx_enable_list, SIMPLIFY_EXPR);
       disable_list &= ~vec_approx_enable_list;
