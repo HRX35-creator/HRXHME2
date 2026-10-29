@@ -259,7 +259,13 @@ int ObOllamaUtils::get_header(common::ObIAllocator &allocator,
                               common::ObArray<ObString> &headers) 
 {
   int ret = OB_SUCCESS;
-  // ollama header is empty, do nothing
+  // ollama does not authenticate, but the http client rejects an empty header
+  // list and the body of every request is json.
+  ObString content_type_str("Content-Type: application/json");
+  ObString content_type_c_str;
+  if (OB_FAIL(ob_write_string(allocator, content_type_str, content_type_c_str, true))) {
+  } else if (OB_FAIL(headers.push_back(content_type_c_str))) {
+  }
   return ret;
 }
 
@@ -281,16 +287,21 @@ int ObOllamaUtils::ObOllamaComplete::get_body(common::ObIAllocator &allocator,
   if (model.empty() || content.empty()) { 
     ret = OB_INVALID_ARGUMENT;
   } else {
-    // {"model": "llama3.1", "prompt": "What is the capital of France?"}
+    // {"model": "llama3.1", "prompt": "...", "stream": false,
+    //  "options": {"temperature": 0.2}}
     ObJsonObject *body_obj = nullptr;
     ObJsonString *model_str = nullptr;
     ObJsonString *content_str = nullptr;
+    ObJsonBoolean *stream_boolean = nullptr;
     if (OB_FAIL(ObAIFuncJsonUtils::get_json_object(allocator, body_obj))) {
     } else if (OB_FAIL(ObAIFuncJsonUtils::get_json_string(allocator, model, model_str))) {
     } else if (OB_FAIL(body_obj->add("model", model_str))) {
     } else if (OB_FAIL(ObAIFuncJsonUtils::get_json_string(allocator, content, content_str))) {
     } else if (OB_FAIL(body_obj->add("prompt", content_str))) {
-    } else if (OB_FAIL(ObAIFuncJsonUtils::compact_json_object(allocator, config, body_obj))) {
+    } else if (OB_FAIL(ObAIFuncJsonUtils::get_json_boolean(allocator, false, stream_boolean))) {
+    } else if (OB_FAIL(body_obj->add("stream", stream_boolean))) {
+    } else if (OB_NOT_NULL(config) && config->element_count() > 0
+               && OB_FAIL(body_obj->add("options", config))) {
     } else {
       body = body_obj;
     }
@@ -328,8 +339,11 @@ int ObOllamaUtils::ObOllamaComplete::parse_output(common::ObIAllocator &allocato
     ObJsonSeekResult hit;
     if (OB_FAIL(j_path.parse_path())) {
     } else if (OB_FAIL(j_tree->seek(j_path, j_path.path_node_cnt(), false, false, hit))) {
-    } else if (hit.size() == 0) {
-      ret = OB_ERR_UNEXPECTED;
+    } else if (hit.size() != 1 || OB_ISNULL(hit[0])
+               || hit[0]->json_type() != ObJsonNodeType::J_STRING
+               || static_cast<ObJsonString *>(hit[0])->get_str().empty()) {
+      ret = OB_INVALID_DATA;
+      LOG_WARN("ollama returns an unexpected completion response", K(ret), K(hit.size()));
     } else {
       result = hit[0];
     }
@@ -362,12 +376,10 @@ int ObOllamaUtils::ObOllamaEmbed::get_body(common::ObIAllocator &allocator,
     } else if (OB_FAIL(body_obj->add("model", model_str))) {
     } else if (OB_FAIL(ObAIFuncJsonUtils::transform_array_to_json_array(allocator, contents, input_array))) {
     } else if (OB_FAIL(body_obj->add("input", input_array))) {
+    } else if (OB_NOT_NULL(config) && config->element_count() > 0
+               && OB_FAIL(body_obj->add("options", config))) {
     } else {
       body = body_obj;
-    }
-    if (OB_SUCC(ret)) {
-      if (OB_FAIL(ObAIFuncJsonUtils::compact_json_object(allocator, config, body))) {
-      }
     }
   }
   return ret;
@@ -381,16 +393,24 @@ int ObOllamaUtils::ObOllamaEmbed::parse_output(common::ObIAllocator &allocator,
   if (OB_ISNULL(http_response)) {
     ret = OB_INVALID_ARGUMENT;
   } else {
-    ObIJsonBase *j_tree = http_response;
-    common::ObString path_text("$.embeddings");
-    ObJsonPath j_path(path_text, &allocator);
-    ObJsonSeekResult hit;
-    if (OB_FAIL(j_path.parse_path())) {
-    } else if (OB_FAIL(j_tree->seek(j_path, j_path.path_node_cnt(), false, false, hit))) {
-    } else if (hit.size() == 0) {
-      ret = OB_ERR_UNEXPECTED;
+    ObJsonNode *embeddings_node = http_response->get_value("embeddings");
+    if (OB_NOT_NULL(embeddings_node) && embeddings_node->json_type() == ObJsonNodeType::J_ARRAY
+        && embeddings_node->element_count() > 0) {
+      // /api/embed answers {"embeddings": [[...], ...]}
+      result = embeddings_node;
     } else {
-      result = hit[0];
+      // /api/embeddings answers {"embedding": [...]}, wrap it so that the caller
+      // always sees one array per input
+      ObJsonNode *embedding_node = http_response->get_value("embedding");
+      ObJsonArray *wrapper = nullptr;
+      if (OB_ISNULL(embedding_node) || embedding_node->json_type() != ObJsonNodeType::J_ARRAY) {
+        ret = OB_INVALID_DATA;
+        LOG_WARN("ollama returns an unexpected embedding response", K(ret));
+      } else if (OB_FAIL(ObAIFuncJsonUtils::get_json_array(allocator, wrapper))) {
+      } else if (OB_FAIL(wrapper->append(embedding_node))) {
+      } else {
+        result = wrapper;
+      }
     }
   }
   return ret;
@@ -1080,6 +1100,8 @@ int ObAIFuncUtils::get_complete_provider(ObIAllocator &allocator, const ObString
       || ob_provider_check(provider, ObAIFuncProviderUtils::SILICONFLOW)
       || ob_provider_check(provider, ObAIFuncProviderUtils::HUNYUAN)) {
     complete_provider = OB_NEWx(ObOpenAIUtils::ObOpenAIComplete, &allocator);
+  } else if (ob_provider_check(provider, ObAIFuncProviderUtils::OLLAMA)) {
+    complete_provider = OB_NEWx(ObOllamaUtils::ObOllamaComplete, &allocator);
   } else if (ob_provider_check(provider, ObAIFuncProviderUtils::DASHSCOPE)) {
     complete_provider = OB_NEWx(ObDashscopeUtils::ObDashscopeComplete, &allocator);
   } else {
@@ -1103,6 +1125,8 @@ int ObAIFuncUtils::get_embed_provider(ObIAllocator &allocator, const ObString &p
       || ob_provider_check(provider, ObAIFuncProviderUtils::HUNYUAN)
       || ob_provider_check(provider, ObAIFuncProviderUtils::SILICONFLOW)) {
     embed_provider = OB_NEWx(ObOpenAIUtils::ObOpenAIEmbed, &allocator);
+  } else if (ob_provider_check(provider, ObAIFuncProviderUtils::OLLAMA)) {
+    embed_provider = OB_NEWx(ObOllamaUtils::ObOllamaEmbed, &allocator);
   } else if (ob_provider_check(provider, ObAIFuncProviderUtils::DASHSCOPE)) {
     embed_provider = OB_NEWx(ObDashscopeUtils::ObDashscopeEmbed, &allocator);
   } else {
