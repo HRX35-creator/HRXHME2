@@ -2947,6 +2947,11 @@ int ObBasicSessionInfo::is_select_index_enabled(bool &select_index_enabled) cons
   return get_bool_sys_var(SYS_VAR_OB_ENABLE_INDEX_DIRECT_SELECT, select_index_enabled);
 }
 
+int ObBasicSessionInfo::get_file_table_enabled(bool &enabled) const
+{
+  return get_bool_sys_var(SYS_VAR_ENABLE_FILE_SQL, enabled);
+}
+
 int ObBasicSessionInfo::set_autocommit(bool autocommit)
 {
   sys_vars_cache_.set_autocommit(autocommit);
