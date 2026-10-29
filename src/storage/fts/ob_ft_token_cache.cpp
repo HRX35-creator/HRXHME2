@@ -69,8 +69,6 @@ int ObFTTokenCache::init()
       }
       bucket_lock_.destroy();
     } else {
-      total_cnt_.store(0, std::memory_order_relaxed);
-      evicting_.store(false, std::memory_order_relaxed);
       is_inited_ = true;
       FLOG_INFO("succeeded to initialize fulltext token cache");
     }
@@ -209,42 +207,51 @@ int ObFTTokenCache::try_store(const ObFTTokenCacheKey &key,
   uint64_t hash_val = 0;
   key.hash(hash_val);
   const uint64_t bucket_idx = hash_val & (BUCKET_CNT - 1);
-  bool stored = false;
-  {
-    common::ObBucketWLockGuard guard(bucket_lock_, bucket_idx);
-    if (OB_UNLIKELY(OB_SUCCESS != guard.get_ret())) {
-      ret = guard.get_ret();
-      FLOG_WARN("fail to write lock fulltext token cache bucket", K(ret), K(bucket_idx));
-    } else if (OB_NOT_NULL(buckets_[bucket_idx].map_.get(key))) {
-      // another thread cached the same text first
+  // Skip large documents before sizing/copying their word map. Caching is
+  // optional: the caller already has the correct segmentation result.
+  if (fulltext_len > MAX_ENTRY_BYTES) {
+    return OB_SUCCESS;
+  }
+  const int64_t size = entry_size(property, fulltext_len, words);
+  if (size > MAX_ENTRY_BYTES) {
+    return OB_SUCCESS;
+  }
+  common::ObBucketWLockGuard guard(bucket_lock_, bucket_idx);
+  Bucket &bucket = buckets_[bucket_idx];
+  if (OB_UNLIKELY(OB_SUCCESS != guard.get_ret())) {
+    ret = guard.get_ret();
+  } else if (OB_NOT_NULL(bucket.map_.get(key))) {
+    // Another thread stored the same key first.
+  } else {
+    if (bucket.used_bytes_ + size > BUCKET_BYTE_BUDGET
+        || bucket.map_.size() >= BUCKET_ENTRY_BUDGET) {
+      ret = bucket.clear();
+    }
+    char *buf = nullptr;
+    if (OB_FAIL(ret)) {
+    } else if (OB_ISNULL(buf = static_cast<char *>(bucket.arena_.alloc(size)))) {
+      ret = OB_ALLOCATE_MEMORY_FAILED;
     } else {
-      const int64_t size = entry_size(property, fulltext_len, words);
-      char *buf = static_cast<char *>(buckets_[bucket_idx].arena_.alloc(size));
-      if (OB_ISNULL(buf)) {
-        ret = OB_ALLOCATE_MEMORY_FAILED;
-      } else {
-        ObFTTokenCacheEntry *entry = new (buf) ObFTTokenCacheEntry();
-        if (OB_FAIL(fill_entry(*entry,
-                               property,
-                               parser_name,
-                               parser_version,
-                               key.collation_,
-                               fulltext,
-                               fulltext_len,
-                               doc_length,
-                               words))) {
-          FLOG_WARN("fail to fill fulltext token cache entry", K(ret), K(fulltext_len));
-        } else if (OB_FAIL(buckets_[bucket_idx].map_.set_refactored(
-                       key, reinterpret_cast<char *>(entry)))) {
-          FLOG_WARN("fail to insert fulltext token cache entry", K(ret), K(bucket_idx));
-        } else {
-          stored = true;
-        }
+      // Account for allocations even if filling/inserting subsequently fails.
+      bucket.used_bytes_ += size;
+      ObFTTokenCacheEntry *entry = new (buf) ObFTTokenCacheEntry();
+      if (OB_FAIL(fill_entry(*entry, property, parser_name, parser_version,
+                            key.collation_, fulltext, fulltext_len, doc_length, words))) {
+      } else if (OB_FAIL(bucket.map_.set_refactored(key, reinterpret_cast<char *>(entry)))) {
       }
     }
   }
-  if (OB_SUCC(ret) && stored) {
-    evict_all_if_needed();
+  return ret;
+}
+
+int ObFTTokenCache::Bucket::clear()
+{
+  // Clear pointers before releasing their payloads. Caller holds the shard's
+  // write lock, so no reader can still be copying data out of this arena.
+  int ret = map_.reuse();
+  if (OB_SUCCESS == ret) {
+    arena_.reset();
+    used_bytes_ = 0;
   }
   return ret;
 }
@@ -355,33 +362,6 @@ int ObFTTokenCache::fill_entry(ObFTTokenCacheEntry &entry,
     cursor += word_len;
   }
   return ret;
-}
-
-void ObFTTokenCache::evict_all_if_needed()
-{
-  int ret = OB_SUCCESS;  // FLOG_* renders the enclosing function's ret
-  const int64_t cnt = total_cnt_.fetch_add(1, std::memory_order_relaxed) + 1;
-  if (cnt > ENTRY_BUDGET) {
-    bool expected = false;
-    if (evicting_.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
-      common::ObBucketWLockAllGuard guard(bucket_lock_);
-      const int lock_ret = guard.get_ret();
-      if (OB_UNLIKELY(OB_SUCCESS != lock_ret)) {
-        FLOG_WARN("fail to write lock all fulltext token cache buckets", K(lock_ret));
-      } else {
-        for (int64_t i = 0; i < BUCKET_CNT; ++i) {
-          buckets_[i].map_.destroy();
-          buckets_[i].arena_.reset();
-          if (OB_SUCCESS != buckets_[i].map_.create(BUCKET_MAP_CNT, "FtsTokCacheBkt", "FtsTokCacheNode")) {
-            FLOG_WARN("fail to recreate fulltext token cache bucket map", K(i));
-          }
-        }
-        total_cnt_.store(0, std::memory_order_relaxed);
-        FLOG_INFO("evicted fulltext token cache", K(cnt));
-      }
-      evicting_.store(false, std::memory_order_release);
-    }
-  }
 }
 
 } // end namespace storage

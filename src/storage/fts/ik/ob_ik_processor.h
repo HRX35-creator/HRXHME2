@@ -48,6 +48,12 @@ public:
   int current_char(const char *&ch, uint8_t &char_len);
   int current_char_type(ObFTCharUtil::CharType &type);
 
+  // Decode and classify the character starting at pos in one pass. The
+  // arbitrator walks the document again after segmentation to fill the gaps
+  // between tokens, and first_valid_char plus classify_first_char decode the
+  // same character twice.
+  int char_at(int64_t pos, int64_t &char_len, ObFTCharUtil::CharType &type) const;
+
   int check_current_cn_number(bool &is_number) const
   {
     if (has_decoded_unicode_) {

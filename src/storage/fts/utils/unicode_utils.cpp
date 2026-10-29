@@ -152,8 +152,25 @@ ob_wc_t ObUnicodeBlockUtils::get_unicode_from_u8(const char *input, const uint8_
 
 bool ObUnicodeBlockUtils::is_unicode_cn_number(ob_wc_t unicode)
 {
-  // This predicate runs for every Chinese character. Keep the original set,
-  // but let the compiler dispatch on code points instead of scanning it.
+  // This predicate runs for every Chinese character. Keep the original set, but
+  // reject the common case before the sparse switch: only a few 256-code-point
+  // blocks contain a Chinese numeral, so most characters stop at the bit test.
+  static constexpr ob_wc_t CN_NUMBER_MIN = 0x4E00;
+  static constexpr ob_wc_t CN_NUMBER_MAX = 0x96F6;
+  static constexpr uint64_t CN_NUMBER_BLOCKS_LOW =
+      (1ULL << 0x00) | (1ULL << 0x01) | (1ULL << 0x03) | (1ULL << 0x05)
+      | (1ULL << 0x08) | (1ULL << 0x0A) | (1ULL << 0x10) | (1ULL << 0x14)
+      | (1ULL << 0x15) | (1ULL << 0x19) | (1ULL << 0x25) | (1ULL << 0x28)
+      | (1ULL << 0x32) | (1ULL << 0x36) | (1ULL << 0x3F);
+  static constexpr uint64_t CN_NUMBER_BLOCKS_HIGH = 1ULL << (0x48 - 0x40);
+  if (unicode < CN_NUMBER_MIN || unicode > CN_NUMBER_MAX) {
+    return false;
+  }
+  const uint32_t block = static_cast<uint32_t>((unicode - CN_NUMBER_MIN) >> 8);
+  const uint64_t mask = block < 64 ? CN_NUMBER_BLOCKS_LOW : CN_NUMBER_BLOCKS_HIGH;
+  if (0 == ((mask >> (block & 0x3F)) & 1)) {
+    return false;
+  }
   switch (unicode) {
   case 0x4E00: // 一
   case 0x4E8C: // 二

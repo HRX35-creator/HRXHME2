@@ -14,10 +14,8 @@
  * limitations under the License.
  */
 
-#ifndef OB_FT_TOKEN_CACHE_H_
-#define OB_FT_TOKEN_CACHE_H_
+#pragma once
 
-#include <atomic>
 
 #include "lib/alloc/alloc_struct.h"
 #include "lib/allocator/page_arena.h"
@@ -117,7 +115,7 @@ public:
 //
 // The cache is a sharded hash map guarded by bucket RW locks.  Entries are
 // serialized into flat buffers allocated from per-bucket arenas, which makes
-// eviction a simple arena reset under the write lock of every bucket.  Hit
+// eviction a shard-local arena reset under that shard's write lock.  Hit
 // verification compares the stored text bytes, parser name and version, the
 // property fields and the collation, so a hash collision on the 64-bit key
 // hashes cannot return a wrong segmentation.
@@ -126,10 +124,14 @@ class ObFTTokenCache final
 public:
   static constexpr int64_t BUCKET_CNT = 256;
   static constexpr int64_t BUCKET_MAP_CNT = 64;
-  static constexpr int64_t ENTRY_BUDGET = 1 << 17; // 131072 entries
+  // At most 128 MiB of serialized entries in total, plus arena/map overhead.
+  // Shard-local eviction never blocks readers of unrelated shards.
+  static constexpr int64_t BUCKET_BYTE_BUDGET = 512 * 1024;
+  static constexpr int64_t BUCKET_ENTRY_BUDGET = 512;
+  static constexpr int64_t MAX_ENTRY_BYTES = 64 * 1024;
 
   ObFTTokenCache()
-      : total_cnt_(0), evicting_(false), is_inited_(false)
+      : is_inited_(false)
   {
   }
   ~ObFTTokenCache() = default;
@@ -173,12 +175,14 @@ private:
   struct Bucket final
   {
     Bucket()
-        : arena_(lib::ObMemAttr("FtsTokCache")), map_()
+        : arena_(lib::ObMemAttr("FtsTokCache")), map_(), used_bytes_(0)
     {
     }
     ~Bucket() = default;
+    int clear();
     common::ObArenaAllocator arena_;
     common::hash::ObHashMap<ObFTTokenCacheKey, char *, common::hash::NoPthreadDefendMode> map_;
+    int64_t used_bytes_;
   };
 
   static bool property_equals(const ObFTParserProperty &property,
@@ -199,15 +203,12 @@ private:
                  const int64_t fulltext_len,
                  const int64_t doc_length,
                  const ObFTWordMap &words);
-  void evict_all_if_needed();
 
 private:
   static ObFTTokenCache *g_token_cache_;
 
   Bucket buckets_[BUCKET_CNT];
   common::ObBucketLock bucket_lock_;
-  std::atomic<int64_t> total_cnt_;
-  std::atomic<bool> evicting_;
   bool is_inited_;
 
 private:
@@ -216,5 +217,3 @@ private:
 
 } // end namespace storage
 } // end namespace oceanbase
-
-#endif // OB_FT_TOKEN_CACHE_H_

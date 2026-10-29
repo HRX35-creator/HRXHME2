@@ -159,16 +159,22 @@ int ObStringDiffDecoder::batch_decode(
 
     // Fill string data
     const uint16_t string_size = header_->string_size_;
-    const static uint16_t min_buf_size = 128;
-    const int64_t buf_size = std::max(string_size, min_buf_size);
+    // Size the batch buffer by the column width: a fixed 128-byte floor
+    // inflated a 16-byte doc-id batch eight times and hurt cache reuse.
+    const int64_t buf_size = string_size > 0 ? string_size : 1;
     char *buf = nullptr;
     if (OB_FAIL(ret)) {
     } else if (OB_ISNULL(buf = static_cast<char *>(ctx.allocator_->alloc(buf_size * row_cap)))) {
       ret = OB_ALLOCATE_MEMORY_FAILED;
     } else {
-      for (int64_t i = 0; i < row_cap; ++i) {
-        header_->copy_string(ObStringDiffHeader::LeftToRight(), std::logical_not<uint8_t>(),
-            header_->common_data(), buf + i * buf_size);
+      // The common bytes are identical for every row: materialize the template
+      // once and replicate it with one fixed-width copy per row. The per-row
+      // diff segments are patched below.
+      header_->copy_string(ObStringDiffHeader::LeftToRight(), std::logical_not<uint8_t>(),
+          header_->common_data(), buf);
+      ObStringDiffHeader::LeftToRight l2r;
+      for (int64_t i = 1; i < row_cap; ++i) {
+        l2r(buf, buf + i * buf_size, string_size);
       }
     }
 

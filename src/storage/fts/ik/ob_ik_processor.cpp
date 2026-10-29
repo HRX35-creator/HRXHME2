@@ -136,6 +136,52 @@ int TokenizeContext::prepare_next_char()
   return ret;
 }
 
+int TokenizeContext::char_at(const int64_t pos,
+                             int64_t &char_len,
+                             ObFTCharUtil::CharType &type) const
+{
+  int ret = OB_SUCCESS;
+  if (OB_UNLIKELY(pos < 0 || pos >= fulltext_len_)) {
+    ret = OB_ITER_END;
+  } else if (is_utf8mb4_) {
+    const unsigned char *start = reinterpret_cast<const unsigned char *>(fulltext_ + pos);
+    const unsigned char *end = reinterpret_cast<const unsigned char *>(fulltext_ + fulltext_len_);
+    ob_wc_t wc = 0;
+    const int len = common::ob_charset_decode_unicode<CHARSET_UTF8MB4>(start, end, wc);
+    if (len > 0) {
+      char_len = len;
+      type = ObFTCharUtil::classify_unicode(wc);
+    } else if (OB_FAIL(nullptr != cs_
+                    ? ObCharset::first_valid_char(cs_,
+                                                  fulltext_ + pos,
+                                                  fulltext_len_ - pos,
+                                                  char_len)
+                    : ObCharset::first_valid_char(coll_type_,
+                                                  fulltext_ + pos,
+                                                  fulltext_len_ - pos,
+                                                  char_len))) {
+    } else if (OB_FAIL(ObFTCharUtil::classify_first_char(coll_type_,
+                                                         fulltext_ + pos,
+                                                         char_len,
+                                                         type))) {
+    }
+  } else if (OB_FAIL(nullptr != cs_
+                  ? ObCharset::first_valid_char(cs_,
+                                                fulltext_ + pos,
+                                                fulltext_len_ - pos,
+                                                char_len)
+                  : ObCharset::first_valid_char(coll_type_,
+                                                fulltext_ + pos,
+                                                fulltext_len_ - pos,
+                                                char_len))) {
+  } else if (OB_FAIL(ObFTCharUtil::classify_first_char(coll_type_,
+                                                       fulltext_ + pos,
+                                                       char_len,
+                                                       type))) {
+  }
+  return ret;
+}
+
 int TokenizeContext::step_next()
 {
   int ret = OB_SUCCESS;

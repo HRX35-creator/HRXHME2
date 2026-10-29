@@ -50,11 +50,21 @@ int ObIKFTParser::init(const ObFTParserParam &param)
     coll_type_ = ObCollationType::CS_TYPE_INVALID;
     if (OB_ISNULL(param.cs_) || OB_ISNULL(param.cs_->name)) {
       ret = OB_INVALID_ARGUMENT;
-    } else if (CS_TYPE_INVALID == (coll_type_ = ObCharset::collation_type(param.cs_->name))) {
-      ret = OB_INVALID_ARGUMENT;
-    } else if (OB_FAIL(init_dict(param))) {
-    } else if (OB_FAIL(init_ctx(param))) {
-    } else if (OB_FAIL(init_segmenter(param))) {
+    } else {
+      // cs_ is the resolved collation of the indexed column, so its number is
+      // already the collation type; looking the name up again scans all
+      // collation names on every tokenize call.
+      if (ObCharset::is_valid_collation(static_cast<int64_t>(param.cs_->number))) {
+        coll_type_ = static_cast<ObCollationType>(param.cs_->number);
+      } else {
+        coll_type_ = ObCharset::collation_type(param.cs_->name);
+      }
+      if (CS_TYPE_INVALID == coll_type_) {
+        ret = OB_INVALID_ARGUMENT;
+      } else if (OB_FAIL(init_dict(param))) {
+      } else if (OB_FAIL(init_ctx(param))) {
+      } else if (OB_FAIL(init_segmenter(param))) {
+      }
     }
 
     if (OB_FAIL(ret)) {

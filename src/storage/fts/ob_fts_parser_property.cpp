@@ -1018,15 +1018,21 @@ int ObFTParserProperty::parse_for_parser_helper(const ObFTParser &parser, const 
   int ret = OB_SUCCESS;
   ObFTParserJsonProps props;
   if (json_str.empty()) {
-    // No configuration was given, so the constructor defaults are used directly
-    // and there is no json to build or parse. The ik branch below also records
-    // these placeholder names so that a helper built from an empty property
-    // string still compares equal to one built from the default json in
-    // ObFTParseHelper::check_is_the_same().
+    // Restore this parser's defaults even when the helper is reused after a
+    // previous non-default configuration. Avoid allocating an empty JSON tree.
     if (parser.is_ik()) {
+      ik_mode_smart_ = true;
       dict_table_ = ObString(ObFTSLiteral::CONFIG_NAME_DICT_TABLE);
       stopword_table_ = ObString(ObFTSLiteral::CONFIG_NAME_STOPWORD_TABLE);
       quantifier_table_ = ObString(ObFTSLiteral::CONFIG_NAME_QUANTIFIER_TABLE);
+    } else if (parser.is_space() || parser.is_beng()) {
+      min_token_size_ = ObFTSLiteral::FT_DEFAULT_MIN_TOKEN_SIZE;
+      max_token_size_ = ObFTSLiteral::FT_DEFAULT_MAX_TOKEN_SIZE;
+    } else if (parser.is_ngram()) {
+      ngram_token_size_ = ObFTSLiteral::FT_DEFAULT_NGRAM_TOKEN_SIZE;
+    } else if (parser.is_ngram2()) {
+      min_ngram_token_size_ = ObFTSLiteral::FT_DEFAULT_MIN_NGRAM_SIZE;
+      max_ngram_token_size_ = ObFTSLiteral::FT_DEFAULT_MAX_NGRAM_SIZE;
     }
   } else if (OB_FAIL(props.init())) {
   } else if (OB_FAIL(props.parse_from_valid_str(json_str))) {
