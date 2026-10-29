@@ -5344,7 +5344,19 @@ int ObDMLResolver::resolve_approx_clause(const ParseNode *approx_node)
           LOG_USER_ERROR(OB_NOT_SUPPORTED, "Using vector index without column ref or vector const expr is");
         }
       }
-      if (OB_SUCC(ret) && is_match && is_vec_index_valid && tmp_expr->get_expr_type() != T_FUN_SYS_INNER_PRODUCT) {
+      // INNER_PRODUCT is a similarity: a vector index scan returns the most similar rows
+      // first, so it only serves the requested ordering when the sort is descending.
+      // Other supported distance expressions are metrics whose smaller values mean
+      // closer rows, and their handling is intentionally left unchanged.
+      bool is_ann_order_matched = true;
+      if (T_FUN_SYS_INNER_PRODUCT == tmp_expr->get_expr_type()) {
+        is_ann_order_matched = is_descending_direction(stmt->get_order_item(0).order_type_);
+        if (!is_ann_order_matched) {
+          LOG_WARN("inner product approximated order is not similarity descending, will not use vector index",
+                   K(stmt->get_order_item(0).order_type_));
+        }
+      }
+      if (OB_SUCC(ret) && is_match && is_vec_index_valid && is_ann_order_matched) {
         stmt->set_has_vec_approx(true);
       }
       if (OB_SUCC(ret) && !has_const) {
