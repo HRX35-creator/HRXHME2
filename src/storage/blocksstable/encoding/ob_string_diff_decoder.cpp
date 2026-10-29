@@ -162,6 +162,35 @@ int ObStringDiffDecoder::batch_decode(
     // Size the batch buffer by the column width: a fixed 128-byte floor
     // inflated a 16-byte doc-id batch eight times and hurt cache reuse.
     const int64_t buf_size = string_size > 0 ? string_size : 1;
+    // Precompute the diff segments of this column once: {target offset, source
+    // offset, length}. A fixed-length doc-id column decodes as 2-3 segments, so
+    // the per-row patch becomes one or two direct copies instead of walking the
+    // descriptor list and its bitfields for every row.
+    constexpr int64_t MAX_DIFF_SEGS = 16;
+    uint16_t seg_dst[MAX_DIFF_SEGS];
+    uint16_t seg_src[MAX_DIFF_SEGS];
+    uint8_t seg_len[MAX_DIFF_SEGS];
+    int64_t seg_cnt = 0;
+    bool seg_overflow = false;
+    if (!header_->is_hex_packing()) {
+      int64_t dst_off = 0;
+      int64_t src_off = 0;
+      for (int64_t d = 0; d < header_->diff_desc_cnt_; ++d) {
+        const ObStringDiffHeader::DiffDesc &desc = header_->diff_descs_[d];
+        if (0 != desc.diff_) {
+          if (seg_cnt >= MAX_DIFF_SEGS) {
+            seg_overflow = true;
+            break;
+          }
+          seg_dst[seg_cnt] = static_cast<uint16_t>(dst_off);
+          seg_src[seg_cnt] = static_cast<uint16_t>(src_off);
+          seg_len[seg_cnt] = desc.count_;
+          ++seg_cnt;
+          src_off += desc.count_;
+        }
+        dst_off += desc.count_;
+      }
+    }
     char *buf = nullptr;
     if (OB_FAIL(ret)) {
     } else if (OB_ISNULL(buf = static_cast<char *>(ctx.allocator_->alloc(buf_size * row_cap)))) {
@@ -183,6 +212,7 @@ int ObStringDiffDecoder::batch_decode(
       int64_t row_id = 0;
       const unsigned char *cell_data = nullptr;
       char *str_ptr = nullptr;
+      ObStringDiffHeader::LeftToRight l2r;
       for (int64_t i = 0; i < row_cap; ++i) {
         if (ctx.has_extend_value() && datums[i].is_null()) {
           // Skip
@@ -196,6 +226,10 @@ int ObStringDiffDecoder::batch_decode(
             header_->copy_hex_string(unpacker,
                 static_cast<void (ObHexStringUnpacker::*)(unsigned char &)>(&ObHexStringUnpacker::unpack),
                 reinterpret_cast<unsigned char *>(str_ptr));
+          } else if (!seg_overflow) {
+            for (int64_t s = 0; s < seg_cnt; ++s) {
+              l2r(cell_data + seg_src[s], str_ptr + seg_dst[s], seg_len[s]);
+            }
           } else {
             header_->copy_string(
               ObStringDiffHeader::LeftToRight(),
