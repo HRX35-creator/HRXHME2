@@ -166,6 +166,8 @@ public:
                 const int64_t fulltext_len,
                 const int64_t doc_length,
                 const ObFTWordMap &words);
+  // The caller builds the key itself, so it needs the property digest too.
+  static uint64_t property_fingerprint(const ObFTParserProperty &property);
 
 private:
   struct Bucket final
@@ -179,7 +181,6 @@ private:
     common::hash::ObHashMap<ObFTTokenCacheKey, char *, common::hash::NoPthreadDefendMode> map_;
   };
 
-  static uint64_t property_fingerprint(const ObFTParserProperty &property);
   static bool property_equals(const ObFTParserProperty &property,
                               const ObFTTokenCacheEntry &entry);
   int replay_entry(const ObFTTokenCacheEntry &entry,

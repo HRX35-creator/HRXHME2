@@ -359,6 +359,7 @@ int ObFTTokenCache::fill_entry(ObFTTokenCacheEntry &entry,
 
 void ObFTTokenCache::evict_all_if_needed()
 {
+  int ret = OB_SUCCESS;  // FLOG_* renders the enclosing function's ret
   const int64_t cnt = total_cnt_.fetch_add(1, std::memory_order_relaxed) + 1;
   if (cnt > ENTRY_BUDGET) {
     bool expected = false;
