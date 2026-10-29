@@ -806,6 +806,7 @@ public:
   bool get_reload_finish() { return reload_finish_; };
   int get_inc_index_row_cnt(int64_t &count);
   int get_snap_index_row_cnt(int64_t &count);
+  bool has_nonempty_snapshot();
   common::RWLock& get_query_lock() { return query_lock_; }
   common::ObSpinLock& get_reload_lock() { return reload_lock_; }
   bool is_hybrid_index();

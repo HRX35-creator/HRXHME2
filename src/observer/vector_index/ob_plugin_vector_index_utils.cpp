@@ -703,7 +703,8 @@ int ObPluginVectorIndexUtils::try_sync_snapshot_memdata(ObPluginVectorIndexAdapt
       ret = OB_ERR_UNEXPECTED;
       LOG_WARN("invalid row", K(ret), K(row));
     } else if (adapter->get_snapshot_key_prefix().empty() ||
-               !row->storage_datums_[0].get_string().prefix_match(adapter->get_snapshot_key_prefix())) {
+               !row->storage_datums_[0].get_string().prefix_match(adapter->get_snapshot_key_prefix()) ||
+               !adapter->has_nonempty_snapshot()) {
       ObString key_prefix;
       ObString target_prefix;
       if (OB_ISNULL(vector_index_service)) {

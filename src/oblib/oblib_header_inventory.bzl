@@ -1373,6 +1373,7 @@ OBLIB_HEADER_TARGETS = {
     },
     "oblib_vector_primitives": {
         "hdrs": [
+        "lib/vector/hipvs_bulk_builder.h",
         "lib/vector/ob_vsag_adaptor.h",
     ],
         "deps": [],
@@ -1771,6 +1772,7 @@ OBLIB_HEADER_TARGET_FOR_HEADER = {
     "lib/utility/utility.h": ":oblib_core_advanced",
     "lib/vector/ob_vector_util.h": ":oblib_vector",
     "lib/vector/ob_vsag_adaptor.h": ":oblib_vector_primitives",
+    "lib/vector/hipvs_bulk_builder.h": ":oblib_vector_primitives",
     "lib/wait_event/ob_inner_sql_wait_type.h": ":oblib_diagnostics_primitives",
     "lib/wait_event/ob_wait_class.h": ":oblib_foundation_base",
     "lib/wait_event/ob_wait_event.h": ":oblib_foundation_base",

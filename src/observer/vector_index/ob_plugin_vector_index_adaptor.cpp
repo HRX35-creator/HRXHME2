@@ -1427,7 +1427,7 @@ int ObPluginVectorIndexAdaptor::init_sparse_vector_type()
 
 // [hipVS/cuVS] Mark a just-populated index handle for the GPU path when the
 // vector index was declared WITH (lib=cuvs) on a dense L2 HNSW index. Idempotent.
-static inline void ob_mark_cuvs_if_needed(void *algo_data, void *handle)
+static inline void ob_mark_cuvs_if_needed(void *algo_data, void *handle, bool bulk_snapshot = false)
 {
   ObVectorIndexParam *param = static_cast<ObVectorIndexParam *>(algo_data);
   if (handle != nullptr && param != nullptr
@@ -1435,7 +1435,9 @@ static inline void ob_mark_cuvs_if_needed(void *algo_data, void *handle)
       && param->dist_algorithm_ == ObVectorIndexDistAlgorithm::VIDA_L2
       && (param->type_ == ObVectorIndexAlgorithmType::VIAT_HNSW
           || param->type_ == ObVectorIndexAlgorithmType::VIAT_HGRAPH)) {
-    oceanbase::common::obvsag::mark_cuvs_index(handle);
+    if (!bulk_snapshot || !oceanbase::common::obvsag::mark_cuvs_bulk_index(handle)) {
+      oceanbase::common::obvsag::mark_cuvs_index(handle);
+    }
   }
 }
 
@@ -1821,7 +1823,7 @@ int ObPluginVectorIndexAdaptor::add_snap_index(float *vectors, int64_t *vids, Ob
           lib::ObMallocHookAttrGuard malloc_guard(lib::ObMemAttr("VIndexVsagADP"));
           lib::ObLightBacktraceGuard light_backtrace_guard(false);
           if (!is_sparse_vector_index_type()) {
-            ob_mark_cuvs_if_needed(algo_data_, snap_data_->index_);
+            ob_mark_cuvs_if_needed(algo_data_, snap_data_->index_, true);
             if (OB_FAIL(obvectorutil::add_index(snap_data_->index_, vectors, vids, dim, extra_info_buf, num))) {
             }
           } else {
@@ -2134,7 +2136,18 @@ int ObPluginVectorIndexAdaptor::check_snap_hnswsq_index()
   } else if (OB_ISNULL(param = static_cast<ObVectorIndexParam*>(algo_data_))) {
     ret = OB_ERR_UNEXPECTED;
     LOG_WARN("failed to get param.", K(ret));
-  } else if (param->type_ == VIAT_HNSW || param->type_ == VIAT_HGRAPH || snap_data_->has_build_sq_ || param->type_ == VIAT_IPIVF) {
+  } else if (param->type_ == VIAT_HNSW) {
+    // Finish deferred construction before the snapshot key becomes observable.
+    // A scheduler adapter can share snap_data_ while retaining its own prefix.
+    // Publishing the prefix and then waiting for a GPU build lets that adapter
+    // cache the new key before memory-saving renewal replaces the shared index
+    // with an empty one, causing it to skip the required snapshot reload.
+    lib::ObMallocHookAttrGuard malloc_guard(lib::ObMemAttr("VIndexVsagADP"));
+    lib::ObLightBacktraceGuard light_backtrace_guard(false);
+    if (OB_FAIL(oceanbase::common::obvsag::finalize_cuvs_bulk_index(snap_data_->index_))) {
+      LOG_WARN("failed to finalize HNSW before snapshot publication", K(ret));
+    }
+  } else if (param->type_ == VIAT_HGRAPH || snap_data_->has_build_sq_ || param->type_ == VIAT_IPIVF) {
     // do nothing
   } else if (OB_ISNULL(snap_data_->index_)) {
     TCWLockGuard lock_guard(snap_data_->mem_data_rwlock_);
@@ -4156,7 +4169,13 @@ int ObPluginVectorIndexAdaptor::query_result(ObVectorQueryAdaptorResultContext *
   const bool need_load_data_from_table = (ctx->flag_ == PVQP_SECOND || !ctx->get_ls_leader()) ? true : false;
   if (OB_FAIL(ret)) {
   } else if (!need_load_data_from_table) {
-    if (query_cond->only_complete_data_) {
+    if (!get_snapshot_key_prefix().empty() && get_snapshot_key_prefix() != ObString("renew") &&
+        !has_nonempty_snapshot()) {
+      // A shared memory-saving renewal can invalidate the graph while this
+      // adapter still has the published snapshot key. Refresh, never return an
+      // apparently successful empty result for a persisted nonempty snapshot.
+      ctx->status_ = PVQ_REFRESH;
+    } else if (query_cond->only_complete_data_) {
       // do nothing
     } else if (OB_FAIL(vsag_query_vids(ctx, query_cond, dim, query_vector, vids_iter))) {
     }
@@ -4178,7 +4197,8 @@ int ObPluginVectorIndexAdaptor::query_result(ObVectorQueryAdaptorResultContext *
         ret = OB_ERR_UNEXPECTED;
         LOG_WARN("invalid row", K(ret), K(row));
       } else if (get_snapshot_key_prefix().empty() ||
-          !row->storage_datums_[0].get_string().prefix_match(get_snapshot_key_prefix()))
+          !row->storage_datums_[0].get_string().prefix_match(get_snapshot_key_prefix()) ||
+          !has_nonempty_snapshot())
       {
         if (get_create_type() == CreateTypeComplete) {
           ctx->status_ = PVQ_REFRESH;
@@ -4242,7 +4262,10 @@ int ObPluginVectorIndexAdaptor::deserialize_snap_data(ObVectorQueryConditions *q
     ObVectorIndexSerializer index_seri(tmp_allocator);
     TCWLockGuard lock_guard(snap_data_->mem_data_rwlock_);
     ObString target_prefix;
-    if (!get_snapshot_key_prefix().empty() && key_prefix.prefix_match(get_snapshot_key_prefix()) && !snap_data_->rb_flag_) {
+    int64_t loaded_count = 0;
+    if (OB_NOT_NULL(snap_data_->index_) && OB_FAIL(obvectorutil::get_index_number(snap_data_->index_, loaded_count))) {
+    } else if (loaded_count > 0 && !get_snapshot_key_prefix().empty() &&
+        key_prefix.prefix_match(get_snapshot_key_prefix()) && !snap_data_->rb_flag_) {
       // skip deserialize, already been deserialized by other concurrent thread
     } else if (OB_FAIL(index_seri.deserialize(snap_data_->index_, param, cb))) {
     } else if (OB_FAIL(obvectorutil::immutable_optimize(snap_data_->index_))) {
@@ -4728,6 +4751,15 @@ int ObPluginVectorIndexAdaptor::get_inc_index_row_cnt(int64_t &count)
   } else {
   }
   return ret;
+}
+
+bool ObPluginVectorIndexAdaptor::has_nonempty_snapshot()
+{
+  if (snap_data_ == nullptr) return false;
+  TCRLockGuard guard(snap_data_->mem_data_rwlock_);
+  int64_t count = 0;
+  return snap_data_->is_inited() && snap_data_->index_ != nullptr &&
+      obvectorutil::get_index_number(snap_data_->index_, count) == OB_SUCCESS && count > 0;
 }
 
 int ObPluginVectorIndexAdaptor::get_snap_index_row_cnt(int64_t &count)

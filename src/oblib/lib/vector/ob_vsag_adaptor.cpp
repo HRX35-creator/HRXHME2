@@ -17,6 +17,10 @@
 #define USING_LOG_PREFIX LIB
 
 #include "ob_vsag_adaptor.h"
+#include "hipvs_bulk_builder.h"
+#include <cstdlib>
+#include <sstream>
+#include <atomic>
 #include <map>
 #include <set>
 #include <mutex>
@@ -419,6 +423,8 @@ public:
                  bool need_extra_info, const char *&extra_infos,
                  void *&iter_ctx, bool is_last_search, void *allocator);
   int immutable_optimize();
+  bool enable_hipvs_bulk();
+  int finalize_hipvs_bulk();
 
   std::shared_ptr<vsag::Index> &get_index() { return index_; }
   void set_index(std::shared_ptr<vsag::Index> hnsw) { index_ = hnsw; }
@@ -445,6 +451,9 @@ public:
       K_(refine_type), K_(bq_bits_query), K_(bq_use_fht));
 
 private:
+  std::unique_ptr<HipvsBulkBuilder> hipvs_bulk_;
+  std::mutex hipvs_bulk_mutex_;
+  std::atomic<bool> hipvs_bulk_enabled_{false};
   bool is_created_;
   bool is_build_;
   bool use_static_;
@@ -465,6 +474,63 @@ private:
   float doc_prune_ratio_;
   int window_size_;
 };
+
+bool HnswIndexHandler::enable_hipvs_bulk()
+{
+#if defined(OB_BUILD_CUVS) && defined(__linux__)
+  std::lock_guard<std::mutex> guard(hipvs_bulk_mutex_);
+  if (hipvs_bulk_) return true;
+  const char *worker = std::getenv("SEEKDB_HIPVS_BUILD_WORKER");
+  if (worker == nullptr || worker[0] == '\0') return false;
+  if (index_type_ != HNSW_TYPE || std::strcmp(metric_, "l2") != 0 ||
+      extra_info_size_ != 0 || max_degree_ < 4 || max_degree_ > 128 ||
+      index_->GetNumElements() != 0) {
+    LOG_INFO("[HIPVS_BUILD_FALLBACK] unsupported snapshot configuration", K_(index_type), K_(extra_info_size), K_(max_degree));
+    return false;
+  }
+  hipvs_bulk_.reset(new HipvsBulkBuilder(worker, dim_, max_degree_, ef_construction_));
+  hipvs_bulk_enabled_.store(true, std::memory_order_release);
+  LOG_INFO("[HIPVS_BUILD_STAGE] snapshot buffering enabled", K_(dim), K_(max_degree));
+  return true;
+#else
+  return false;
+#endif
+}
+
+int HnswIndexHandler::finalize_hipvs_bulk()
+{
+  if (!hipvs_bulk_enabled_.load(std::memory_order_acquire)) return OB_SUCCESS;
+  std::lock_guard<std::mutex> guard(hipvs_bulk_mutex_);
+  if (hipvs_bulk_->complete() || hipvs_bulk_->size() == 0) return OB_SUCCESS;
+  int ret = OB_SUCCESS;
+  const int64_t rows = hipvs_bulk_->size();
+  try {
+    if (rows < 256 || rows <= 4 * max_degree_) {
+      LOG_INFO("[HIPVS_BUILD_FALLBACK] small snapshot, CPU build", K(rows), K_(max_degree));
+      auto data = vsag::Dataset::Make();
+      data->NumElements(rows)->Dim(dim_)->Float32Vectors(hipvs_bulk_->vectors())->Ids(hipvs_bulk_->ids())->Owner(false);
+      auto result = index_->Build(data);
+      if (!result.has_value()) return vsag_errcode2ob(result.error().type);
+      if (!result.value().empty()) return OB_ERR_VSAG_RETURN_ERROR;
+    } else {
+      // CPU native graph import is linear work, not a second HNSW construction.
+      std::string graph = hipvs_bulk_->build_native_graph();
+      std::istringstream stream(std::move(graph), std::ios::binary);
+      auto result = index_->Deserialize(stream);
+      if (!result.has_value()) {
+        LOG_WARN("[HIPVS_BUILD_IMPORT_FAILED] native graph import failed", "error", result.error().message.c_str());
+        return vsag_errcode2ob(result.error().type);
+      }
+      if (index_->GetNumElements() != rows) return OB_ERR_VSAG_RETURN_ERROR;
+      LOG_INFO("[HIPVS_BUILD_READY] GPU-built native HNSW imported", K(rows), K_(dim), K_(max_degree));
+    }
+    hipvs_bulk_->release_staging();
+  } catch (const std::exception &e) {
+    ret = OB_ERR_VSAG_RETURN_ERROR;
+    LOG_WARN("[HIPVS_BUILD_FAILED] no CPU fallback after worker failure", K(ret), "reason", e.what(), K(rows));
+  }
+  return ret;
+}
 
 int HnswIndexHandler::build_index(const vsag::DatasetPtr &base)
 {
@@ -487,12 +553,29 @@ int HnswIndexHandler::build_index(const vsag::DatasetPtr &base)
 
 int HnswIndexHandler::get_index_number()
 {
+  if (hipvs_bulk_enabled_.load(std::memory_order_acquire)) {
+    std::lock_guard<std::mutex> guard(hipvs_bulk_mutex_);
+    if (!hipvs_bulk_->complete()) return hipvs_bulk_->size();
+  }
   return index_->GetNumElements();
 }
 
 int HnswIndexHandler::add_index(const vsag::DatasetPtr &incremental)
 {
   int ret = OB_SUCCESS;
+  if (hipvs_bulk_enabled_.load(std::memory_order_acquire)) {
+    std::lock_guard<std::mutex> guard(hipvs_bulk_mutex_);
+    if (!hipvs_bulk_->complete()) {
+      try {
+        hipvs_bulk_->append(incremental->GetFloat32Vectors(), incremental->GetIds(),
+                            incremental->GetDim(), incremental->GetNumElements());
+        return OB_SUCCESS;
+      } catch (const std::exception &e) {
+        LOG_WARN("[HIPVS_BUILD_FAILED] snapshot staging failed", "reason", e.what());
+        return OB_ERR_VSAG_RETURN_ERROR;
+      }
+    }
+  }
   tl::expected<std::vector<int64_t>, Error> result = index_->Add(incremental);
   if (result.has_value()) {
     LOG_DEBUG("add index success", K(get_index_number()));
@@ -537,6 +620,7 @@ int HnswIndexHandler::cal_distance_by_id(const float *vector,
                                          const float *&dist)
 {
   int ret = OB_SUCCESS;
+  if (OB_FAIL(finalize_hipvs_bulk())) return ret;
   tl::expected<DatasetPtr, Error> result = index_->CalDistanceById(vector, ids, count);
   if (result.has_value()) {
     result.value()->Owner(false);
@@ -551,6 +635,7 @@ int HnswIndexHandler::get_extra_info_by_ids(const int64_t *ids, int64_t count,
                                             char *extra_infos)
 {
   int ret = OB_SUCCESS;
+  if (OB_FAIL(finalize_hipvs_bulk())) return ret;
   tl::expected<void, Error> result = index_->GetExtraInfoByIds(ids, count, extra_infos);
   if (result.has_value()) {
   } else {
@@ -562,6 +647,19 @@ int HnswIndexHandler::get_extra_info_by_ids(const int64_t *ids, int64_t count,
 int HnswIndexHandler::get_vid_bound(int64_t &min_vid, int64_t &max_vid)
 {
   int ret = OB_SUCCESS;
+  if (hipvs_bulk_enabled_.load(std::memory_order_acquire)) {
+    std::lock_guard<std::mutex> guard(hipvs_bulk_mutex_);
+    if (!hipvs_bulk_->complete()) {
+      if (hipvs_bulk_->size() > 0) {
+        min_vid = max_vid = hipvs_bulk_->ids()[0];
+        for (int64_t i = 1; i < hipvs_bulk_->size(); ++i) {
+          min_vid = std::min(min_vid, hipvs_bulk_->ids()[i]);
+          max_vid = std::max(max_vid, hipvs_bulk_->ids()[i]);
+        }
+      }
+      return OB_SUCCESS;
+    }
+  }
   int64_t element_cnt = index_->GetNumElements();
   if (element_cnt == 0) {
   } else {
@@ -604,6 +702,7 @@ uint64_t HnswIndexHandler::estimate_memory(const uint64_t row_count, const bool 
 int HnswIndexHandler::immutable_optimize()
 {
   int ret = OB_SUCCESS;
+  if (OB_FAIL(finalize_hipvs_bulk())) return ret;
   if (index_type_ == IPIVF_TYPE) {
     // TODO(ningxin.ning): support SetImmutable for sparse vector index
   } else {
@@ -628,6 +727,7 @@ int HnswIndexHandler::knn_search(const vsag::DatasetPtr &query, int64_t topk,
                                  float distance_threshold)
 {
   int ret = OB_SUCCESS;
+  if (OB_FAIL(finalize_hipvs_bulk())) return ret;
   std::function<bool(int64_t)> vid_filter = [bitmap, reverse_filter](int64_t id) -> bool {
     if (!reverse_filter) {
       return bitmap->test(id);
@@ -680,6 +780,7 @@ int HnswIndexHandler::knn_search(const vsag::DatasetPtr &query, int64_t topk,
                                  bool is_last_search, void *allocator)
 {
   int ret = OB_SUCCESS;
+  if (OB_FAIL(finalize_hipvs_bulk())) return ret;
   std::function<bool(int64_t)> filter = [bitmap, reverse_filter](int64_t id) -> bool {
     if (!reverse_filter) {
       return bitmap->test(id);
@@ -1581,6 +1682,7 @@ int fserialize(VectorIndexPtr &index_handler, std::ostream &out_stream)
     LOG_WARN("[OBVSAG] null pointer addr", K(index_handler));
   } else {
     HnswIndexHandler *hnsw = static_cast<HnswIndexHandler *>(index_handler);
+    if (OB_FAIL(hnsw->finalize_hipvs_bulk())) return ret;
     tl::expected<void, Error> bs = hnsw->get_index()->Serialize(out_stream);
     if (bs.has_value()) {
       LOG_INFO("[OBVSAG] serialize index success");
@@ -1794,6 +1896,22 @@ long cuvs_batch_knn(const float *base, long n, long dim,
 }
 
 // [hipVS/cuVS] Per-index opt-in hooks called by the plugin for lib=cuvs indexes.
+bool mark_cuvs_bulk_index(void *key) {
+  if (key == nullptr) return false;
+  try {
+    return static_cast<HnswIndexHandler *>(key)->enable_hipvs_bulk();
+  } catch (const std::exception &e) {
+    int ret = OB_ALLOCATE_MEMORY_FAILED;
+    LOG_WARN("[HIPVS_BUILD_FALLBACK] cannot allocate staging state", "reason", e.what());
+    return false;
+  }
+}
+
+int finalize_cuvs_bulk_index(void *key) {
+  if (key == nullptr) return OB_SUCCESS;
+  return static_cast<HnswIndexHandler *>(key)->finalize_hipvs_bulk();
+}
+
 void mark_cuvs_index(void *key) {
 #ifdef OB_BUILD_CUVS
   if (key == nullptr) { return; }

@@ -182,6 +182,8 @@ long cuvs_batch_knn(const float *base, long n, long dim,
 // [hipVS/cuVS] Per-index opt-in: plugin marks/unmarks a handle when the vector
 // index was declared WITH (lib=cuvs). Marked handles use the GPU path.
 void mark_cuvs_index(void *key);
+bool mark_cuvs_bulk_index(void *key);
+int finalize_cuvs_bulk_index(void *key);
 void unmark_cuvs_index(void *key);
 
 } // namesapce obvsag
