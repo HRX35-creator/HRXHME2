@@ -390,7 +390,13 @@ int ObFTParseHelper::segment(
     ObFTTokenCache *token_cache = ObFTTokenCache::get_instance();
     ObFTTokenCacheKey token_key;
     bool cache_hit = false;
-    if (OB_NOT_NULL(token_cache) && fulltext_len > 0) {
+    // beng/space/ngram indexes tokenize each document once, so the shared
+    // cache only adds a hash, a bucket lock and an entry store per column.
+    // IK keeps it: its auxiliary builds tokenize the same content column more
+    // than once, and that second pass is what the cache saves.
+    const bool use_token_cache = OB_NOT_NULL(token_cache)
+        && 0 != STRCMP(parser_name_.get_parser_name().str(), "beng");
+    if (use_token_cache && fulltext_len > 0) {
       const int64_t parser_version = parser_name_.get_parser_version();
       uint64_t parser_hash = 0;
       parser_name_.get_parser_name().hash(parser_hash);
@@ -431,7 +437,7 @@ int ObFTParseHelper::segment(
                       add_word))) {
       } else {
         doc_length = add_word.get_add_word_count();
-        if (OB_NOT_NULL(token_cache) && fulltext_len > 0) {
+        if (use_token_cache && fulltext_len > 0) {
           // A store failure only costs performance, never correctness.
           int tmp_ret = token_cache->try_store(token_key,
                                                parser_name_.get_parser_name(),
