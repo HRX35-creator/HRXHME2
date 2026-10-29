@@ -128,7 +128,7 @@ int ObExprAIPrompt::eval_ai_prompt(const ObExpr &expr, ObEvalCtx &ctx, ObDatum &
             ret = OB_ALLOCATE_MEMORY_FAILED;
           } else if (OB_FAIL(args_array->append(arg_json_null))) {
           }
-        } else if (OB_FAIL(args_array->append(j_base))) {
+        } else if (OB_FAIL(args_array->append(static_cast<ObJsonNode *>(j_base)))) {
         }
       } else {
         ret = OB_ERR_INVALID_TYPE_FOR_OP;
