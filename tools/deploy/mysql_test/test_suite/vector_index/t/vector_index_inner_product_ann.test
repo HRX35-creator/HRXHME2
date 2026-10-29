@@ -1,0 +1,40 @@
+# Regression: a descending APPROXIMATE inner product search must use the inner product
+# vector index instead of falling back to a full scan (oceanbase/seekdb#1470).
+
+SET ob_query_timeout = 20000000;
+SET ob_trx_timeout = 60000000;
+alter system set vector_memory_limit = 0;
+sleep 1;
+
+--disable_warnings
+DROP DATABASE IF EXISTS seekdb_ip_ann;
+--enable_warnings
+CREATE DATABASE seekdb_ip_ann;
+USE seekdb_ip_ann;
+
+CREATE TABLE t_ip_ann (id INT PRIMARY KEY, v VECTOR(3),
+  VECTOR INDEX idx_ip_ann(v) WITH (distance=inner_product, type=hnsw, lib=vsag));
+INSERT INTO t_ip_ann VALUES
+  (1,'[1,0,0]'), (2,'[0,1,0]'), (3,'[0,0,1]'),
+  (4,'[2,0,0]'), (5,'[0.5,0,0]'), (6,'[0,3,0]');
+CALL dbms_stats.gather_table_stats('seekdb_ip_ann','t_ip_ann');
+
+--echo # exact search keeps a table scan and a top-n sort
+--replace_regex /_[0-9]+/_0/g
+EXPLAIN SELECT id FROM t_ip_ann ORDER BY inner_product(v, '[1,0,0]') DESC LIMIT 3;
+
+--echo # descending approximate search uses the inner product vector index
+--replace_regex /_[0-9]+/_0/g
+EXPLAIN SELECT id FROM t_ip_ann ORDER BY inner_product(v, '[1,0,0]') DESC APPROXIMATE LIMIT 3;
+
+--echo # ascending approximate search is not similarity ordered and must not use the index
+--replace_regex /_[0-9]+/_0/g
+EXPLAIN SELECT id FROM t_ip_ann ORDER BY inner_product(v, '[1,0,0]') ASC APPROXIMATE LIMIT 3;
+
+--echo # the approximation returns the same rows as the exact search and as negative_inner_product
+SELECT id FROM t_ip_ann ORDER BY inner_product(v, '[1,0,0]') DESC LIMIT 3;
+SELECT id FROM t_ip_ann ORDER BY inner_product(v, '[1,0,0]') DESC APPROXIMATE LIMIT 3;
+SELECT id FROM t_ip_ann ORDER BY negative_inner_product(v, '[1,0,0]') ASC APPROXIMATE LIMIT 3;
+
+DROP TABLE t_ip_ann;
+DROP DATABASE seekdb_ip_ann;
