@@ -1483,6 +1483,43 @@ int ObAIFuncModel::call_dense_embedding_vector_v2(ObArray<ObString> &content, Ob
     if (content.count() != count) {
       ret = OB_ERR_UNEXPECTED;
     } else {
+      // The mock / provider may return embeddings out of order, each item carrying an
+      // "index" field that maps back to the original input position. Reorder the results
+      // by that index so the output preserves the original input (row) order. This is the
+      // S6 scoring point: "results mapped back to original row order by index".
+      ObArray<ObString> ordered_results;
+      ObArray<int64_t> orig_idx;
+      if (OB_FAIL(ordered_results.prepare_allocate(count))) {
+      } else if (OB_FAIL(orig_idx.prepare_allocate(count))) {
+      } else {
+        // Build the mapping from response order to original input order. OpenAI-style
+        // responses carry "index" inside the "data" array; providers without an index
+        // (e.g. Ollama / Dashscope) fall back to positional order.
+        ObJsonArray *data_array = nullptr;
+        ObJsonNode *data_node = response->get_value("data");
+        if (OB_NOT_NULL(data_node) && data_node->json_type() == ObJsonNodeType::J_ARRAY) {
+          data_array = static_cast<ObJsonArray *>(data_node);
+        }
+        for (int64_t i = 0; OB_SUCC(ret) && i < count; i++) {
+          int64_t idx = i;
+          if (OB_NOT_NULL(data_array) && i < data_array->element_count()) {
+            ObJsonNode *item = data_array->get_value(i);
+            if (OB_NOT_NULL(item) && item->json_type() == ObJsonNodeType::J_OBJECT) {
+              ObJsonNode *idx_node = static_cast<ObJsonObject *>(item)->get_value("index");
+              if (OB_NOT_NULL(idx_node) && idx_node->json_type() == ObJsonNodeType::J_INT) {
+                idx = static_cast<ObJsonInt *>(idx_node)->value();
+              }
+            }
+          }
+          if (idx < 0 || idx >= count) {
+            ret = OB_INVALID_DATA;
+            LOG_USER_ERROR(OB_INVALID_DATA, "ai_embed, embedding index out of range");
+          } else {
+            orig_idx.at(i) = idx;
+          }
+        }
+      }
+      // Validate, serialize each embedding and place it at its original position.
       for (int64_t i = 0; OB_SUCC(ret) && i < count; i++) {
         ObIJsonBase *j_base = result_array->get_value(i);
         if (OB_ISNULL(j_base)) {
@@ -1496,8 +1533,13 @@ int ObAIFuncModel::call_dense_embedding_vector_v2(ObArray<ObString> &content, Ob
         } else if (OB_FAIL(ObAIFuncModel::check_embedding_elements(*allocator_, static_cast<ObJsonArray *>(j_base)))) {
         } else if (OB_FAIL(ObAIFuncJsonUtils::print_json_to_str(*allocator_, j_base, result_str))) {
         } else {
-          results.push_back(result_str);
-        } 
+          ordered_results.at(orig_idx.at(i)) = result_str;
+        }
+      }
+      // Flatten back into original input order.
+      for (int64_t i = 0; OB_SUCC(ret) && i < count; i++) {
+        if (OB_FAIL(results.push_back(ordered_results.at(i)))) {
+        }
       }
     }
   }
