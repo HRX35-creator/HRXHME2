@@ -1478,8 +1478,9 @@ int ObAIFuncModel::call_dense_embedding_vector_v2(ObArray<ObString> &content, Ob
   } else {
     ObJsonArray *result_array = static_cast<ObJsonArray *>(result_base);
     int64_t count = result_array->element_count();
-    // when dimension is not specified explicitly, the default embedding dimension is 4
-    int64_t expect_dim = dimension > 0 ? dimension : 4;
+    // dimension <= 0 means the caller did not constrain the dimension, accept whatever
+    // the endpoint returns (the model owns its dimensionality).
+    int64_t expect_dim = dimension;
     if (content.count() != count) {
       ret = OB_ERR_UNEXPECTED;
     } else {
@@ -1527,7 +1528,7 @@ int ObAIFuncModel::call_dense_embedding_vector_v2(ObArray<ObString> &content, Ob
         } else if (j_base->json_type() != ObJsonNodeType::J_ARRAY) {
           ret = OB_INVALID_ARGUMENT;
           LOG_USER_ERROR(OB_INVALID_ARGUMENT, "ai_embed, result is not an array");
-        } else if (static_cast<ObJsonArray *>(j_base)->element_count() != expect_dim) {
+        } else if (expect_dim > 0 && static_cast<ObJsonArray *>(j_base)->element_count() != expect_dim) {
           ret = OB_INVALID_ARGUMENT;
           LOG_USER_ERROR(OB_INVALID_ARGUMENT, "ai_embed, result dimension is not equal to dimension");
         } else if (OB_FAIL(ObAIFuncModel::check_embedding_elements(*allocator_, static_cast<ObJsonArray *>(j_base)))) {
