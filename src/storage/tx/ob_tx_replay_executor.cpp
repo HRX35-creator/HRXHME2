@@ -292,7 +292,6 @@ void ObTxReplayExecutor::finish_replay_(const int retcode)
       }
     }
     if (OB_SUCCESS != retcode) {
-      ctx_->print_trace_log();
     }
     ls_tx_srv_->revert_tx_ctx(ctx_);
   }
