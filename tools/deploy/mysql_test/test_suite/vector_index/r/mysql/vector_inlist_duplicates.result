@@ -1,0 +1,154 @@
+DROP TABLE IF EXISTS vector_inlist_duplicates;
+DROP TABLE IF EXISTS inlist_unsigned_duplicates;
+CREATE TABLE vector_inlist_duplicates (
+id INT PRIMARY KEY,
+category INT,
+embedding VECTOR(3),
+VECTOR INDEX vec_idx(embedding) WITH (distance=l2, type=hnsw, lib=vsag, sync_mode=immediate)
+) ORGANIZATION HEAP;
+INSERT INTO vector_inlist_duplicates VALUES
+(1, 1, '[1,0,0]'), (2, 2, '[2,0,0]'), (3, 3, '[3,0,0]'),
+(4, 4, '[4,0,0]'), (5, NULL, '[5,0,0]');
+EXPLAIN BASIC SELECT /*+ OPT_PARAM('inlist_rewrite_threshold' 4) */ id
+FROM vector_inlist_duplicates WHERE category IN (1,2,3,1,2,3)
+ORDER BY l2_distance(embedding, '[0,0,0]') APPROXIMATE LIMIT 3;
+Query Plan
+=====================================================================
+|ID|OPERATOR                               |NAME                    |
+---------------------------------------------------------------------
+|0 |VECTOR INDEX ADAPTIVE SCAN (PRE-FILTER)|vector_inlist_duplicates|
+=====================================================================
+Outputs & filters:
+-------------------------------------
+  0 - output([vector_inlist_duplicates.id]), filter([vector_inlist_duplicates.category IN (1, 2, 3, 1, 2, 3)]), rowset=16
+      access([vector_inlist_duplicates.__pk_increment], [vector_inlist_duplicates.category], [vector_inlist_duplicates.id]), partitions(p0)
+      is_index_back=true, is_global_index=false, filter_before_indexback[false],
+      range_key([vector_inlist_duplicates.__pk_increment]), range(MIN ; MAX)always true
+SELECT /*+ OPT_PARAM('inlist_rewrite_threshold' 4) */ id
+FROM vector_inlist_duplicates WHERE category IN (1,2,3,1,2,3)
+ORDER BY l2_distance(embedding, '[0,0,0]') APPROXIMATE LIMIT 3;
+id
+1
+2
+3
+EXPLAIN BASIC SELECT /*+ OPT_PARAM('inlist_rewrite_threshold' 4) */ id
+FROM vector_inlist_duplicates WHERE category IN (1,2,3,4)
+ORDER BY l2_distance(embedding, '[0,0,0]') APPROXIMATE LIMIT 4;
+Query Plan
+=========================================================================
+|ID|OPERATOR                                   |NAME                    |
+-------------------------------------------------------------------------
+|0 |TOP-N SORT                                 |                        |
+|1 |└─SUBPLAN FILTER                           |                        |
+|2 |  ├─VECTOR INDEX ADAPTIVE SCAN (PRE-FILTER)|vector_inlist_duplicates|
+|3 |  └─HASH DISTINCT                          |                        |
+|4 |    └─VALUES TABLE ACCESS                  |VALUES_TABLE1           |
+=========================================================================
+Outputs & filters:
+-------------------------------------
+  0 - output([vector_inlist_duplicates.id]), filter(nil), rowset=16
+      sort_keys([l2_distance(vector_inlist_duplicates.embedding, cast('[0,0,0]', ARRAY(18, -1))), ASC]), topn(4)
+  1 - output([l2_distance(vector_inlist_duplicates.embedding, cast('[0,0,0]', ARRAY(18, -1)))], [vector_inlist_duplicates.id]), filter([vector_inlist_duplicates.category
+      = ANY(subquery(1))]), rowset=16
+      exec_params_(nil), onetime_exprs_(nil), init_plan_idxs_([1]), use_batch=false
+  2 - output([vector_inlist_duplicates.category], [vector_inlist_duplicates.id], [l2_distance(vector_inlist_duplicates.embedding, cast('[0,0,0]', ARRAY(18,
+       -1)))]), filter(nil), rowset=16
+      access([vector_inlist_duplicates.__pk_increment], [vector_inlist_duplicates.embedding], [vector_inlist_duplicates.category], [vector_inlist_duplicates.id]), partitions(p0)
+      is_index_back=true, is_global_index=false,
+      range_key([vector_inlist_duplicates.__pk_increment]), range(MIN ; MAX)always true
+  3 - output([VALUES_TABLE1.column_0]), filter(nil), rowset=16
+      distinct([VALUES_TABLE1.column_0])
+  4 - output([VALUES_TABLE1.column_0]), filter(nil)
+      access([VALUES_TABLE1.column_0])
+SELECT /*+ OPT_PARAM('inlist_rewrite_threshold' 4) */ id
+FROM vector_inlist_duplicates WHERE category IN (1,2,3,4)
+ORDER BY l2_distance(embedding, '[0,0,0]') APPROXIMATE LIMIT 4;
+id
+1
+2
+3
+4
+SELECT /*+ OPT_PARAM('inlist_rewrite_threshold' 4) */ id
+FROM vector_inlist_duplicates WHERE category IN (1,NULL,1,NULL) ORDER BY id;
+id
+1
+SELECT /*+ OPT_PARAM('inlist_rewrite_threshold' 4) */ id
+FROM vector_inlist_duplicates WHERE category NOT IN (1,NULL,1,NULL) ORDER BY id;
+id
+SELECT /*+ OPT_PARAM('inlist_rewrite_threshold' 4) */ id
+FROM vector_inlist_duplicates WHERE category IN (NULL,NULL,NULL,NULL) ORDER BY id;
+id
+SELECT /*+ OPT_PARAM('inlist_rewrite_threshold' 4) */ id
+FROM vector_inlist_duplicates WHERE category NOT IN (1,1,1,1) ORDER BY id;
+id
+2
+3
+4
+SET @saved_plan_cache = @@ob_enable_plan_cache;
+SET ob_enable_plan_cache = OFF;
+EXPLAIN BASIC SELECT /*+ OPT_PARAM('inlist_rewrite_threshold' 4) */ id
+FROM vector_inlist_duplicates WHERE category IN (1,2,3,1,2,3)
+ORDER BY l2_distance(embedding, '[0,0,0]') APPROXIMATE LIMIT 3;
+Query Plan
+=====================================================================
+|ID|OPERATOR                               |NAME                    |
+---------------------------------------------------------------------
+|0 |VECTOR INDEX ADAPTIVE SCAN (PRE-FILTER)|vector_inlist_duplicates|
+=====================================================================
+Outputs & filters:
+-------------------------------------
+  0 - output([vector_inlist_duplicates.id]), filter([vector_inlist_duplicates.category IN (1, 2, 3, 1, 2, 3)]), rowset=16
+      access([vector_inlist_duplicates.__pk_increment], [vector_inlist_duplicates.category], [vector_inlist_duplicates.id]), partitions(p0)
+      is_index_back=true, is_global_index=false, filter_before_indexback[false],
+      range_key([vector_inlist_duplicates.__pk_increment]), range(MIN ; MAX)always true
+SET ob_enable_plan_cache = @saved_plan_cache;
+SELECT /*+ OPT_PARAM('inlist_rewrite_threshold' 4) */ id
+FROM vector_inlist_duplicates WHERE category IN (1,1,1,1,1,1)
+ORDER BY l2_distance(embedding, '[0,0,0]') APPROXIMATE LIMIT 4;
+id
+1
+SELECT /*+ OPT_PARAM('inlist_rewrite_threshold' 4) */ id
+FROM vector_inlist_duplicates WHERE category IN (1,2,3,4,4,4)
+ORDER BY l2_distance(embedding, '[0,0,0]') APPROXIMATE LIMIT 4;
+id
+1
+2
+3
+4
+PREPARE inlist_stmt FROM 'SELECT /*+ OPT_PARAM(''inlist_rewrite_threshold'' 4) */ id FROM vector_inlist_duplicates WHERE category IN (?,?,?,?) ORDER BY id';
+SET @a = 1, @b = 1, @c = 1, @d = 1;
+EXECUTE inlist_stmt USING @a, @b, @c, @d;
+id
+1
+SET @a = 1, @b = 2, @c = 3, @d = 4;
+EXECUTE inlist_stmt USING @a, @b, @c, @d;
+id
+1
+2
+3
+4
+DEALLOCATE PREPARE inlist_stmt;
+SELECT /*+ OPT_PARAM('inlist_rewrite_threshold' 4) */ id
+FROM vector_inlist_duplicates WHERE category IN ('1','2','1','2') ORDER BY id;
+id
+1
+2
+SELECT /*+ OPT_PARAM('inlist_rewrite_threshold' 4) */ id
+FROM vector_inlist_duplicates WHERE (category,id) IN ((1,1),(2,2),(1,1),(2,2)) ORDER BY id;
+id
+1
+2
+CREATE TABLE inlist_unsigned_duplicates (id BIGINT UNSIGNED PRIMARY KEY);
+INSERT INTO inlist_unsigned_duplicates VALUES (18446744073709551614), (18446744073709551615);
+SELECT /*+ OPT_PARAM('inlist_rewrite_threshold' 4) */ id FROM inlist_unsigned_duplicates
+WHERE id IN (18446744073709551615,18446744073709551614,18446744073709551615,18446744073709551614)
+ORDER BY id;
+id
+18446744073709551614
+18446744073709551615
+SELECT /*+ OPT_PARAM('inlist_rewrite_threshold' 0) */ id
+FROM vector_inlist_duplicates WHERE category IN (1,1) ORDER BY id;
+id
+1
+DROP TABLE inlist_unsigned_duplicates;
+DROP TABLE vector_inlist_duplicates;

@@ -1,0 +1,88 @@
+# Regression for GitHub issue #1512: duplicate integers must not force an
+# otherwise small IN predicate through a VALUES subquery during ANN search.
+--disable_warnings
+DROP TABLE IF EXISTS vector_inlist_duplicates;
+DROP TABLE IF EXISTS inlist_unsigned_duplicates;
+--enable_warnings
+
+CREATE TABLE vector_inlist_duplicates (
+  id INT PRIMARY KEY,
+  category INT,
+  embedding VECTOR(3),
+  VECTOR INDEX vec_idx(embedding) WITH (distance=l2, type=hnsw, lib=vsag, sync_mode=immediate)
+) ORGANIZATION HEAP;
+INSERT INTO vector_inlist_duplicates VALUES
+  (1, 1, '[1,0,0]'), (2, 2, '[2,0,0]'), (3, 3, '[3,0,0]'),
+  (4, 4, '[4,0,0]'), (5, NULL, '[5,0,0]');
+
+# A low per-query threshold makes the plan regression small and deterministic.
+--replace_regex / +$//g
+EXPLAIN BASIC SELECT /*+ OPT_PARAM('inlist_rewrite_threshold' 4) */ id
+FROM vector_inlist_duplicates WHERE category IN (1,2,3,1,2,3)
+ORDER BY l2_distance(embedding, '[0,0,0]') APPROXIMATE LIMIT 3;
+SELECT /*+ OPT_PARAM('inlist_rewrite_threshold' 4) */ id
+FROM vector_inlist_duplicates WHERE category IN (1,2,3,1,2,3)
+ORDER BY l2_distance(embedding, '[0,0,0]') APPROXIMATE LIMIT 3;
+
+# Four distinct values still reach the requested rewrite threshold.
+--replace_regex / +$//g
+EXPLAIN BASIC SELECT /*+ OPT_PARAM('inlist_rewrite_threshold' 4) */ id
+FROM vector_inlist_duplicates WHERE category IN (1,2,3,4)
+ORDER BY l2_distance(embedding, '[0,0,0]') APPROXIMATE LIMIT 4;
+SELECT /*+ OPT_PARAM('inlist_rewrite_threshold' 4) */ id
+FROM vector_inlist_duplicates WHERE category IN (1,2,3,4)
+ORDER BY l2_distance(embedding, '[0,0,0]') APPROXIMATE LIMIT 4;
+
+# NULL is retained in the original predicate, including NOT IN's UNKNOWN result.
+SELECT /*+ OPT_PARAM('inlist_rewrite_threshold' 4) */ id
+FROM vector_inlist_duplicates WHERE category IN (1,NULL,1,NULL) ORDER BY id;
+SELECT /*+ OPT_PARAM('inlist_rewrite_threshold' 4) */ id
+FROM vector_inlist_duplicates WHERE category NOT IN (1,NULL,1,NULL) ORDER BY id;
+SELECT /*+ OPT_PARAM('inlist_rewrite_threshold' 4) */ id
+FROM vector_inlist_duplicates WHERE category IN (NULL,NULL,NULL,NULL) ORDER BY id;
+SELECT /*+ OPT_PARAM('inlist_rewrite_threshold' 4) */ id
+FROM vector_inlist_duplicates WHERE category NOT IN (1,1,1,1) ORDER BY id;
+
+# Literal SQL can also run without fast parameterization.
+SET @saved_plan_cache = @@ob_enable_plan_cache;
+SET ob_enable_plan_cache = OFF;
+--replace_regex / +$//g
+EXPLAIN BASIC SELECT /*+ OPT_PARAM('inlist_rewrite_threshold' 4) */ id
+FROM vector_inlist_duplicates WHERE category IN (1,2,3,1,2,3)
+ORDER BY l2_distance(embedding, '[0,0,0]') APPROXIMATE LIMIT 3;
+SET ob_enable_plan_cache = @saved_plan_cache;
+
+# Reusing a text plan must not discard any of the original parameter positions.
+SELECT /*+ OPT_PARAM('inlist_rewrite_threshold' 4) */ id
+FROM vector_inlist_duplicates WHERE category IN (1,1,1,1,1,1)
+ORDER BY l2_distance(embedding, '[0,0,0]') APPROXIMATE LIMIT 4;
+SELECT /*+ OPT_PARAM('inlist_rewrite_threshold' 4) */ id
+FROM vector_inlist_duplicates WHERE category IN (1,2,3,4,4,4)
+ORDER BY l2_distance(embedding, '[0,0,0]') APPROXIMATE LIMIT 4;
+
+# Unknown prepared parameters keep their existing execution path and semantics.
+PREPARE inlist_stmt FROM 'SELECT /*+ OPT_PARAM(''inlist_rewrite_threshold'' 4) */ id FROM vector_inlist_duplicates WHERE category IN (?,?,?,?) ORDER BY id';
+SET @a = 1, @b = 1, @c = 1, @d = 1;
+EXECUTE inlist_stmt USING @a, @b, @c, @d;
+SET @a = 1, @b = 2, @c = 3, @d = 4;
+EXECUTE inlist_stmt USING @a, @b, @c, @d;
+DEALLOCATE PREPARE inlist_stmt;
+
+# Mixed-comparison and row-valued lists retain the previous rewrite behavior.
+SELECT /*+ OPT_PARAM('inlist_rewrite_threshold' 4) */ id
+FROM vector_inlist_duplicates WHERE category IN ('1','2','1','2') ORDER BY id;
+SELECT /*+ OPT_PARAM('inlist_rewrite_threshold' 4) */ id
+FROM vector_inlist_duplicates WHERE (category,id) IN ((1,1),(2,2),(1,1),(2,2)) ORDER BY id;
+
+CREATE TABLE inlist_unsigned_duplicates (id BIGINT UNSIGNED PRIMARY KEY);
+INSERT INTO inlist_unsigned_duplicates VALUES (18446744073709551614), (18446744073709551615);
+SELECT /*+ OPT_PARAM('inlist_rewrite_threshold' 4) */ id FROM inlist_unsigned_duplicates
+WHERE id IN (18446744073709551615,18446744073709551614,18446744073709551615,18446744073709551614)
+ORDER BY id;
+
+# A zero threshold still forces the existing rewrite instead of raising an error.
+SELECT /*+ OPT_PARAM('inlist_rewrite_threshold' 0) */ id
+FROM vector_inlist_duplicates WHERE category IN (1,1) ORDER BY id;
+
+DROP TABLE inlist_unsigned_duplicates;
+DROP TABLE vector_inlist_duplicates;
