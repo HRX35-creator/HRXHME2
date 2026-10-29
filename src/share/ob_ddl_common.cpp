@@ -34,20 +34,17 @@
 #include "share/tablet/ob_tablet_table_operator.h"
 #include "share/storage/ob_tablet_local_checksum_table_storage.h"
 #include "lib/allocator/ob_allocator.h"
+#include "share/ob_ddl_identifier_escape.h"
 
 using namespace oceanbase::share;
 using namespace oceanbase::common;
 using namespace oceanbase::share::schema;
 using namespace oceanbase::blocksstable;
 
-namespace
+namespace oceanbase
 {
-// Escape embedded backticks in a DDL identifier by doubling them, so that the
-// identifier can be safely wrapped in backticks when generating DDL text.
-//
-// This mirrors sql::ObSQLUtils::generate_new_name_with_escape_character but is
-// kept local to the share module: share is a terminal module and must not
-// depend on the upper sql module (see issue #1469).
+namespace share
+{
 int escape_ddl_identifier(
     common::ObIAllocator &allocator,
     const ObString &src,
@@ -94,7 +91,8 @@ int escape_ddl_identifier(
   }
   return ret;
 }
-} // anonymous namespace
+} // namespace share
+} // namespace oceanbase
 
 ObDDLTaskSerializeField::ObDDLTaskSerializeField()
 {
