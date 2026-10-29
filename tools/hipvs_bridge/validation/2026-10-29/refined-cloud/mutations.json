@@ -1,0 +1,102 @@
+{
+  "scope": "real GPU snapshot mutation without builder directory",
+  "checks": [
+    {
+      "label": "original_row",
+      "ids": [
+        0,
+        986,
+        1809,
+        1542,
+        1042,
+        137,
+        1783,
+        656,
+        229,
+        916
+      ],
+      "plan": "===========================================================\n|ID|OPERATOR         |NAME          |EST.ROWS|EST.TIME(us)|\n-----------------------------------------------------------\n|0 |VECTOR INDEX SCAN|t_hipvs_0(idx)|1       |7           |\n===========================================================\nOutputs & filters:\n-------------------------------------\n  0 - output([t_hipvs_0.id]), filter(nil), rowset=16\n      access([t_hipvs_0.id]), partitions(p0)\n      is_index_back=true, is_global_index=false, \n      range_key([t_hipvs_0.__vid_1793255575342710], [t_hipvs_0.__type_17_1793255575564963]), range(MIN,MIN ; MAX,MAX)always true"
+    },
+    {
+      "label": "insert_large_id",
+      "ids": [
+        36028797018963975,
+        1038,
+        283,
+        1379,
+        132,
+        588,
+        155,
+        1713,
+        1730,
+        529
+      ],
+      "plan": "===========================================================\n|ID|OPERATOR         |NAME          |EST.ROWS|EST.TIME(us)|\n-----------------------------------------------------------\n|0 |VECTOR INDEX SCAN|t_hipvs_0(idx)|1       |7           |\n===========================================================\nOutputs & filters:\n-------------------------------------\n  0 - output([t_hipvs_0.id]), filter(nil), rowset=16\n      access([t_hipvs_0.id]), partitions(p0)\n      is_index_back=true, is_global_index=false, \n      range_key([t_hipvs_0.__vid_1793255575342710], [t_hipvs_0.__type_17_1793255575564963]), range(MIN,MIN ; MAX,MAX)always true"
+    },
+    {
+      "label": "update",
+      "ids": [
+        36028797018963975,
+        1038,
+        283,
+        1379,
+        132,
+        588,
+        155,
+        1713,
+        1730,
+        529
+      ],
+      "plan": "===========================================================\n|ID|OPERATOR         |NAME          |EST.ROWS|EST.TIME(us)|\n-----------------------------------------------------------\n|0 |VECTOR INDEX SCAN|t_hipvs_0(idx)|3       |12          |\n===========================================================\nOutputs & filters:\n-------------------------------------\n  0 - output([t_hipvs_0.id]), filter(nil), rowset=16\n      access([t_hipvs_0.id]), partitions(p0)\n      is_index_back=true, is_global_index=false, \n      range_key([t_hipvs_0.__vid_1793255575342710], [t_hipvs_0.__type_17_1793255575564963]), range(MIN,MIN ; MAX,MAX)always true"
+    },
+    {
+      "label": "delete_filter",
+      "ids": [
+        986,
+        1809,
+        1542,
+        1042,
+        137,
+        1783,
+        656,
+        229,
+        916,
+        1070
+      ],
+      "plan": "===========================================================\n|ID|OPERATOR         |NAME          |EST.ROWS|EST.TIME(us)|\n-----------------------------------------------------------\n|0 |VECTOR INDEX SCAN|t_hipvs_0(idx)|4       |15          |\n===========================================================\nOutputs & filters:\n-------------------------------------\n  0 - output([t_hipvs_0.id]), filter(nil), rowset=16\n      access([t_hipvs_0.id]), partitions(p0)\n      is_index_back=true, is_global_index=false, \n      range_key([t_hipvs_0.__vid_1793255575342710], [t_hipvs_0.__type_17_1793255575564963]), range(MIN,MIN ; MAX,MAX)always true"
+    },
+    {
+      "label": "restart_update",
+      "ids": [
+        36028797018963975,
+        1038,
+        283,
+        1379,
+        132,
+        588,
+        155,
+        1713,
+        1730,
+        529
+      ],
+      "plan": "===========================================================\n|ID|OPERATOR         |NAME          |EST.ROWS|EST.TIME(us)|\n-----------------------------------------------------------\n|0 |VECTOR INDEX SCAN|t_hipvs_0(idx)|4       |15          |\n===========================================================\nOutputs & filters:\n-------------------------------------\n  0 - output([t_hipvs_0.id]), filter(nil), rowset=16\n      access([t_hipvs_0.id]), partitions(p0)\n      is_index_back=true, is_global_index=false, \n      range_key([t_hipvs_0.__vid_1793255575342710], [t_hipvs_0.__type_17_1793255575564963]), range(MIN,MIN ; MAX,MAX)always true"
+    },
+    {
+      "label": "restart_delete",
+      "ids": [
+        986,
+        1809,
+        1542,
+        1042,
+        137,
+        1783,
+        656,
+        229,
+        916,
+        1070
+      ],
+      "plan": "===========================================================\n|ID|OPERATOR         |NAME          |EST.ROWS|EST.TIME(us)|\n-----------------------------------------------------------\n|0 |VECTOR INDEX SCAN|t_hipvs_0(idx)|4       |15          |\n===========================================================\nOutputs & filters:\n-------------------------------------\n  0 - output([t_hipvs_0.id]), filter(nil), rowset=16\n      access([t_hipvs_0.id]), partitions(p0)\n      is_index_back=true, is_global_index=false, \n      range_key([t_hipvs_0.__vid_1793255575342710], [t_hipvs_0.__type_17_1793255575564963]), range(MIN,MIN ; MAX,MAX)always true"
+    }
+  ],
+  "complete": true
+}

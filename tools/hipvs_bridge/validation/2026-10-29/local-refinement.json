@@ -1,0 +1,47 @@
+{
+  "scope": "local refined candidate validation; not real GPU SQL or formal acceptance",
+  "sort_only_configurations": 24,
+  "sort_only_all_query_results_unchanged": true,
+  "refined_output_matches_prior_experiment": true,
+  "refined_graph_sha256": "2b786131ed1b917dbaa7047dec443c69cc154fd19d23ae73634ff9870b019d7f",
+  "cost": {
+    "complete": true,
+    "refine_seconds": [
+      1.92971,
+      1.92835,
+      1.89237
+    ],
+    "rows": 100000,
+    "dim": 128,
+    "scope": "isolated CPU refine; includes validation and allocations, excludes file IO and GPU build"
+  },
+  "sql_mode": "TEST_ONLY_SYNTHETIC_GRAPH_NOT_GPU",
+  "sql_checks": [
+    "unsupported_options_rejected",
+    "vsag_post_import_create",
+    "hipvs_post_import_create",
+    "restart_without_gpu_plugin",
+    "incremental_insert",
+    "vector_update",
+    "delete_filter",
+    "restart_after_mutations"
+  ],
+  "sql_passed": true,
+  "build_exit": 0,
+  "ctest_groups_passed": 5,
+  "sanitized_refinement_shapes": 18,
+  "unstripped_binary_sha256": "605148ce9324b90508daf837a5bfc2db94f84a38b97c658536277a1b9cea9dc1",
+  "limitations": [
+    "Real AMD SQL measurements for this binary remain outstanding.",
+    "Existing Python AST deprecation warnings appeared during build.",
+    "CPU scratch memory accounting and concurrent-build limits remain open."
+  ],
+  "evidence_sha256": {
+    "refined-integration/sql.json": "1dedc37fef2bd28d810fdb37ecab748a24d975f017ddb941bc6ea045a871ac82",
+    "refined-integration/build.log": "b688278780c6425c5552fead55971b5af52ccfd219422e66845011924f028616",
+    "refine-cost/run.log": "7f986aff82c8455c177deb88ca70db387f8c77d7f80d2e8bfa102cf7dbc982ac",
+    "refine-cost/cost.json": "d40880ff6a73e1aafcde23a3c8edbe779ddd320de9d5dd08a5bf5a4e7eab2ac7",
+    "refine-cost/sorted.json": "64a7fc8fc847e3722f91800661ca245217629b51a9c605a71e36504a4dcff153",
+    "neighbor-validation/degree-64/original.json": "b4291d0225df68a3c41a87264d83f675ad37fd7758968807855fe5bd782f71e7"
+  }
+}

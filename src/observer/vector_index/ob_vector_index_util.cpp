@@ -257,6 +257,8 @@ int ObVectorIndexUtil::parser_params_from_string(
             param.lib_ = ObVectorIndexAlgorithmLib::VIAL_VSAG;
           } else if (new_param_value == "OB") {
             param.lib_ = ObVectorIndexAlgorithmLib::VIAL_OB;
+          } else if (new_param_value == "HIPVS") {
+            param.lib_ = ObVectorIndexAlgorithmLib::VIAL_HIPVS;
           } else {
             ret = OB_NOT_SUPPORTED;
           }
@@ -1030,6 +1032,8 @@ int ObVectorIndexUtil::construct_rebuild_index_param(
         tmp_lib = ObString("VSAG");
       } else if (old_vec_param.lib_ == ObVectorIndexAlgorithmLib::VIAL_OB) {
         tmp_lib = ObString("OB");
+      } else if (old_vec_param.lib_ == ObVectorIndexAlgorithmLib::VIAL_HIPVS) {
+        tmp_lib = ObString("HIPVS");
       } else {
         ret = OB_ERR_UNEXPECTED;
       }
@@ -2991,6 +2995,7 @@ int ObVectorIndexUtil::check_index_param(
           }
         } else if (last_variable == "LIB") {
           if (new_parser_name == "VSAG" ||
+              new_parser_name == "HIPVS" ||
               new_parser_name == "OB") {
             lib_is_set = true;
             lib_name = new_parser_name;
@@ -3225,6 +3230,10 @@ int ObVectorIndexUtil::check_index_param(
       LOG_USER_ERROR(OB_NOT_SUPPORTED, "hybrid vector index on non-varchar column is");
     }
     if (OB_FAIL(ret)) {
+    } else if (lib_name == "HIPVS" && (vsag_index_type != VIAT_HNSW || distance_name != "L2" ||
+                                       is_sparse_vec || is_text_col)) {
+      ret = OB_NOT_SUPPORTED;
+      LOG_USER_ERROR(OB_NOT_SUPPORTED, "hipVS other than dense float32 L2 HNSW snapshot build is");
     } else if (!is_sparse_vec) {
       bool ivf_is_set = type_ivf_sq8_is_set || type_ivf_pq_is_set || type_ivf_flat_is_set;
       bool hnsw_is_set = type_hnsw_is_set;
@@ -3293,7 +3302,7 @@ int ObVectorIndexUtil::check_index_param(
           LOG_USER_ERROR(OB_NOT_SUPPORTED, "this value of vector index m is");
         }
         if (OB_FAIL(ret)) {
-        } else if (lib_is_set && lib_name != "VSAG") {
+        } else if (lib_is_set && lib_name != "VSAG" && lib_name != "HIPVS") {
           ret = OB_NOT_SUPPORTED;
           LOG_USER_ERROR(OB_NOT_SUPPORTED, "hnsw vector index lib name not equal to 'VSAG' is");
         }
@@ -3352,6 +3361,9 @@ int ObVectorIndexUtil::check_index_param(
                                            ", NBITS=%ld", default_nbits_value))) {
         } else if (hnsw_is_set && OB_FAIL(check_extra_info_size(tbl_schema, session_info, extra_info_max_size_is_set,
                                                                 extra_info_max_size, extra_info_actual_size))) {
+        } else if (lib_name == "HIPVS" && extra_info_actual_size != 0) {
+          ret = OB_NOT_SUPPORTED;
+          LOG_USER_ERROR(OB_NOT_SUPPORTED, "hipVS extra-info graph payloads are");
         } else if (hnsw_is_set && (!is_text_col || type_hybrid_vec_is_set) &&
                    OB_FAIL(validate_vector_index_vsag_create_index_param(vsag_index_type,
                                                                         distance_name,
