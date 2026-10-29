@@ -20,6 +20,7 @@
 #include "sql/resolver/dml/ob_dml_resolver.h"
 #include "sql/engine/expr/ob_expr_version.h"
 #include "sql/rewrite/ob_transform_pre_process.h"
+#include "lib/hash/ob_hashset.h"
 
 namespace oceanbase
 {
@@ -263,6 +264,63 @@ int ObInListResolver::get_inlist_rewrite_info(const ParseNode &in_list,
   return ret;
 }
 
+static int check_distinct_inlist_threshold(const ParseNode &in_list,
+                                         const ParamStore *param_store,
+                                         const int64_t threshold,
+                                         bool &below_threshold)
+{
+  int ret = OB_SUCCESS;
+  bool supported = true;
+  below_threshold = false;
+  hash::ObHashSet<ObObj, hash::NoPthreadDefendMode> values;
+  if (OB_UNLIKELY(threshold <= 0 || in_list.num_child_ <= 0)
+      || OB_ISNULL(in_list.children_)) {
+    ret = OB_ERR_UNEXPECTED;
+  } else if (OB_FAIL(values.create(hash::cal_next_prime(OB_MIN(in_list.num_child_, threshold)),
+                                  "InlistDistinct", "InlistDistinct"))) {
+    LOG_WARN("failed to create in-list distinct set", K(ret));
+  }
+  for (int64_t i = 0; OB_SUCC(ret) && supported && values.size() < threshold
+       && i < in_list.num_child_; ++i) {
+    const ParseNode *node = in_list.children_[i];
+    ObObj value;
+    if (OB_ISNULL(node)) {
+      ret = OB_ERR_UNEXPECTED;
+    } else if (T_QUESTIONMARK == node->type_) {
+      if (OB_ISNULL(param_store) || node->value_ < 0 || node->value_ >= param_store->count()) {
+        supported = false;
+      } else {
+        value = param_store->at(node->value_);
+      }
+    } else if (T_INT == node->type_) {
+      value.set_int(node->value_);
+    } else if (T_UINT64 == node->type_) {
+      value.set_uint64(static_cast<uint64_t>(node->value_));
+    } else if (T_NULL == node->type_) {
+      value.set_null();
+    } else {
+      supported = false;
+    }
+    // Restrict the estimate to integer/NULL lists; other comparisons retain
+    // their existing type- and collation-dependent rewrite decisions.
+    if (OB_SUCC(ret) && supported) {
+      if (!value.is_null() && !ob_is_integer_type(value.get_type())) {
+        supported = false;
+      } else if (OB_FAIL(values.set_refactored(value))) {
+        if (OB_HASH_EXIST == ret) {
+          ret = OB_SUCCESS;
+        } else {
+          LOG_WARN("failed to insert in-list distinct value", K(ret));
+        }
+      }
+    }
+  }
+  if (OB_SUCC(ret)) {
+    below_threshold = supported && values.size() < threshold;
+  }
+  return ret;
+}
+
 int ObInListResolver::check_inlist_rewrite_enable(const ParseNode &in_list,
                                                   const ObItemType op_type,
                                                   const ObRawExpr &left_expr,
@@ -350,6 +408,19 @@ int ObInListResolver::check_inlist_rewrite_enable(const ParseNode &in_list,
         }
       }
       is_question_mark = rewrite_info.is_question_mark_;
+      if (OB_SUCC(ret) && is_enable && threshold > 0 && column_cnt == 1
+          && !(is_prepare_stmt && rewrite_info.is_question_mark_)) {
+        bool below_threshold = false;
+        // Repeated integers do not make a large VALUES subquery worthwhile.
+        // Keep the original list and parameter positions intact: only the
+        // choice of rewrite changes, including when a cached plan is reused.
+        if (OB_FAIL(check_distinct_inlist_threshold(in_list, param_store,
+                                                   threshold, below_threshold))) {
+          LOG_WARN("failed to check distinct in-list threshold", K(ret));
+        } else if (below_threshold) {
+          is_enable = false;
+        }
+      }
     }
   }
   return ret;
