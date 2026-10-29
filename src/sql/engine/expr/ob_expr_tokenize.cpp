@@ -201,12 +201,6 @@ int ObExprTokenize::eval_tokenize(const ObExpr &expr, ObEvalCtx &ctx, ObDatum &e
 {
   int ret = OB_SUCCESS;
 
-  ObEvalCtx::TempAllocGuard tmp_alloc_g(ctx);
-  common::ObArenaAllocator &temp_allocator = tmp_alloc_g.get_allocator();
-
-  ObIJsonBase *json_result = nullptr;
-  TokenizeParam param;
-
   // check param num, which is checked in ObExprOperator::calc_result_typeN.
   if (OB_UNLIKELY(expr.arg_cnt_ < 1 || expr.arg_cnt_ > 3)) {
     ret = OB_INVALID_ARGUMENT;
@@ -238,7 +232,59 @@ int ObExprTokenize::eval_tokenize(const ObExpr &expr, ObEvalCtx &ctx, ObDatum &e
           && tokenize_memo_lookup(name, no_properties, text, mode, collation, cached_result)) {
         if (OB_FAIL(ObJsonExprHelper::pack_json_str_res(expr, ctx, expr_datum, cached_result))) {
         }
-      } else if (OB_FAIL(parse_param(expr, ctx, temp_allocator, param))) {
+      } else {
+        // A memo hit has no need for the parser parameter arena or temporary JSON allocator.
+        ObEvalCtx::TempAllocGuard tmp_alloc_g(ctx);
+        common::ObArenaAllocator &temp_allocator = tmp_alloc_g.get_allocator();
+        TokenizeParam param;
+        ObIJsonBase *json_result = nullptr;
+        if (OB_FAIL(parse_param(expr, ctx, temp_allocator, param))) {
+        } else if (OB_FAIL(tokenize_fulltext(param, param.output_mode_, temp_allocator, json_result))) {
+        } else {
+          ObString raw_result;
+          const bool has_raw_result =
+              (memo_eligible
+               && OB_SUCCESS == share::ObJsonWrapper::get_raw_binary(json_result,
+                                                                     raw_result,
+                                                                     &temp_allocator)
+               && 0 < raw_result.length()
+               && raw_result.length() <= ObTokenizeMemoEntry::MAX_RESULT_LEN);
+          if (OB_FAIL(ObJsonExprHelper::pack_json_res(expr,
+                                                      ctx,
+                                                      temp_allocator,
+                                                      json_result,
+                                                      expr_datum))) {
+          } else if (has_raw_result) {
+            tokenize_memo_store(name, no_properties, text, mode, collation, raw_result);
+          }
+        }
+      }
+    }
+  } else {
+    ObEvalCtx::TempAllocGuard tmp_alloc_g(ctx);
+    common::ObArenaAllocator &temp_allocator = tmp_alloc_g.get_allocator();
+    TokenizeParam param;
+    ObIJsonBase *json_result = nullptr;
+    if (OB_FAIL(parse_param(expr, ctx, temp_allocator, param))) {
+    } else {
+      ObString cached_result;
+      // Arguments this large can never be held by an entry, so they take the plain path untouched.
+      const bool memo_eligible = tokenize_memo_fits(param.parser_name_,
+                                                    param.properties_,
+                                                    param.fulltext_);
+      if (memo_eligible
+          && tokenize_memo_lookup(param.parser_name_,
+                                  param.properties_,
+                                  param.fulltext_,
+                                  static_cast<int64_t>(param.output_mode_),
+                                  static_cast<int64_t>(param.meta_.get_collation_type()),
+                                  cached_result)) {
+        // Same text, parser and options as a recent call on this thread: reuse its result.
+        if (OB_FAIL(ObJsonExprHelper::pack_json_str_res(expr,
+                                                        ctx,
+                                                        expr_datum,
+                                                        cached_result))) {
+        }
       } else if (OB_FAIL(tokenize_fulltext(param, param.output_mode_, temp_allocator, json_result))) {
       } else {
         ObString raw_result;
@@ -255,52 +301,13 @@ int ObExprTokenize::eval_tokenize(const ObExpr &expr, ObEvalCtx &ctx, ObDatum &e
                                                     json_result,
                                                     expr_datum))) {
         } else if (has_raw_result) {
-          tokenize_memo_store(name, no_properties, text, mode, collation, raw_result);
+          tokenize_memo_store(param.parser_name_,
+                              param.properties_,
+                              param.fulltext_,
+                              static_cast<int64_t>(param.output_mode_),
+                              static_cast<int64_t>(param.meta_.get_collation_type()),
+                              raw_result);
         }
-      }
-    }
-  } else if (OB_FAIL(parse_param(expr, ctx, temp_allocator, param))) {
-  } else {
-    ObString cached_result;
-    // Arguments this large can never be held by an entry, so they take the plain path untouched.
-    const bool memo_eligible = tokenize_memo_fits(param.parser_name_,
-                                                  param.properties_,
-                                                  param.fulltext_);
-    if (memo_eligible
-        && tokenize_memo_lookup(param.parser_name_,
-                                param.properties_,
-                                param.fulltext_,
-                                static_cast<int64_t>(param.output_mode_),
-                                static_cast<int64_t>(param.meta_.get_collation_type()),
-                                cached_result)) {
-      // Same text, parser and options as a recent call on this thread: reuse its result.
-      if (OB_FAIL(ObJsonExprHelper::pack_json_str_res(expr,
-                                                      ctx,
-                                                      expr_datum,
-                                                      cached_result))) {
-      }
-    } else if (OB_FAIL(tokenize_fulltext(param, param.output_mode_, temp_allocator, json_result))) {
-    } else {
-      ObString raw_result;
-      const bool has_raw_result =
-          (memo_eligible
-           && OB_SUCCESS == share::ObJsonWrapper::get_raw_binary(json_result,
-                                                                 raw_result,
-                                                                 &temp_allocator)
-           && 0 < raw_result.length()
-           && raw_result.length() <= ObTokenizeMemoEntry::MAX_RESULT_LEN);
-      if (OB_FAIL(ObJsonExprHelper::pack_json_res(expr,
-                                                  ctx,
-                                                  temp_allocator,
-                                                  json_result,
-                                                  expr_datum))) {
-      } else if (has_raw_result) {
-        tokenize_memo_store(param.parser_name_,
-                            param.properties_,
-                            param.fulltext_,
-                            static_cast<int64_t>(param.output_mode_),
-                            static_cast<int64_t>(param.meta_.get_collation_type()),
-                            raw_result);
       }
     }
   }
