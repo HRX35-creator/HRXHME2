@@ -1903,6 +1903,7 @@ OBLIB_PRIVATE_HEADERS = [
     "lib/vector/hipvs_build_bridge.h",
     "lib/vector/hipvs_build_loader.h",
     "lib/vector/hipvs_graph_import.h",
+    "lib/vector/hipvs_graph_refine.h",
     "rpc/frame/ob_rpc_checksum.h",
     "rpc/obmysql/ob_mysql_packet_storage.h",
     ]

@@ -4,15 +4,37 @@ Submission reproduction commands, raw measurements and limitations:
 [VALIDATION.md](VALIDATION.md).
 
 `lib=hipvs` collects the complete dense L2 HNSW snapshot, builds its base graph
-with hipVS CAGRA, validates/converts the export, and loads it into VSAG without
-CPU Build/Add construction. Existing VSAG serialization, CPU queries, filtering
+with hipVS CAGRA, validates/converts the export, refines its neighbors on the CPU,
+and loads it into VSAG without CPU Build/Add construction. Existing VSAG serialization, CPU queries, filtering
 and incremental writes remain in use. Ordinary `lib=vsag` is unchanged.
 
-This is a development implementation. Real AMD GPU smoke, SQL build/restart,
-and mutation checks have passed on gfx1100. The 100k exploratory dataset shows
+This is a development implementation. The earlier unrefined version passed
+real AMD GPU smoke, SQL build/restart and mutation checks on gfx1100. Its 100k exploratory dataset shows
 a construction speed gain but lower recall than the CPU baseline. Quality at
 the required workload, memory accounting and concurrent builds remain open.
-This is not a competition submission or an acceptance result.
+The refined candidate still needs real AMD end-to-end validation.
+
+## Connectivity-preserving refinement (2026-10-29)
+
+After export validation, `GraphRefine` combines outgoing and incoming neighbors,
+reserves the original entry's BFS tree edges, and fills the remaining fixed-degree
+slots by float64 squared L2 distance with ordinal tie-breaking. It uses only the
+graph and vectors. No query, answer or external label affects selection. Every
+originally reachable vertex remains reachable; this does not promise full graph
+connectivity. Only neighbor ordinals change. Validation/allocation failures leave
+the refinement input unchanged and fail index construction before publication.
+
+On a saved real GPU 100k graph, 400 fresh Gaussian queries improved Recall@10
+from 0.4195 to 0.4845 at ef=64 (CPU HNSW: 0.474). Sorting the original edges alone
+gave identical per-query results across all 24 replay configurations. Three local
+component timings were 1.930, 1.928 and 1.892 seconds, excluding GPU construction
+and file I/O. These are diagnostic results, not a new SQL speedup measurement.
+
+The source-built refined server passed all five standalone CTest groups and
+eight SQL lifecycle checks with the explicit synthetic plugin, including vector
+update and persistence after restart. The refinement unit test passed ASan/UBSan
+on 18 shapes. Real GPU SQL timing, repeated construction quality and resource
+limits for this version remain unverified. See [VALIDATION.md](VALIDATION.md).
 
 Local validation on 2026-10-28: full seekdb compilation succeeded; all three
 standalone test groups passed, including 25,434 graph/consumer checks under
@@ -100,8 +122,10 @@ hierarchy is harmless for every graph, but it cannot alone explain the earlier
 GPU result of 0.395-0.433. Two captured 2k GPU graphs were fully reachable; higher
 ef reached recall 1.0, and changing their entry points had little effect. These
 small graphs do not rule out connectivity or candidate-quality issues at 100k.
-The full 100k GPU graph was not retained in the earlier archive, so a new
-controlled capture is required before changing production construction settings.
+The full 100k GPU graph was not retained in that earlier archive. A subsequent
+2026-10-29 capture retained three complete graphs with intermediate degrees
+64/128/256. Increasing that degree alone did not resolve the low-ef recall gap;
+the current candidate retains degree 64 and adds the refinement described above.
 
 ## Compatibility and limits
 

@@ -19,6 +19,7 @@
 #include "ob_vsag_adaptor.h"
 #include "hipvs_build_loader.h"
 #include "hipvs_graph_import.h"
+#include "hipvs_graph_refine.h"
 #include <map>
 #include "vsag/vsag.h"
 #include "vsag/errors.h"
@@ -1010,6 +1011,11 @@ int build_index_hipvs(VectorIndexPtr &index_handler, const float *vectors, const
         const char *invalid = hipvs::GraphImport::convert(
             {exported.bytes_, exported.length_}, {vectors, size_t(rows) * dim}, {ids, size_t(rows)},
             dim, handler->get_max_degree(), handler->get_ef_construction());
+        if (invalid == nullptr) {
+          invalid = hipvs::GraphRefine::refine(
+              {exported.bytes_, exported.length_}, {vectors, size_t(rows) * dim},
+              dim, handler->get_max_degree());
+        }
         if (invalid != nullptr) {
           ret = OB_ERR_VSAG_RETURN_ERROR;
           LOG_WARN("hipVS graph export rejected", K(ret), KCSTRING(invalid), K(rows), K(dim));
@@ -1036,7 +1042,8 @@ int build_index_hipvs(VectorIndexPtr &index_handler, const float *vectors, const
                 ret = OB_ERR_UNEXPECTED;
               } else {
                 // Publish only a completely validated, loaded index. No CPU
-                // Build/Add has constructed its graph; normal persistence works.
+                // Build/Add has constructed its graph. CPU neighbor selection
+                // preserves the GPU graph's reachable nodes and normal persistence.
                 handler->set_index(candidate.value());
                 LOG_INFO("hipVS GPU graph imported", K(rows), K(dim), K(exported.length_));
               }

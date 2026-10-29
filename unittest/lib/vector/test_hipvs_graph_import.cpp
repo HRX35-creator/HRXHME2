@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 OceanBase. Licensed under the Apache License, Version 2.0. */
 #include "lib/vector/hipvs_graph_import.h"
+#include "lib/vector/hipvs_graph_refine.h"
 #include <vsag/vsag.h>
 #include <iostream>
 #include <numeric>
@@ -117,6 +118,8 @@ int main() try {
                       converted.data() + 96 + row * ROW_BYTES, LABEL_OFFSET) == 0,
           "conversion changed graph or vectors");
   }
+  check(oceanbase::common::hipvs::GraphRefine::refine(converted, data, DIM, M) == nullptr,
+        "graph refinement failed");
   auto make_index = [] {
     return take(vsag::Factory::CreateIndex("hnsw",
       R"({"dtype":"float32","metric_type":"l2","dim":7,"use_old_serial_format":true,"hnsw":{"max_degree":16,"ef_construction":200,"ef_search":64}})"));

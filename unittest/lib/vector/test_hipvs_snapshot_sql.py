@@ -141,6 +141,9 @@ try:
     data[new_id] = [7.0] * 7
     q('INSERT INTO gpu_fixture VALUES(%s,%s)', (new_id, json.dumps(data[new_id])))
     verify('gpu_fixture', 'incremental_insert')
+    data[new_id] = [5.0] * 7
+    q('UPDATE gpu_fixture SET v=%s WHERE id=%s', (json.dumps(data[new_id]), new_id))
+    verify('gpu_fixture', 'vector_update')
     old_id = next(iter(data))
     q('DELETE FROM gpu_fixture WHERE id=%s', (old_id,))
     del data[old_id]
@@ -149,6 +152,8 @@ try:
     start(original_env)
     q('USE hipvs_lifecycle')
     verify('gpu_fixture', 'restart_after_mutations')
+    assert q('SELECT id FROM gpu_fixture ORDER BY l2_distance(v,%s) APPROXIMATE LIMIT 1',
+             (json.dumps(data[new_id]),))[0][0] == new_id
     report['passed'] = True
 except Exception as error:
     report['error'] = repr(error)

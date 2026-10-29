@@ -5,10 +5,14 @@
 This candidate was developed from seekdb `2026-competition`,
 `5bce9e06d1281347ad61344e4b01fab9158c58a2`. The source-built server and real
 hipVS plugin completed SQL construction, query, persistence and mutation checks
-on Radeon Cloud on 2026-10-28. Evaluation against the competition's final quality
+on Radeon Cloud on 2026-10-28, before the neighbor refinement added on 2026-10-29.
+The historical GPU measurements below do not validate that new production path.
+Evaluation against the competition's final quality
 and performance thresholds is pending.
 
-The GPU constructs the snapshot graph with CAGRA NN-Descent. A validated
+The GPU constructs the snapshot graph with CAGRA NN-Descent. In the current
+candidate, a CPU pass preserves the original BFS tree and selects neighbors from
+outgoing plus reverse edges. Its cost belongs inside end-to-end build timing. A validated
 conversion restores external 64-bit IDs and VSAG's mutable serialization
 parameters; VSAG deserializes the completed graph. CPU queries, filtering,
 incremental writes and persistence continue through VSAG. Optional builder
@@ -22,8 +26,8 @@ failures return errors. `lib=vsag` remains the ordinary CPU construction path.
 The 100k GPU recall is lower. Its timing ratio is consequently **not an
 equal-quality speedup result or a competition pass claim**. The 10k gain is small.
 The 100k data uses seed 20261028 and is an exploratory workload, not the official
-evaluation data. No construction/search parameters were changed after these
-measurements to improve a reported score.
+evaluation data. The table describes the unrefined implementation and has not
+been relabeled as a measurement of the current candidate.
 
 Raw successful runs, query IDs/truth/recall, plans, build events, environment
 details and the independent kernel trace are in
@@ -48,8 +52,8 @@ attempts remain in that archive, SHA-256
 - The C API link fix was applied before successful GPU trials and committed in
   `e0e8084364817e06db6d2e15cf466258237d2e1a`. Tested plugin SHA-256:
   `bd2e7498aefa5f413e653ca9f2d30ad762a1bc7416ef79b804e112e2b8bb115a`.
-- Subsequent replay tools and this evidence packaging do not change production
-  construction/query code or the plugin source.
+- The 2026-10-29 refinement changes production graph import; it does not change
+  the plugin source. It requires a new real GPU SQL validation run.
 
 ## Reproduction
 
@@ -141,7 +145,36 @@ quotas and concurrent-build admission remain open. GPU errors fail explicitly.
 Fresh construction needs the optional real plugin and runtime; persisted indexes
 retain the ordinary VSAG format and query without the builder.
 
-The 100k CPU hierarchy control reproduced recall 0.509, and removing only upper
-layers yielded 0.497. This does not explain the full GPU quality gap. Planned
-full-graph candidate-degree comparisons were blocked by cloud allocation and
-have not been run. No unmeasured candidate-degree change is included here.
+## Refined candidate: local evidence on 2026-10-29
+
+Full-graph capture subsequently succeeded (archive SHA-256
+`cb3720c32513b7dc6ab8c1ab0b958df8a7d14b9a16d02d9850d6e163cfe1f800`,
+109 manifest files verified). With 400 fresh Gaussian queries, intermediate
+degrees 64/128/256 gave original ef64 recall 0.4195/0.39325/0.38025 and refined
+recall 0.4845/0.46475/0.4485. CPU HNSW gave 0.474. These three graphs share one
+vector dataset and differ in construction parameters; they are not independent
+datasets or repeated same-parameter builds. A separate template 2k graph changed
+from 0.963 to 0.964 on 100 existing queries. All 192 replay configurations passed.
+Original reachable coverage and all non-edge bytes were preserved.
+
+The paired-query bootstrap interval for the default graph versus CPU includes
+zero; these observations do not establish stable superiority to CPU or formal
+acceptance. A sort-only control returned identical results to the original graph
+in all 24 configurations. The production component output matched the previously
+tested refined graph byte-for-byte. Its three local CPU times were
+1.92971/1.92835/1.89237 seconds, including validation and allocation but excluding
+file I/O and GPU construction. Cross-machine times must not be added to infer
+an end-to-end speedup.
+
+The refined server built successfully and passed five standalone test groups,
+18 refinement shapes under ASan/UBSan, and eight synthetic-plugin SQL checks:
+unsupported options, CPU/imported index creation, restart without builder,
+insert, vector update, deletion filtering and restart after mutations. Build
+logs contain existing Python AST deprecation warnings, with no C++ warnings
+observed. The source-built unstripped binary SHA-256 is
+`605148ce9324b90508daf837a5bfc2db94f84a38b97c658536277a1b9cea9dc1`.
+
+These local tests do not execute AMD GPU code. Repeat the real GPU SQL benchmark
+on one machine with this binary, including refinement in the measured interval,
+before reporting a new quality or performance result. CPU scratch allocations,
+GPU quotas and concurrent-build memory accounting remain limitations.
