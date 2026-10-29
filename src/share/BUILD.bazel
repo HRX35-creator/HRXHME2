@@ -1767,6 +1767,17 @@ cc_library(
 )
 
 
+cc_library(
+    name = "ddl_column_name_test_headers",
+    testonly = True,
+    deps = [
+        ":ddl_protocol",
+        "//src/oblib:oblib_base",
+    ],
+    tags = ["manual"],
+    visibility = ["//unittest/share:__pkg__"],
+)
+
 _SHARE_RUNTIME_UNITY_GROUPS = remaining_unity_groups(
     SHARE_UNITY_GROUPS,
     _SHARE_NATIVE_UNITY_SOURCES,
