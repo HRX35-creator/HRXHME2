@@ -171,7 +171,7 @@ private:
   struct Bucket final
   {
     Bucket()
-        : arena_(common::ObMemAttr("FtsTokCache")), map_()
+        : arena_(lib::ObMemAttr("FtsTokCache")), map_()
     {
     }
     ~Bucket() = default;
