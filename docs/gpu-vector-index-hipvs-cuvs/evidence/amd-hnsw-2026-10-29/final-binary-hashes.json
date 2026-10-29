@@ -1,0 +1,7 @@
+{
+  "/workspace/amd-solution/build_release/src/observer/seekdb": "e8fc5e5da932b8c48432eb497214c930f9b13b0410074c47ae2e5b503d8c5881",
+  "/workspace/amd-solution/build_release/seekdb-hipvs-hnsw-build-nnd": "09c8ba6e837502ae3866d5d8e7cbe0149a217726ab13833d8f32589b8d0de073",
+  "/seekdb_workspace/bin/seekdb": "74dc22b805519dcff14bc1dfe1928bdfe351e0b7feeb8a993797173380e80bee",
+  "/opt/hipvs/lib/libcuvs_c.so": "b63211897276e0a6911bb534fe77c8b0b59f31c50af1df2f108845f06ad46ebf",
+  "/opt/hipvs/lib/libcuvs.so": "5ccf012af5923c687cd2d22149740a410ca69e0aa51223a6386ba6fc129c967a"
+}

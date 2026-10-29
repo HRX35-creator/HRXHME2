@@ -65,9 +65,9 @@ export TZ=UTC
 
 build_release/src/observer/seekdb \
   --base-dir="$PWD/run/hipvs-candidate" --port=2883 --nodaemon \
-  --parameter _memory_budget=8G --parameter memory_limit=8G \
-  --parameter cpu_count=8 --parameter datafile_size=4G \
-  --parameter datafile_maxsize=12G --parameter log_disk_size=4G \
+  --parameter _memory_budget=16G --parameter memory_limit=16G \
+  --parameter cpu_count=8 --parameter datafile_size=8G \
+  --parameter datafile_maxsize=24G --parameter log_disk_size=4G \
   --log-level INFO
 ```
 
@@ -168,6 +168,7 @@ The SQL persistence check creates a separate fixture and exercises negative/zero
 
 ```bash
 python sql_regressions.py --phase prepare --state runs/restart-state.json --port 2883
+python sql_regressions.py --phase prepare --library vsag --state runs/cpu-state.json --port 2883
 # Gracefully stop and restart only this test instance with the same data directory.
 # To verify the saved native format, omit SEEKDB_HIPVS_BUILD_WORKER and set
 # HIP_VISIBLE_DEVICES=-1 for the restarted process, then run:

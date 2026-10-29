@@ -57,6 +57,7 @@ def main():
     p.add_argument('--port',type=int,default=2883)
     p.add_argument('--host',default='127.0.0.1')
     p.add_argument('--user',default='root')
+    p.add_argument('--library',choices=['cuvs','vsag'],default='cuvs')
     a=p.parse_args()
     path=Path(a.state)
     with pymysql.connect(host=a.host,port=a.port,user=a.user,password=os.getenv('SEEKDB_PASSWORD',''),autocommit=True,read_timeout=120) as conn:
@@ -71,7 +72,7 @@ def main():
                 cur.execute('USE '+ident(state['database']))
                 cur.execute('CREATE TABLE vectors(id BIGINT PRIMARY KEY,tag INT,v VECTOR(8))')
                 cur.executemany('INSERT INTO vectors VALUES(%s,%s,%s)',[(r['id'],r['tag'],vector_literal(r['vector'])) for r in state['rows']])
-                cur.execute('CREATE VECTOR INDEX ann ON vectors(v) WITH(distance=l2,type=hnsw,lib=cuvs,m=16,ef_construction=200,ef_search=1000)')
+                cur.execute(f'CREATE VECTOR INDEX ann ON vectors(v) WITH(distance=l2,type=hnsw,lib={a.library},m=16,ef_construction=200,ef_search=1000)')
                 verify(cur,state)
                 target=state['rows'][7]
                 target['vector']=[50.0]*8
@@ -88,20 +89,22 @@ def main():
                 # The explicitly logged small-snapshot fallback must remain correct.
                 cur.execute('CREATE TABLE small_vectors(id INT PRIMARY KEY,v VECTOR(8))')
                 cur.executemany('INSERT INTO small_vectors VALUES(%s,%s)',[(i,vector_literal(vectors[i])) for i in range(20)])
-                cur.execute('CREATE VECTOR INDEX small_ann ON small_vectors(v) WITH(distance=l2,type=hnsw,lib=cuvs,m=16,ef_construction=200,ef_search=1000)')
+                cur.execute(f'CREATE VECTOR INDEX small_ann ON small_vectors(v) WITH(distance=l2,type=hnsw,lib={a.library},m=16,ef_construction=200,ef_search=1000)')
                 cur.execute('SELECT id FROM small_vectors ORDER BY l2_distance(v,%s) APPROXIMATE LIMIT 1',(vector_literal(vectors[4]),))
                 assert cur.fetchone()==(4,),'small-snapshot CPU fallback query'
                 # Empty snapshots must not loop forever in the same-prefix reload
                 # guard, and their first delta insertion must remain queryable.
                 cur.execute('CREATE TABLE empty_vectors(id BIGINT PRIMARY KEY,v VECTOR(8))')
-                cur.execute('CREATE VECTOR INDEX empty_ann ON empty_vectors(v) WITH(distance=l2,type=hnsw,lib=cuvs,m=16,ef_construction=200,ef_search=1000)')
+                cur.execute(f'CREATE VECTOR INDEX empty_ann ON empty_vectors(v) WITH(distance=l2,type=hnsw,lib={a.library},m=16,ef_construction=200,ef_search=1000)')
                 empty_sql='SELECT id FROM empty_vectors ORDER BY l2_distance(v,%s) APPROXIMATE LIMIT 1'
                 cur.execute(empty_sql,(vector_literal(vectors[0]),))
                 assert cur.fetchall()==(),'empty indexed table must return promptly'
                 cur.execute('INSERT INTO empty_vectors VALUES(%s,%s)',(77777777777,vector_literal(vectors[0])))
                 cur.execute(empty_sql,(vector_literal(vectors[0]),))
                 assert cur.fetchone()==(77777777777,),'first insert into empty indexed table'
-                state['checks_before_restart']=['512 row snapshot','64-bit,zero,negative primary keys','filter','update','delete','insert','20 row CPU fallback','empty snapshot','first insert after empty snapshot']
+                state['library']=a.library
+                small_check='20 row CPU fallback' if a.library=='cuvs' else '20 row CPU index'
+                state['checks_before_restart']=['512 row snapshot','64-bit,zero,negative primary keys','filter','update','delete','insert',small_check,'empty snapshot','first insert after empty snapshot']
                 write_json(path,state)
                 print(json.dumps({'database':state['database'],'phase':'prepare','passed':state['checks_before_restart']}),flush=True)
             else:

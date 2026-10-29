@@ -1,0 +1,19 @@
+{
+  "implementation_commit": "eccc3912f816000e65a75f62d3713e23c486201a",
+  "base": "de17949d57b9cd2240f141f8116d29bcd495d8d9",
+  "files": {
+    "src/oblib/lib/vector/hipvs_bulk_builder.cpp": "831c70c84cca5f82f3d9cd3aedbd485c5762eddf5099c98c0bcc7e425da6f4ae",
+    "src/oblib/lib/vector/hipvs_bulk_builder.h": "4a6b522a381ecd383faf535156756b02ae522c6e068144f3492277f7f8b98870",
+    "src/oblib/lib/vector/ob_vsag_adaptor.cpp": "b22c8cf879cb998e453f1ad7ee8c49eef8031793dbb7c2b532f6f0fad9933297",
+    "src/oblib/lib/vector/ob_vsag_adaptor.h": "5dbb771d0cd7c1987836d4faee5fff99e769df8c682d9402cfbc8f7234e5c78f",
+    "src/oblib/oblib_header_inventory.bzl": "e240188ed729ffb49a48f7f9d980a4e72fbf2380b4bcf32bea3ad647ac6d406d",
+    "src/oblib/oblib_source_inventory.bzl": "aa77c9041321d9f0fa1c14360b17293bc466059ab29d81e6ca84b5886813f07a",
+    "src/observer/vector_index/ob_plugin_vector_index_adaptor.cpp": "229987454f2d5d7fdbdb1585241cf646d9da07ea9243fc5b9e8dab841f1a5102",
+    "src/observer/vector_index/ob_plugin_vector_index_utils.cpp": "98137973af0d78fbfdda7441acd468ff6dd84733cb340595cf9d3b5e1ba9da42",
+    "src/query/api/query/vector/ob_vector_index_adaptor.h": "9919362884409f11e51d99b0bc422dc3c3bbe84db2874b11cd3211e5e2c68540",
+    "tools/hipvs_bridge/build_hnsw_worker.sh": "6f7c23a6ada9a6c98be2d8307d93ef019f46dc6d0896df31759f5e3a377ad858",
+    "tools/hipvs_bridge/hnsw_build_worker.cpp": "37544b8c7da9c18f1429137d134ce8cad473fb07529d596856e0347f59fbe75b",
+    "tools/hipvs_bridge/hnsw_hierarchy.h": "c551863d5febd7c5939ede3ff896ef2ba627233965df2207f378c6cb590dc835",
+    "tools/hipvs_bridge/run_vector_tests.sh": "fb286ce3ec09eb520aa14b9c25f06ff43a534cd9790b20111c1a5122e51d744f"
+  }
+}

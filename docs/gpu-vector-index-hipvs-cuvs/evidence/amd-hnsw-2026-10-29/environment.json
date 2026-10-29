@@ -1,0 +1,42 @@
+{
+  "date": "2026-10-29",
+  "template": "AMD Radeon Cloud 3102 / seekdb-hipvs",
+  "host_cpu": "AMD EPYC 9334 32-Core Processor",
+  "container_cpu_quota": 16,
+  "cgroup_cpu_max": "1600000 100000",
+  "cgroup_memory_max_bytes": 59055800320,
+  "gpu_reported_name": "AMD Radeon Graphics",
+  "gpu_architecture": "gfx1100",
+  "gpu_compute_units": 96,
+  "gpu_vram_reported_mb": 49136,
+  "rocm": "7.2.4",
+  "seekdb": "1.4.0.0",
+  "numpy": "2.4.6",
+  "pymysql": "1.1.2",
+  "cpu_and_gpu_instance_parameters": {
+    "cpu_count": [
+      "8"
+    ],
+    "memory_limit": [
+      "16G"
+    ],
+    "_memory_budget": [],
+    "vector_memory_limit": [
+      "0M"
+    ]
+  },
+  "OMP_NUM_THREADS": 8,
+  "profile_event_counts": {
+    "100k": {
+      "kernel_trace": 158,
+      "memory_copy_trace": 201
+    },
+    "500k": {
+      "kernel_trace": 14722,
+      "memory_copy_trace": 493
+    }
+  },
+  "baseline_commit": "de17949d57b9cd2240f141f8116d29bcd495d8d9",
+  "implementation_commit": "eccc3912f816000e65a75f62d3713e23c486201a",
+  "provenance": "Built from the image baseline working tree, then frozen as implementation commit; all 13 runtime source hashes matched the cloud checkout."
+}

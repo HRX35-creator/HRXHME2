@@ -1,0 +1,188 @@
+{
+  "utc": "2026-10-29T02:09:04.945275+00:00",
+  "dataset": {
+    "kind": "local_development_dataset_not_official",
+    "seed": 20261029,
+    "rng": "PCG64",
+    "n": 100000,
+    "dimensions": 128,
+    "queries": 100,
+    "k": 10,
+    "metric": "l2",
+    "dtype": "float32",
+    "truth_arithmetic": "float64 exhaustive squared L2; tie broken by document ID",
+    "tie_at_k_queries": [],
+    "generation_seconds": 3.4938373044133186,
+    "numpy_version": "2.4.6",
+    "files": {
+      "vectors.npz": "615061c55864de9645f3ce926b538cd681ea17eb1b93fa8020606d8b031f6c1b",
+      "truth.json": "3a661ad7fe647da76a6327bb08e8862ff6765269ee9652fcde78350897e6fc61"
+    }
+  },
+  "parameters": {
+    "m": 32,
+    "ef_construction": 200,
+    "ef_search": 1000,
+    "k": 10
+  },
+  "rounds": [
+    {
+      "table": "cpu_01_cedf311b",
+      "backend": "cpu",
+      "iteration": 1,
+      "valid": true,
+      "seconds": 23.05705278739333,
+      "ddl_seconds": 22.983938962221146,
+      "first_query_seconds": 0.0731138251721859,
+      "recall": 0.986,
+      "gpu_build_rows": [],
+      "native_import_rows": [],
+      "first_query_valid": true,
+      "gpu_ready_within_timed_window": false,
+      "construction_log_sha256": "c77b8f9825b9ca1d367fedbe9112646950d5bbc02562ce99ec216a1eb1845c79"
+    },
+    {
+      "table": "gpu_01_bc203547",
+      "backend": "gpu",
+      "iteration": 1,
+      "valid": true,
+      "seconds": 3.7127404306083918,
+      "ddl_seconds": 3.642883064225316,
+      "first_query_seconds": 0.06985736638307571,
+      "recall": 0.998,
+      "gpu_build_rows": [
+        "100000"
+      ],
+      "native_import_rows": [
+        "100000"
+      ],
+      "first_query_valid": true,
+      "gpu_ready_within_timed_window": true,
+      "construction_log_sha256": "db0d7ef1aed3164a91f6cbde7f29d37bc1ff2db43f15900f14e035e98dc68656"
+    },
+    {
+      "table": "gpu_02_0fa9578f",
+      "backend": "gpu",
+      "iteration": 2,
+      "valid": true,
+      "seconds": 3.797841774299741,
+      "ddl_seconds": 3.727289594709873,
+      "first_query_seconds": 0.07055217958986759,
+      "recall": 0.999,
+      "gpu_build_rows": [
+        "100000"
+      ],
+      "native_import_rows": [
+        "100000"
+      ],
+      "first_query_valid": true,
+      "gpu_ready_within_timed_window": true,
+      "construction_log_sha256": "458c9ae7365587d2498829fdd1275eec6e20497c7c499cb5023f4ce9a0d24be7"
+    },
+    {
+      "table": "cpu_02_26e9b2b2",
+      "backend": "cpu",
+      "iteration": 2,
+      "valid": true,
+      "seconds": 25.270790906623006,
+      "ddl_seconds": 25.198078647255898,
+      "first_query_seconds": 0.07271225936710835,
+      "recall": 0.986,
+      "gpu_build_rows": [],
+      "native_import_rows": [],
+      "first_query_valid": true,
+      "gpu_ready_within_timed_window": false,
+      "construction_log_sha256": "f8ccbbc3cc1500b847e52369c04a9ce54efa0e4267e94a685d81894ee6d6d41b"
+    },
+    {
+      "table": "cpu_03_5a78077c",
+      "backend": "cpu",
+      "iteration": 3,
+      "valid": true,
+      "seconds": 24.137119883671403,
+      "ddl_seconds": 24.062666196376085,
+      "first_query_seconds": 0.07445368729531765,
+      "recall": 0.986,
+      "gpu_build_rows": [],
+      "native_import_rows": [],
+      "first_query_valid": true,
+      "gpu_ready_within_timed_window": false,
+      "construction_log_sha256": "23efc7cddf11c238697326d952c2c752ad79670e6e576497a6f09683c6625999"
+    },
+    {
+      "table": "gpu_03_54a9ccc3",
+      "backend": "gpu",
+      "iteration": 3,
+      "valid": true,
+      "seconds": 3.8132172133773565,
+      "ddl_seconds": 3.746343359351158,
+      "first_query_seconds": 0.06687385402619839,
+      "recall": 0.999,
+      "gpu_build_rows": [
+        "100000"
+      ],
+      "native_import_rows": [
+        "100000"
+      ],
+      "first_query_valid": true,
+      "gpu_ready_within_timed_window": true,
+      "construction_log_sha256": "9d5463d5890f3e85ef216c3d7527d4af58fb6147e7b605de0ce3f2bcb2b9b67e"
+    }
+  ],
+  "local_min_recall": 0.95,
+  "official_target_speedup": null,
+  "official_acceptance": "not determined by this script",
+  "binaries": {
+    "cpu": {
+      "file": "/seekdb_workspace/bin/seekdb",
+      "sha256": "74dc22b805519dcff14bc1dfe1928bdfe351e0b7feeb8a993797173380e80bee"
+    },
+    "gpu": {
+      "file": "/workspace/amd-solution/build_release/src/observer/seekdb",
+      "sha256": "e8fc5e5da932b8c48432eb497214c930f9b13b0410074c47ae2e5b503d8c5881"
+    },
+    "worker": {
+      "file": "/workspace/amd-solution/build_release/seekdb-hipvs-hnsw-build-nnd",
+      "sha256": "09c8ba6e837502ae3866d5d8e7cbe0149a217726ab13833d8f32589b8d0de073"
+    }
+  },
+  "timing": "data imported and checked first; CREATE VECTOR INDEX through first real SQL query; no prebuilt index reused",
+  "status": "local_validation_passed",
+  "cpu": {
+    "database": "amd_paired_cpu_20584373f5",
+    "version": "5.7.25-OceanBase seekdb-v1.4.0.0",
+    "server_parameters": {
+      "cpu_count": [
+        "8"
+      ],
+      "memory_limit": [
+        "16G"
+      ],
+      "_memory_budget": [],
+      "vector_memory_limit": [
+        "0M"
+      ]
+    }
+  },
+  "gpu": {
+    "database": "amd_paired_gpu_fc9dc3e152",
+    "version": "5.7.25-OceanBase seekdb-v1.4.0.0",
+    "server_parameters": {
+      "cpu_count": [
+        "8"
+      ],
+      "memory_limit": [
+        "16G"
+      ],
+      "_memory_budget": [],
+      "vector_memory_limit": [
+        "0M"
+      ]
+    }
+  },
+  "medians_seconds": {
+    "cpu": 24.137119883671403,
+    "gpu": 3.797841774299741
+  },
+  "measured_speedup": 6.355483276583287
+}

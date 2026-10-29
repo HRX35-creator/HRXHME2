@@ -10,6 +10,8 @@ history rather than in the product-facing tree.
 For GPU-accelerated **snapshot construction** with native VSAG query and persistence,
 see [Build native HNSW snapshots with hipVS](bulk_hnsw_build.md). That opt-in path
 uses `SEEKDB_HIPVS_BUILD_WORKER`; it has separate build-time evidence and benchmarks.
+See the [2026-10-29 construction experiment report](bulk_hnsw_experiment_2026-10-29.md)
+for repeated end-to-end measurements, recall checks and GPU execution evidence.
 The lazy GPU query path described below remains the default when the worker is not configured.
 
 The backend adds optional hipVS/cuVS acceleration behind seekdb's existing
