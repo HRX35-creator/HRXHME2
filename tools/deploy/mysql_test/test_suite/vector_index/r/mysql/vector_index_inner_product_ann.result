@@ -1,0 +1,78 @@
+SET ob_query_timeout = 20000000;
+SET ob_trx_timeout = 60000000;
+alter system set vector_memory_limit = 0;
+DROP DATABASE IF EXISTS seekdb_ip_ann;
+CREATE DATABASE seekdb_ip_ann;
+USE seekdb_ip_ann;
+CREATE TABLE t_ip_ann (id INT PRIMARY KEY, v VECTOR(3),
+VECTOR INDEX idx_ip_ann(v) WITH (distance=inner_product, type=hnsw, lib=vsag));
+INSERT INTO t_ip_ann VALUES
+(1,'[1,0,0]'), (2,'[0,1,0]'), (3,'[0,0,1]'),
+(4,'[2,0,0]'), (5,'[0.5,0,0]'), (6,'[0,3,0]');
+CALL dbms_stats.gather_table_stats('seekdb_ip_ann','t_ip_ann');
+# exact search keeps a table scan and a top-n sort
+EXPLAIN SELECT id FROM t_ip_ann ORDER BY inner_product(v, '[1,0,0]') DESC LIMIT 3;
+Query Plan
+=====================================================
+|ID|OPERATOR         |NAME    |EST.ROWS|EST.TIME(us)|
+-----------------------------------------------------
+|0 |TOP-N SORT       |        |3       |3           |
+|1 |└─TABLE FULL SCAN|t_ip_ann|6       |3           |
+=====================================================
+Outputs & filters:
+-------------------------------------
+  0 - output([t_ip_ann.id]), filter(nil), rowset=16
+      sort_keys([inner_product(t_ip_ann.v, cast('[1,0,0]', ARRAY(18, -1))), DESC]), topn(3)
+  1 - output([t_ip_ann.id], [t_ip_ann.v]), filter(nil), rowset=16
+      access([t_ip_ann.id], [t_ip_ann.v]), partitions(p0)
+      is_index_back=false, is_global_index=false, 
+      range_key([t_ip_ann.id]), range(MIN ; MAX)always true
+# descending approximate search uses the inner product vector index
+EXPLAIN SELECT id FROM t_ip_ann ORDER BY inner_product(v, '[1,0,0]') DESC APPROXIMATE LIMIT 3;
+Query Plan
+=================================================================
+|ID|OPERATOR         |NAME                |EST.ROWS|EST.TIME(us)|
+-----------------------------------------------------------------
+|0 |VECTOR INDEX SCAN|t_ip_ann(idx_ip_ann)|6       |19          |
+=================================================================
+Outputs & filters:
+-------------------------------------
+  0 - output([t_ip_ann.id]), filter(nil), rowset=16
+      access([t_ip_ann.id]), partitions(p0)
+      is_index_back=true, is_global_index=false, 
+      range_key([t_ip_ann.__vid_0], [t_ip_ann.__type_0_0]), range(MIN,MIN ; MAX,MAX)always true
+# ascending approximate search is not similarity ordered and must not use the index
+EXPLAIN SELECT id FROM t_ip_ann ORDER BY inner_product(v, '[1,0,0]') ASC APPROXIMATE LIMIT 3;
+Query Plan
+=====================================================
+|ID|OPERATOR         |NAME    |EST.ROWS|EST.TIME(us)|
+-----------------------------------------------------
+|0 |TOP-N SORT       |        |3       |3           |
+|1 |└─TABLE FULL SCAN|t_ip_ann|6       |3           |
+=====================================================
+Outputs & filters:
+-------------------------------------
+  0 - output([t_ip_ann.id]), filter(nil), rowset=16
+      sort_keys([inner_product(t_ip_ann.v, cast('[1,0,0]', ARRAY(18, -1))), ASC]), topn(3)
+  1 - output([t_ip_ann.id], [t_ip_ann.v]), filter(nil), rowset=16
+      access([t_ip_ann.id], [t_ip_ann.v]), partitions(p0)
+      is_index_back=false, is_global_index=false, 
+      range_key([t_ip_ann.id]), range(MIN ; MAX)always true
+# the approximation returns the same rows as the exact search and as negative_inner_product
+SELECT id FROM t_ip_ann ORDER BY inner_product(v, '[1,0,0]') DESC LIMIT 3;
+id
+4
+1
+5
+SELECT id FROM t_ip_ann ORDER BY inner_product(v, '[1,0,0]') DESC APPROXIMATE LIMIT 3;
+id
+4
+1
+5
+SELECT id FROM t_ip_ann ORDER BY negative_inner_product(v, '[1,0,0]') ASC APPROXIMATE LIMIT 3;
+id
+4
+1
+5
+DROP TABLE t_ip_ann;
+DROP DATABASE seekdb_ip_ann;
