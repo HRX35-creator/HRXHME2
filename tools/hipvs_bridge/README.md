@@ -12,7 +12,8 @@ This is a development implementation. The earlier unrefined version passed
 real AMD GPU smoke, SQL build/restart and mutation checks on gfx1100. Its 100k exploratory dataset shows
 a construction speed gain but lower recall than the CPU baseline. Quality at
 the required workload, memory accounting and concurrent builds remain open.
-The refined candidate still needs real AMD end-to-end validation.
+The refined candidate completed real AMD end-to-end validation on 2026-10-29;
+the remaining 100k recall gap prevents an equal-quality speedup claim.
 
 ## Connectivity-preserving refinement (2026-10-29)
 
@@ -33,8 +34,10 @@ and file I/O. These are diagnostic results, not a new SQL speedup measurement.
 The source-built refined server passed all five standalone CTest groups and
 eight SQL lifecycle checks with the explicit synthetic plugin, including vector
 update and persistence after restart. The refinement unit test passed ASan/UBSan
-on 18 shapes. Real GPU SQL timing, repeated construction quality and resource
-limits for this version remain unverified. See [VALIDATION.md](VALIDATION.md).
+on 18 shapes. Subsequent real AMD SQL trials measured 7.697 seconds versus CPU
+40.581 seconds at 100k, including refinement, with recall 0.461-0.46325 versus
+CPU 0.47525 on 400 queries. The 5.27x raw timing ratio is not an equal-quality
+speedup. See [VALIDATION.md](VALIDATION.md) for all scales and remaining limits.
 
 Local validation on 2026-10-28: full seekdb compilation succeeded; all three
 standalone test groups passed, including 25,434 graph/consumer checks under

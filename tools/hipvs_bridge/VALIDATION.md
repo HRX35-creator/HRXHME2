@@ -6,7 +6,8 @@ This candidate was developed from seekdb `2026-competition`,
 `5bce9e06d1281347ad61344e4b01fab9158c58a2`. The source-built server and real
 hipVS plugin completed SQL construction, query, persistence and mutation checks
 on Radeon Cloud on 2026-10-28, before the neighbor refinement added on 2026-10-29.
-The historical GPU measurements below do not validate that new production path.
+The historical GPU measurements below do not validate that new production path;
+the separate refined-candidate section records its subsequent real GPU trials.
 Evaluation against the competition's final quality
 and performance thresholds is pending.
 
@@ -53,7 +54,7 @@ attempts remain in that archive, SHA-256
   `e0e8084364817e06db6d2e15cf466258237d2e1a`. Tested plugin SHA-256:
   `bd2e7498aefa5f413e653ca9f2d30ad762a1bc7416ef79b804e112e2b8bb115a`.
 - The 2026-10-29 refinement changes production graph import; it does not change
-  the plugin source. It requires a new real GPU SQL validation run.
+  the plugin source. Its separate real GPU SQL validation is recorded below.
 
 ## Reproduction
 
@@ -174,7 +175,45 @@ logs contain existing Python AST deprecation warnings, with no C++ warnings
 observed. The source-built unstripped binary SHA-256 is
 `605148ce9324b90508daf837a5bfc2db94f84a38b97c658536277a1b9cea9dc1`.
 
-These local tests do not execute AMD GPU code. Repeat the real GPU SQL benchmark
-on one machine with this binary, including refinement in the measured interval,
-before reporting a new quality or performance result. CPU scratch allocations,
+These local tests do not execute AMD GPU code. The following separate run
+measures the refined candidate on real AMD hardware. CPU scratch allocations,
 GPU quotas and concurrent-build memory accounting remain limitations.
+
+## Refined candidate: real AMD evidence on 2026-10-29
+
+Tested source: `94e5f3aa84b3fb9bb6b2942ca8cb1bfaea7d3be8`.
+All five suite stages exited 0. The downloaded archive SHA-256 is
+`2a570a5e0d3a2dced288c31e0f5b050fdaba4c6f88f0c7d7c6d4cdb5f8a2ede0`;
+24 evidence files and the exact candidate manifest were verified. Raw reports,
+candidate identity and checksum manifests are in
+[`validation/2026-10-29/refined-cloud/`](validation/2026-10-29/refined-cloud/).
+All 510 query truth sets were independently recomputed from the downloaded
+float32 vectors using C++ float64 squared L2 and matched exactly. Reported
+recall was independently recomputed from returned IDs and this truth.
+
+| Rows | Queries | Trials per library | CPU median seconds | Refined GPU median seconds | CPU Recall@10 | Refined GPU Recall@10 |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 2,000 template | 10 | 1 | 0.876642 | 1.884108 | 0.900 | 0.980 |
+| 10,000 template | 100 | 3 | 2.669242 | 2.748858 | 0.640 | 0.714-0.726 |
+| 100,000 Gaussian | 400 | 3 | 40.580997 | 7.697011 | 0.47525 | 0.461-0.46325 |
+
+Timing includes CPU refinement inside CREATE INDEX through the first valid
+ANN query. CPU/GPU builds alternate on one server with fresh indexes. GPU
+construction parameters and ef_search=64 are unchanged. The real plugin hash
+matches the historical validated plugin. The container has 16 CPU cores and
+55 GiB RAM; seekdb uses cpu_count=8 and memory_limit=8G.
+
+The 100k raw time ratio is 5.27x, with recall 1.20-1.425 percentage points below
+CPU. It is **not an equal-quality speedup or a competition pass**. The 10k
+candidate improves recall but its median construction time is slightly slower.
+The first 100 large-data queries are byte-identical to the historical query
+file: refined recalls are 0.489/0.483/0.493, compared with historical unrefined
+0.395-0.433 and CPU 0.509 in both experiments. Different GPU builds and runs
+prevent interpreting that historical comparison as a paired same-graph test.
+
+All seven real GPU indexes passed restart queries without the builder directory.
+The 2k index passed six mutation checks: existing row, large exact-ID insertion,
+vector update, snapshot-row deletion, then persistence of updated and deleted
+rows after another restart. No synthetic plugin was used in these measurements.
+Official evaluation, concurrent-build admission and full memory accounting
+remain outstanding; improving the large-data recall gap is still required.

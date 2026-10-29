@@ -1,0 +1,139 @@
+{
+  "commit": "94e5f3aa84b3fb9bb6b2942ca8cb1bfaea7d3be8",
+  "files_verified": 24,
+  "archive_sha256": "2a570a5e0d3a2dced288c31e0f5b050fdaba4c6f88f0c7d7c6d4cdb5f8a2ede0",
+  "suite_complete": true,
+  "steps": [
+    {
+      "label": "prepare-command",
+      "started": true,
+      "exit": 0
+    },
+    {
+      "label": "benchmark-2000",
+      "started": true,
+      "exit": 0
+    },
+    {
+      "label": "mutations",
+      "started": true,
+      "exit": 0
+    },
+    {
+      "label": "benchmark-10000",
+      "started": true,
+      "exit": 0
+    },
+    {
+      "label": "benchmark-100000",
+      "started": true,
+      "exit": 0
+    }
+  ],
+  "workloads": [
+    {
+      "rows": 2000,
+      "queries": 10,
+      "repeats": 1,
+      "dataset_origin": "template fixed dataset, leading rows as requested",
+      "data_sha256": "50a86aa6e9ff294d8925858b4aa8daa0014e83c394d4c38160dac2f94acb4700",
+      "query_sha256": "eed0dccdf2f394256a3966476a696a10f44823e676eb6a69df179cb0ed53b690",
+      "libraries": {
+        "vsag": {
+          "median_seconds": 0.8766420036554337,
+          "recall_each_trial": [
+            0.9
+          ]
+        },
+        "hipvs": {
+          "median_seconds": 1.8841084353625774,
+          "recall_each_trial": [
+            0.98
+          ]
+        }
+      },
+      "raw_time_ratio_cpu_over_gpu": 0.46528213939381513,
+      "time_ratio_is_equal_quality_claim": false
+    },
+    {
+      "rows": 10000,
+      "queries": 100,
+      "repeats": 3,
+      "dataset_origin": "template fixed dataset, leading rows as requested",
+      "data_sha256": "87adaaad625b3bd309a8292e43d342a3dfb4094e990a404b2290d8880269a442",
+      "query_sha256": "b51c0999f4e93ad1aa03b2e9b3185f38f2873f43a3ba1dca119825637e8f26f4",
+      "libraries": {
+        "vsag": {
+          "median_seconds": 2.6692419480532408,
+          "recall_each_trial": [
+            0.64,
+            0.64,
+            0.64
+          ]
+        },
+        "hipvs": {
+          "median_seconds": 2.7488584630191326,
+          "recall_each_trial": [
+            0.721,
+            0.726,
+            0.714
+          ]
+        }
+      },
+      "raw_time_ratio_cpu_over_gpu": 0.971036517144485,
+      "time_ratio_is_equal_quality_claim": false
+    },
+    {
+      "rows": 100000,
+      "queries": 400,
+      "repeats": 3,
+      "dataset_origin": "generated Gaussian seed 20261028; exploratory, not official dataset",
+      "data_sha256": "c2b5233c5302cf2043cd32dbfdcac895bd4df3a11e504cc814c8df589b6c099a",
+      "query_sha256": "dfb21e058839c5622944f6beb32a1a82a35c1f12a1d8c75fbdd83127d088b3e4",
+      "libraries": {
+        "vsag": {
+          "median_seconds": 40.580996569246054,
+          "recall_each_trial": [
+            0.47525,
+            0.47525,
+            0.47525
+          ]
+        },
+        "hipvs": {
+          "median_seconds": 7.697011394426227,
+          "recall_each_trial": [
+            0.46325,
+            0.4625,
+            0.461
+          ]
+        }
+      },
+      "raw_time_ratio_cpu_over_gpu": 5.2723056378262205,
+      "time_ratio_is_equal_quality_claim": false
+    }
+  ],
+  "formal_acceptance": "not established",
+  "truth_validation": "All 510 query truth sets independently recomputed from raw float32 vectors with C++ float64 squared L2; exact set match.",
+  "matched_historical_100_queries": {
+    "query_prefix_sha256": "d98cf9cad4d182e388b523f827ffffd54a20da806fa28803bd26d22d6880a91f",
+    "recall": {
+      "vsag": [
+        0.509,
+        0.509,
+        0.509
+      ],
+      "hipvs": [
+        0.489,
+        0.483,
+        0.493
+      ]
+    },
+    "limitation": "Same vectors and queries, but different GPU builds and different runs; not a paired same-graph causal measurement."
+  },
+  "resource_configuration": {
+    "container_cpu_cores": 16,
+    "container_memory_gib": 55,
+    "seekdb_cpu_count": 8,
+    "seekdb_memory_limit": "8G"
+  }
+}
