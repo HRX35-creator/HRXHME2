@@ -171,3 +171,28 @@ fresh CPU and GPU builds at comparable quality. Report exact recall separately
 from timing and include first query and any deferred work. Preserve the full
 failed attempts as well as successes. Do not report synthetic fixtures as GPU
 evidence.
+
+## Replay captured graphs without retaining a GPU instance
+
+The standalone test build also produces `replay_hipvs_graph`. It reads a complete
+raw hipVS export, verifies vectors and IDs through the production importer, and
+compares entries and search effort against the pinned VSAG consumer:
+
+```sh
+build_graph_tests/replay_hipvs_graph export.bin base.f32 query.f32 report.json
+build_graph_tests/replay_hipvs_graph --cpu-control base.f32 query.f32 cpu-report.json
+```
+
+Each run reports directed reachability from the entry, reverse reachability to
+it, their intersection (the entry's strongly connected component), reciprocal
+edge count, and incoming degree distribution. These metrics describe **only the
+base layer**. A CPU HNSW upper layer can provide additional access, so base-layer
+unreachability is not proof that a full hierarchical index cannot return a node.
+Topology analysis runs outside the reported load/build interval and never changes
+edges. Search timings here are diagnostics, not end-to-end SQL benchmarks.
+
+The topology regression includes a one-way bridge between two connected pairs:
+every node has incoming edges and is reachable from the entry, while half cannot
+reach back. This distinguishes directed connectivity defects that a forward-only
+coverage check misses. Tests also cover disconnected cycles, a directed cycle,
+sinks, a singleton, malformed edges and invalid entries.

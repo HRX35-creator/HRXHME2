@@ -2,6 +2,7 @@
 // Replay a captured REAL hipVS export against the pinned VSAG consumer, without
 // a GPU. Diagnostic timings are not end-to-end SQL construction measurements.
 #include "lib/vector/hipvs_graph_import.h"
+#include "hipvs_graph_topology.h"
 #include <vsag/vsag.h>
 #include <algorithm>
 #include <chrono>
@@ -42,6 +43,25 @@ template<class T> std::vector<T> file(const char *path, size_t count = 0)
   f.seekg(0);
   if (!f.read(reinterpret_cast<char *>(values.data()), values.size() * sizeof(T))) throw std::runtime_error("short input");
   return values;
+}
+
+hipvs_diagnostic::GraphTopology topology(const Bytes &bytes)
+{
+  if (bytes.size() < 96) throw std::runtime_error("short topology header");
+  const uint64_t n = read<uint64_t>(bytes, 16), stride = read<uint64_t>(bytes, 24);
+  const uint64_t vector_offset = read<uint64_t>(bytes, 40);
+  if (n == 0 || n > UINT32_MAX || vector_offset < 4 || vector_offset > stride ||
+      stride > bytes.size() || n > (bytes.size() - 96) / stride) {
+    throw std::runtime_error("invalid topology serialization dimensions");
+  }
+  std::vector<std::vector<uint32_t>> graph(n);
+  for (uint64_t row = 0; row < n; ++row) {
+    const size_t offset = 96 + row * stride;
+    const uint32_t count = read<uint32_t>(bytes, offset);
+    if (uint64_t(count) * 4 > vector_offset - 4) throw std::runtime_error("invalid topology degree");
+    for (uint32_t j = 0; j < count; ++j) graph[row].push_back(read<uint32_t>(bytes, offset + 4 + 4 * j));
+  }
+  return hipvs_diagnostic::analyze_graph(graph, read<uint32_t>(bytes, 52));
 }
 
 int main(int argc, char **argv) try
@@ -122,6 +142,7 @@ int main(int argc, char **argv) try
     auto index = take(vsag::Factory::CreateIndex("hnsw", parameters));
     const auto began = Clock::now();
     const char *name = "cpu_hnsw";
+    const Bytes *topology_bytes = &raw;
     if (variant == 3) {
       auto data = vsag::Dataset::Make()->NumElements(n)->Dim(dim)->Ids(ids.data())->Float32Vectors(base.data())->Owner(false);
       if (!take(index->Build(data)).empty()) throw std::runtime_error("CPU build rejected IDs");
@@ -130,6 +151,7 @@ int main(int argc, char **argv) try
       const auto binary = take(index->Serialize());
       const auto blob = binary.Get(vsag::HNSW_DATA);
       cpu_flat.assign(reinterpret_cast<unsigned char *>(blob.data.get()), reinterpret_cast<unsigned char *>(blob.data.get()) + blob.size);
+      topology_bytes = &cpu_flat;
       if (read<uint64_t>(cpu_flat, 16) != n || read<uint64_t>(cpu_flat, 24) != stride ||
           read<uint64_t>(cpu_flat, 32) != label_offset || read<uint64_t>(cpu_flat, 40) != vector_offset ||
           read<uint32_t>(cpu_flat, 52) >= n || cpu_flat.size() < 96 + n * (stride + 4)) throw std::runtime_error("unexpected CPU graph format");
@@ -146,6 +168,7 @@ int main(int argc, char **argv) try
       vsag::BinarySet binary;
       binary.Set(vsag::HNSW_DATA, blob);
       take(index->Deserialize(binary));
+      topology_bytes = &cpu_flat;
     } else {
       const uint32_t entry = variant == 0 ? original_entry : variant == 1 ? centroid_entry : indegree_entry;
       name = variant == 0 ? "gpu_original_entry" : variant == 1 ? "gpu_centroid_entry" : "gpu_max_indegree_entry";
@@ -159,10 +182,20 @@ int main(int argc, char **argv) try
     }
     if (uint64_t(index->GetNumElements()) != n) throw std::runtime_error("cardinality changed");
     const double load_seconds = std::chrono::duration<double>(Clock::now() - began).count();
+    const auto shape = topology(*topology_bytes);
     for (int ef : {64, 128, 256, 512}) {
       if (!first) report << ',';
       first = false;
-      report << "{\"variant\":\"" << name << "\",\"ef_search\":" << ef << ",\"load_or_cpu_build_seconds\":" << load_seconds << ",\"query_results\":[";
+      report << "{\"variant\":\"" << name << "\",\"ef_search\":" << ef << ",\"load_or_cpu_build_seconds\":" << load_seconds
+        << ",\"topology\":{\"edges\":" << shape.edges
+        << ",\"reachable_from_entry\":" << shape.reachable_from_entry
+        << ",\"can_reach_entry\":" << shape.can_reach_entry
+        << ",\"entry_strong_component\":" << shape.entry_strong_component
+        << ",\"reciprocal_edges\":" << shape.reciprocal_edges
+        << ",\"zero_indegree\":" << shape.zero_indegree
+        << ",\"max_indegree\":" << shape.max_indegree
+        << ",\"p50_indegree\":" << shape.p50_indegree
+        << ",\"p95_indegree\":" << shape.p95_indegree << "},\"query_results\":[";
       size_t hits = 0;
       double query_seconds = 0;
       for (size_t q = 0; q < nq; ++q) {
