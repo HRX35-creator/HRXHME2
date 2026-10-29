@@ -121,6 +121,12 @@ int ObHybridSearchExecutor::execute_search(ObObj &query_res) {
             ret = OB_SUCCESS;
           } else {
           }
+        } else {
+          // execute_read() reported success but returned no result handle.
+          // Return an explicit NULL instead of leaving query_res untouched,
+          // otherwise the caller forwards an unset Obj to PL as a JSON value.
+          LOG_WARN("inner sql result is null", K(ret), K(query_sql));
+          query_res.set_null();
         }
       }
 
@@ -173,7 +179,21 @@ int ObHybridSearchExecutor::do_get_sql(const ObString &search_params_str,
         } else if (OB_SIZE_OVERFLOW == ret) {
           // retry
           ret = OB_SUCCESS;
+          // Release the buffer of the failed attempt before allocating a larger
+          // one. Nothing else frees it before the statement ends, so keeping it
+          // alive multiplies the peak memory of a single hybrid search under a
+          // tight memory budget.
+          alloc.free(buf);
+          buf = NULL;
         }
+      }
+      if (OB_SUCC(ret) && OB_UNLIKELY(!is_complete)) {
+        // Growth stopped without producing a complete SQL text. Report it
+        // instead of handing an empty statement to the inner SQL, where the
+        // failure would only surface as a broken invariant further downstream.
+        ret = OB_SIZE_OVERFLOW;
+        LOG_WARN("failed to translate hybrid search params into sql, sql text is too long",
+                 K(ret), K(OB_MAX_SQL_LENGTH));
       }
     }
   }
